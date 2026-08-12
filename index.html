@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>WeatherDesk</title>
+<style>
+  :root {
+    --bg: #0b0f14; --panel: #131a22; --panel2: #1a232d; --line: #253141;
+    --text: #e6edf5; --muted: #8ea0b5; --accent: #4fb8ff; --warn: #ffb84f; --bad: #ff5f56; --good: #4fdc8b;
+    --gap: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: var(--gap); padding: 8px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+  }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: .04em; }
+  nav { display: flex; gap: 4px; flex: 1; }
+  .tab {
+    background: none; border: 1px solid transparent; color: var(--muted); padding: 6px 14px;
+    border-radius: 8px; cursor: pointer; font: inherit;
+  }
+  .tab.active { background: var(--panel2); border-color: var(--line); color: var(--text); }
+  .iconbtn { background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
+    border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
+  main { flex: 1; overflow: hidden; position: relative; }
+  section.page { display: none; height: 100%; overflow: auto; padding: var(--gap); }
+  section.page.active { display: block; }
+
+  /* cap columns so an ultrawide doesn't smear 8 cards into one thin row */
+  .grid { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    max-width: 1500px; margin: 0 auto; align-items: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .card h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-variant-numeric: tabular-nums; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+
+  #card-now { grid-column: span 2; }
+  .now-main { display: flex; align-items: center; gap: 16px; }
+  .now-icon { font-size: 56px; }
+  .now-temp { font-size: 64px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums; }
+  .now-temp small { font-size: 24px; color: var(--muted); }
+
+  #nnl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .nnl-card { background: var(--panel2); border-radius: 10px; padding: 10px; text-align: center; }
+  .nnl-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .nnl-icon { font-size: 28px; }
+  .nnl-temp { font-size: 24px; }
+  .nnl-sub { font-size: 12px; color: var(--muted); }
+
+  #pulse { display: flex; gap: 4px; align-items: flex-end; height: 90px; margin-top: 8px; }
+  .pulse-col { flex: 1; text-align: center; font-size: 11px; color: var(--muted); }
+  .pulse-bar { height: 46px; background: var(--panel2); border-radius: 3px; display: flex; align-items: flex-end; }
+  .pulse-bar i { display: block; width: 100%; background: var(--accent); border-radius: 3px; min-height: 1px; }
+
+  .tenday-row { display: grid; grid-template-columns: 42px 24px 1fr 44px 40px 40px; gap: 6px;
+    padding: 5px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .tenday-row:last-child { border: 0; }
+  .td-cond, .td-pop { color: var(--muted); font-size: 13px; }
+  .td-lo { color: var(--muted); }
+
+  .alert { background: var(--panel2); border-left: 3px solid var(--warn); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+  .alert.sev-severe, .alert.sev-extreme { border-color: var(--bad); }
+  .alert-head { display: flex; justify-content: space-between; font-weight: 600; }
+  .alert-head span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .alert-time { font-size: 12px; color: var(--muted); }
+  .alert p { white-space: pre-wrap; font-size: 12px; color: var(--muted); max-height: 240px; overflow: auto; }
+
+  .kv-rows div { display: flex; justify-content: space-between; padding: 2px 0; font-size: 13px;
+    font-variant-numeric: tabular-nums; }
+  .kv-rows div span:first-child { color: var(--muted); }
+  #aqi-val { font-size: 40px; font-variant-numeric: tabular-nums; }
+  .aqi-good { color: var(--good); } .aqi-mod { color: var(--warn); }
+  .aqi-usg, .aqi-bad, .aqi-vbad { color: var(--bad); }
+
+  /* settings drawer */
+  #drawer {
+    position: absolute; inset: 0 0 0 auto; width: min(420px, 100%); background: var(--panel);
+    border-left: 1px solid var(--line); padding: var(--gap); overflow: auto;
+    transform: translateX(100%); transition: transform .18s ease; z-index: 20;
+  }
+  #drawer.open { transform: none; }
+  #drawer label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+  #drawer input, #drawer select {
+    width: 100%; padding: 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  }
+  .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .row button { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; }
+  .row button.primary { background: var(--accent); color: #04121d; border-color: var(--accent); }
+  #diag div { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
+  .ok { color: var(--good); } .fail { color: var(--bad); }
+
+  /* ---- pro desk ---- */
+  #desk { padding: 0; }
+  #desk > .grid, #ticker, #trends, #c48, #desk-radar, #daycards, #gauges { margin: var(--gap) auto; max-width: 1500px; }
+  #desk > .grid { padding: 0 var(--gap); }
+
+  #hero { padding: 14px 18px 22px; color: #fff; position: relative; overflow: hidden; }
+  .hero-top { display: flex; justify-content: space-between; font-size: 13px; }
+  .hero-right { text-align: right; }
+  .hero-dim { opacity: .75; }
+  #hero-place { font-size: 17px; font-weight: 600; }
+  #hero-icon { position: absolute; right: 40px; top: 30px; font-size: 90px; opacity: .9; }
+  #hero-feels { margin-top: 18px; font-size: 14px; }
+  #hero-temp { font-size: 78px; font-weight: 300; line-height: .95; margin: 2px 0; }
+  #hero-cond { font-size: 26px; font-weight: 600; }
+  #hero-hilo { font-size: 14px; }
+  .live { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: #ffffff22; }
+  .live.on { color: #7dffb0; }
+
+  #ticker { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden; padding: 8px 10px; }
+  #ticker-track { flex: 1; white-space: nowrap; overflow: hidden; display: flex; gap: 14px; align-items: center;
+    animation: tick 60s linear infinite; }
+  @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-40%); } }
+  .tick b { background: var(--panel2); border: 1px solid var(--line); color: var(--accent); font-size: 10px;
+    letter-spacing: .1em; padding: 2px 6px; border-radius: 4px; margin-right: 8px; }
+  .tick-sep { color: var(--muted); }
+  #ticker-pause { background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
+    border-radius: 6px; cursor: pointer; padding: 2px 8px; }
+
+  #trends { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  #trends > div { padding: 12px 16px; border-left: 1px solid var(--line); }
+  #trends > div:first-child { border-left: 0; }
+  #trends h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; }
+  #trends .warm { color: var(--warn); font-size: 20px; }
+  #trends .cool { color: var(--accent); font-size: 20px; }
+  #t-model { font-size: 20px; }
+
+  #c48 { display: flex; gap: 14px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px; }
+  #c48-summary { flex: 0 0 150px; font-size: 13px; color: var(--muted); }
+  #c48-summary .big { font-size: 20px; color: var(--text); margin: 4px 0; }
+  #c48-rows { flex: 1; min-width: 0; }
+  .c48-row { display: flex; align-items: center; gap: 10px; }
+  .c48-lab { flex: 0 0 62px; font-size: 11px; color: var(--muted); text-align: right; }
+  .c48-plot { flex: 1; min-width: 0; }
+  #c48-temp svg { width: 100%; height: 90px; overflow: visible; }
+  .c-lbl { fill: var(--muted); font-size: 11px; text-anchor: middle; }
+  #c48-rain { display: flex; align-items: flex-end; gap: 1px; height: 46px; }
+  .rbar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+  .rbar i { display: block; width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; }
+  .rbar u { position: absolute; bottom: -14px; left: 0; font-size: 10px; color: var(--muted); text-decoration: none; }
+  #c48-rain { margin-bottom: 16px; }
+  #c48-wind { display: flex; gap: 1px; }
+  .wcell { flex: 1; text-align: center; position: relative; }
+  .warrow { display: inline-block; color: var(--good); font-size: 13px; }
+  .wcell u { display: block; font-size: 10px; color: var(--muted); text-decoration: none; }
+  #c48-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* ponytail: Hook Echo draws its own toolbars/legend inside the frame, so a short strip clips
+     them. Tie to viewport height instead of a fixed px. */
+  #desk-radar { height: clamp(520px, 78vh, 900px); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  #desk-radar-frame { width: 100%; height: 100%; border: 0; display: block; }
+
+  #daycards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--gap); }
+  .daycard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .dc-head { display: flex; justify-content: space-between; font-size: 13px; }
+  .dc-body { position: relative; height: 120px; display: flex; align-items: center; justify-content: center; }
+  .daysvg { position: absolute; inset: 0; margin: auto; width: 120px; height: 120px; }
+  .dc-mid { position: relative; text-align: center; }
+  .dc-icon { font-size: 22px; }
+  .dc-temp b { font-size: 26px; }
+  .dc-temp span { color: var(--muted); }
+  .dc-cond, .dc-pop { font-size: 12px; color: var(--muted); }
+
+  #gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--gap); }
+  .gauge { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .gauge h3 { margin: 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .gwrap { position: relative; height: 130px; }
+  .gwrap svg { width: 130px; height: 130px; display: block; margin: 0 auto; }
+  .ginner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; }
+  .ginner b { font-size: 24px; font-weight: 500; }
+  .ginner small { font-size: 11px; color: var(--muted); }
+  .ginner span { font-size: 11px; color: var(--muted); max-width: 120px; }
+
+  .chart { width: 100%; height: 150px; display: block; }
+  #places { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .place { background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .place.on { border-color: var(--accent); color: var(--accent); }
+  .place i { font-style: normal; color: var(--muted); margin-left: 6px; }
+  .place-hit { display: block; width: 100%; text-align: left; background: none; border: 0;
+    color: var(--text); padding: 6px 4px; font: inherit; cursor: pointer; border-bottom: 1px solid var(--line); }
+  .place-hit:hover { color: var(--accent); }
+  #place-q { flex: 1; padding: 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  #notif-toggles label { display: flex; align-items: center; gap: 8px; color: var(--text); margin: 6px 0; }
+  #notif-toggles input { width: auto; }
+
+  /* tablet landscape: tighter chrome, two columns of cards */
+  @media (max-height: 820px) and (orientation: landscape) {
+    body { font-size: 14px; }
+    .now-temp { font-size: 52px; }
+    .chart { height: 120px; }
+    header { padding: 5px 10px; }
+  }
+  .live-wind-wrap { display: flex; align-items: center; gap: 16px; }
+  .compass { width: 74px; height: 74px; border: 2px solid var(--line); border-radius: 50%;
+    position: relative; flex: none; }
+  .compass i { position: absolute; left: 50%; top: 6px; width: 2px; height: 32px; margin-left: -1px;
+    background: var(--accent); transform-origin: 50% 31px; transition: transform .4s ease; display: block; }
+  .sig-row { display: grid; grid-template-columns: 1.4fr .7fr .6fr 1fr .6fr .9fr .5fr 20px;
+    gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--line);
+    font-size: 13px; font-variant-numeric: tabular-nums; align-items: center; }
+  .sig-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .sig-row.stale { opacity: .5; }
+  .sig-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; }
+  #add-station-id { flex: 1; padding: 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  #lab-frame { width: 100%; height: 100%; border: 0; display: block; }
+  #notif-stack { position: absolute; top: 8px; right: 8px; width: min(340px, 90vw); z-index: 30; }
+  .notif { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 8px 28px 8px 10px; margin-bottom: 6px; position: relative; }
+  .notif-severe { border-left-color: var(--bad); }
+  .notif-wind, .notif-lightning { border-left-color: var(--warn); }
+  .notif-title { font-weight: 600; }
+  .notif-body { font-size: 12px; color: var(--muted); }
+  .notif-x { position: absolute; top: 4px; right: 6px; background: none; border: 0; color: var(--muted);
+    font-size: 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>WEATHERDESK</h1>
+  <nav>
+    <button class="tab" data-section="desk">Desk</button>
+    <button class="tab" data-section="lab">Forecast Lab</button>
+    <button class="tab" data-section="signals">Local Signals</button>
+    <button class="tab" data-section="data">Data</button>
+  </nav>
+  <span id="station-name" class="muted"></span>
+  <button class="iconbtn" id="btn-refresh">↻</button>
+  <button class="iconbtn" id="btn-full">⛶</button>
+  <button class="iconbtn" id="btn-settings">⚙</button>
+</header>
+
+<main>
+  <div id="notif-stack"></div>
+
+  <section class="page" id="desk">
+    <div id="hero">
+      <div class="hero-top">
+        <div>
+          <div id="hero-place"></div>
+          <div id="hero-time" class="hero-dim"></div>
+        </div>
+        <div class="hero-right">
+          <div id="hero-sun"></div>
+          <div id="hero-moon" class="hero-dim"></div>
+          <div><span id="hero-live" class="live">● --</span> <span id="hero-batt" class="hero-dim"></span></div>
+        </div>
+      </div>
+      <div id="hero-icon"></div>
+      <div id="hero-feels" class="hero-dim"></div>
+      <div id="hero-temp">--°</div>
+      <div id="hero-cond"></div>
+      <div id="hero-hilo" class="hero-dim"></div>
+    </div>
+
+    <div id="ticker"><div id="ticker-track"></div><button id="ticker-pause">❚❚</button></div>
+
+    <div id="trends">
+      <div><h3>Station vs model</h3><div id="t-model" class="warm">--</div><div id="t-model-sub" class="muted"></div></div>
+      <div><h3>Temperature trend</h3><div id="t-temp">--</div><div class="muted">Tempest last 3h</div></div>
+      <div><h3>Pressure trend</h3><div id="t-press">--</div><div class="muted">Tempest last 3h</div></div>
+    </div>
+
+    <div id="c48">
+      <div id="c48-summary"></div>
+      <div id="c48-rows">
+        <div class="c48-row"><span class="c48-lab">Temp</span><div id="c48-temp" class="c48-plot"></div></div>
+        <div class="c48-row"><span class="c48-lab">Rain %</span><div id="c48-rain" class="c48-plot"></div></div>
+        <div class="c48-row"><span class="c48-lab">Wind</span><div id="c48-wind" class="c48-plot"></div></div>
+        <div class="c48-row"><span class="c48-lab"></span><div id="c48-axis" class="c48-plot"></div></div>
+      </div>
+    </div>
+
+    <div id="desk-radar"><iframe id="desk-radar-frame" title="Radar loop"></iframe></div>
+
+    <div id="daycards"></div>
+
+    <div id="gauges">
+      <div class="gauge"><h3>Wind</h3><div id="g-wind"></div></div>
+      <div class="gauge"><h3>Rain</h3><div id="g-rain"></div></div>
+      <div class="gauge"><h3>Humidity</h3><div id="g-hum"></div></div>
+      <div class="gauge"><h3>Pressure</h3><div id="g-press"></div></div>
+      <div class="gauge"><h3>Dew point</h3><div id="g-dew"></div></div>
+      <div class="gauge"><h3>UV / solar</h3><div id="g-uv"></div></div>
+      <div class="gauge"><h3>Lightning</h3><div id="g-ltg"></div></div>
+      <div class="gauge"><h3>Wet bulb</h3><div id="g-wet"></div></div>
+    </div>
+
+    <div class="grid">
+      <div class="card"><h2>10-day</h2><div id="tenday"></div></div>
+      <div class="card"><h2>Alert center</h2><div id="alerts" class="muted">--</div></div>
+      <div class="card" style="grid-column: span 2">
+        <h2>Weather story · 24h</h2>
+        <div id="story" class="muted">--</div>
+        <div id="nowcast" style="margin-top:8px;color:var(--accent)"></div>
+      </div>
+
+      <div class="card">
+        <h2>Model agreement</h2>
+        <div id="agree-verdict" style="margin-bottom:6px"></div>
+        <div id="agree-rows" class="kv-rows"></div>
+        <div id="timing" class="muted" style="margin-top:8px;font-size:13px"></div>
+        <div id="edge" class="muted" style="margin-top:4px;font-size:13px"></div>
+      </div>
+
+      <div class="card"><h2>Forecast changes</h2><div id="changes" class="muted">--</div></div>
+      <div class="card"><h2>Forecast accuracy</h2><div id="verify" class="muted">--</div></div>
+
+      <div class="card">
+        <h2>Air quality</h2>
+        <div id="aqi-val">--</div>
+        <div id="aqi-label" class="muted"></div>
+        <div id="aqi-detail" class="muted" style="font-size:12px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ponytail: Forecast Lab is the existing weathermap app in an iframe (radar loop, satellite,
+       lightning, SPC, alerts already work there). Inline it into map.js only if the two need shared state. -->
+  <section class="page" id="lab" style="padding:0"><iframe id="lab-frame" title="Forecast Lab"></iframe></section>
+  <section class="page" id="signals">
+    <div class="grid">
+      <div class="card">
+        <h2>Live wind · websocket</h2>
+        <div class="live-wind-wrap">
+          <div class="compass"><i id="live-needle"></i></div>
+          <div>
+            <div class="now-temp"><span id="live-wind">--</span><small id="live-wind-unit">mph</small></div>
+            <div id="live-dir" class="muted"></div>
+          </div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:6px">socket: <span id="ws-state">idle</span></div>
+        <div id="live-strike" class="muted" style="font-size:12px"></div>
+      </div>
+
+      <div class="card" style="grid-column: span 2">
+        <h2>Nearby stations</h2>
+        <div class="row" style="margin:0 0 8px">
+          <input id="add-station-id" placeholder="public station ID (tempestwx.com/map)" inputmode="numeric">
+          <button id="btn-add-station" style="flex:0 0 auto">Add</button>
+        </div>
+        <div id="signals-table"></div>
+      </div>
+    </div>
+  </section>
+  <section class="page" id="data">
+    <div class="grid">
+      <div class="card"><h2 id="board-temp">Temperature</h2><canvas id="c-temp" class="chart"></canvas></div>
+      <div class="card"><h2 id="board-rain">Rain</h2><canvas id="c-rain" class="chart"></canvas></div>
+      <div class="card"><h2 id="board-wind">Wind</h2><canvas id="c-wind" class="chart"></canvas></div>
+      <div class="card"><h2 id="board-press">Pressure</h2><canvas id="c-press" class="chart"></canvas></div>
+      <div class="card"><h2>Records · 7 days</h2><div id="extremes" class="kv-rows"></div></div>
+      <div class="card" style="grid-column: span 2"><h2 id="board-models">Model comparison</h2><canvas id="c-models" class="chart"></canvas></div>
+      <div class="card"><h2 id="board-accuracy">Forecast accuracy</h2><canvas id="c-accuracy" class="chart"></canvas></div>
+      <div class="card"><h2>NWS vs Tempest</h2><div id="official" class="kv-rows"></div></div>
+      <div class="card"><h2 id="board-qpf">Precip outlook</h2><canvas id="c-qpf" class="chart"></canvas></div>
+    </div>
+  </section>
+
+  <aside id="drawer">
+    <h2 style="margin-top:0">Settings</h2>
+    <label>Tempest API token</label><input id="set-token" type="password" placeholder="personal use token">
+    <label>Station ID</label><input id="set-station" inputmode="numeric">
+    <label>Device ID (Tempest sensor)</label><input id="set-device" inputmode="numeric">
+    <label>Units</label>
+    <select id="set-units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
+    <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">
+    <label>Wind gust alert threshold</label><input id="set-gust" type="number" min="0">
+    <div class="row">
+      <button class="primary" id="btn-save">Save</button>
+      <button id="btn-diag">Diagnostics</button>
+      <button id="btn-close">Close</button>
+    </div>
+    <h2 style="font-size:13px;margin-top:18px">Places</h2>
+    <div class="row" style="margin-top:6px">
+      <input id="place-q" placeholder="search a city…">
+      <button id="btn-place-search" style="flex:0 0 auto">Find</button>
+    </div>
+    <div id="place-results"></div>
+    <div id="places"></div>
+
+    <h2 style="font-size:13px;margin-top:18px">Notifications</h2>
+    <div id="notif-toggles">
+      <label><input type="checkbox" data-cat="severe"> Severe weather alerts</label>
+      <label><input type="checkbox" data-cat="precip"> Precip start / stop</label>
+      <label><input type="checkbox" data-cat="lightning"> Lightning nearby</label>
+      <label><input type="checkbox" data-cat="wind"> High wind</label>
+      <label><input type="checkbox" data-cat="winter"> Snow / ice</label>
+      <label><input type="checkbox" data-cat="changes"> Forecast changes</label>
+    </div>
+    <div class="row"><button id="btn-notif-test">Test notifications</button></div>
+
+    <div id="diag" style="margin-top:12px"></div>
+    <p class="muted" style="font-size:12px">Token: tempestwx.com → Settings → Data Authorizations → create personal use token.</p>
+  </aside>
+</main>
+
+<script type="module" src="js/boot.js"></script>
+</body>
+</html>

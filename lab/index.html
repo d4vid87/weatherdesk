@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Batman WX</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700;6..12,800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="palettes.js"></script>
+<style>
+  /* zoom.earth-matched shell: #141a22 cards, #0a84ff accent, rounded sans */
+  :root { --bg:#141a22; --bg2:#1c242e; --ink:#fff; --dim:#8a97a5; --line:#272d35; --blue:#0a84ff; --blue2:#1a8cff; }
+  * { box-sizing:border-box; margin:0; }
+  html,body,#map { height:100%; width:100%; background:#0b0f14; font-family:"Nunito Sans",system-ui,sans-serif; color:var(--ink); overflow:hidden; }
+  body { position:fixed; inset:0; overscroll-behavior:none; }
+  #map { position:absolute; inset:0; height:auto; width:auto; }
+  button { font:inherit; color:inherit; }
+  .card { background:rgba(20,26,34,.92); border-radius:10px; box-shadow:0 2px 14px rgba(0,0,0,.45); backdrop-filter:blur(6px); }
+
+  /* brand card */
+  #brand { position:absolute; top:10px; left:10px; z-index:6; width:172px; display:flex; align-items:center; gap:9px; padding:9px 12px; user-select:none; }
+  #brand svg { width:34px; height:21px; flex:none; }
+  #brand span { font-size:14.5px; font-weight:800; letter-spacing:.4px; white-space:nowrap; }
+  #brand span b { color:#ffd60a; font-weight:800; }
+
+  /* left panel — WEATHER MAPS */
+  #panel { position:absolute; top:60px; left:10px; z-index:6; width:172px; padding:6px 0 8px; user-select:none; }
+  #panel h2 { font-size:10.5px; font-weight:800; letter-spacing:1.2px; color:var(--dim); padding:7px 14px 6px; display:flex; justify-content:space-between; cursor:pointer; }
+  #panel h2 .chev { transition:transform .2s; font-size:10px; }
+  #panel.closed .chev { transform:rotate(180deg); }
+  #panel.closed .row, #panel.closed .sect { display:none; }
+  .row { display:flex; align-items:center; gap:11px; padding:7px 14px; cursor:pointer; font-size:13.5px; font-weight:600; color:#cfd8e1; border-left:3px solid transparent; }
+  .row:hover { background:#ffffff10; }
+  .row.on { color:#fff; background:#ffffff14; border-left-color:var(--blue); }
+  .row .ic { width:18px; text-align:center; font-size:14px; filter:grayscale(1) brightness(1.6); }
+  .row.on .ic { filter:none; }
+  .sect { border-top:1px solid var(--line); margin-top:6px; padding-top:6px; }
+  .sect .row { font-size:12.5px; padding:5px 14px; }
+  .sect .row.on { border-left-color:transparent; background:none; }
+  .sect .row .dot { margin-left:auto; width:26px; height:14px; border-radius:8px; background:#39424d; position:relative; transition:background .15s; flex:none; }
+  .sect .row .dot::after { content:''; position:absolute; top:2px; left:2px; width:10px; height:10px; border-radius:50%; background:#aab6c2; transition:left .15s, background .15s; }
+  .sect .row.on .dot { background:var(--blue); }
+  .sect .row.on .dot::after { left:14px; background:#fff; }
+
+  /* right icon rail */
+  #rail { position:absolute; top:10px; right:10px; z-index:6; display:flex; flex-direction:column; gap:8px; }
+  .rbtn { width:38px; height:38px; border:none; border-radius:50%; background:rgba(20,26,34,.92); color:#cfd8e1; font-size:15px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4); position:relative; }
+  .rbtn:hover { color:#fff; background:#232c37; }
+  .rbtn.off { opacity:.55; }
+  #acount { position:absolute; top:-5px; right:-5px; background:#ff453a; color:#fff; font-size:9.5px; font-weight:800; padding:1px 5px; border-radius:99px; }
+  #zoomctl { position:absolute; right:10px; bottom:96px; z-index:6; display:flex; flex-direction:column; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,.4); }
+  #zoomctl button { width:38px; height:36px; border:none; background:rgba(20,26,34,.92); color:#cfd8e1; font-size:17px; cursor:pointer; }
+  #zoomctl button:hover { color:#fff; background:#232c37; }
+  #zoomctl button:first-child { border-bottom:1px solid var(--line); }
+
+  /* search drop-down */
+  #searchwrap { position:absolute; top:10px; right:56px; z-index:7; width:min(320px,80vw); display:none; }
+  #search { width:100%; padding:10px 14px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:#fff; outline:none; font-size:14px; font-family:inherit; box-shadow:0 6px 24px rgba(0,0,0,.5); }
+  #search::placeholder { color:var(--dim); }
+  #search:focus { border-color:var(--blue); }
+  #results { margin-top:6px; overflow:hidden; display:none; }
+  #results > div { display:flex; gap:10px; align-items:center; padding:9px 13px; cursor:pointer; font-size:13.5px; line-height:1.25; }
+  #results > div:hover, #results > div.sel { background:#ffffff12; }
+  #results > div.sel { box-shadow:inset 2px 0 0 var(--blue); }
+  #results .ico { font-size:15px; flex:none; }
+  #results small { color:var(--dim); display:block; }
+  #results .empty { cursor:default; padding:10px 14px; }
+  #sites { position:absolute; top:98px; right:56px; z-index:7; width:250px; display:none; padding:8px; }
+  #sitefilter { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg2); color:#fff; font:inherit; font-size:13px; outline:none; }
+  #sitefilter:focus { border-color:var(--blue); }
+  #sitelist { max-height:50vh; overflow-y:auto; margin-top:6px; }
+  #sitelist > div { padding:6px 8px; border-radius:7px; cursor:pointer; font-size:13px; display:flex; gap:7px; align-items:baseline; }
+  #sitelist > div:hover { background:#ffffff12; }
+  #sitelist small { color:var(--dim); }
+
+  /* bottom-center timeline pill (zoom.earth style) */
+  #timeline { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); z-index:6; display:flex; align-items:center; gap:2px; padding:5px 8px 5px 5px; border-radius:12px; }
+  #play { width:34px; height:34px; border-radius:9px; border:none; background:none; color:#fff; font-size:14px; cursor:pointer; flex:none; }
+  #play:hover { background:#ffffff14; }
+  #scrubwrap { width:min(180px,26vw); position:relative; height:24px; display:flex; align-items:center; margin:0 6px; }
+  #scrub { -webkit-appearance:none; appearance:none; width:100%; height:4px; border-radius:2px; background:#39424d; outline:none; cursor:pointer; }
+  #scrub::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:#fff; cursor:grab; box-shadow:0 1px 4px rgba(0,0,0,.5); }
+  #scrub::-moz-range-thumb { width:9px; height:9px; border-radius:50%; background:#fff; border:none; cursor:grab; }
+  #nowmark { position:absolute; top:4px; width:2px; height:16px; background:var(--blue2); border-radius:1px; pointer-events:none; }
+  #ftdate, #fttime { font-size:13.5px; font-weight:700; padding:6px 8px; border-radius:8px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  #fttime { min-width:86px; text-align:center; }
+  #ftdate { color:#cfd8e1; }
+  .fcast { color:#ffd60a !important; }
+  #live { font-size:10px; font-weight:800; color:var(--dim); letter-spacing:.5px; padding:6px 8px; border:none; background:none; border-radius:8px; cursor:pointer; }
+  #live::before { content:'●'; margin-right:3px; }
+  #live:hover { background:#ffffff14; }
+  #live.on { color:#ff453a; }
+  #live.on::before { animation:blink 1.6s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity:.35; } }
+  #tstep { width:30px; height:34px; border:none; background:none; border-radius:8px; color:#cfd8e1; cursor:pointer; font-size:13px; }
+  #tstep:hover { background:#ffffff14; }
+  #histchips { display:flex; gap:2px; margin-left:4px; }
+  .chip { padding:3px 8px; border-radius:7px; border:none; background:none; color:var(--dim); font-size:11px; font-weight:700; cursor:pointer; }
+  .chip:hover { color:#fff; }
+  .chip.on { background:#ffffff18; color:#fff; }
+
+  /* bottom-left: legend + coords */
+  #legend { position:absolute; left:10px; bottom:16px; z-index:5; padding:8px 12px 9px; font-size:10.5px; color:var(--dim); width:190px; }
+  #legendtitle { color:#cfd8e1; font-size:11px; font-weight:700; }
+  #legendbar { height:7px; border-radius:4px; margin:6px 0 3px; }
+  #legendlbl { display:flex; justify-content:space-between; }
+  .lsec { color:#cfd8e1; font-size:10.5px; font-weight:700; margin-top:7px; }
+  #lx .lgrid { display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; margin-top:3px; }
+  #lx i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align:-1px; border:1px solid #fff3; }
+  #lx .bar { height:5px; border-radius:3px; margin-top:4px; background:linear-gradient(90deg,#fff,#ffffff55); }
+  #coords { position:absolute; left:10px; bottom:2px; z-index:5; font-size:10px; color:#ffffff99; text-shadow:0 1px 2px #000; font-variant-numeric:tabular-nums; }
+  #attr { position:absolute; left:50%; transform:translateX(-50%); bottom:2px; z-index:5; font-size:9.5px; color:#ffffff77; text-shadow:0 1px 2px #000; white-space:nowrap; }
+  #attr a { color:inherit; }
+  #gv { width:10px; height:10px; border-radius:50%; background:var(--blue); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.6); }
+  #gv span { position:absolute; left:14px; top:-3px; font-size:12px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000, 0 0 3px #000; white-space:nowrap; pointer-events:none; }
+
+  /* hover value chip */
+  #tip { position:absolute; z-index:8; pointer-events:none; display:none; background:rgba(20,26,34,.94); border-radius:8px; padding:5px 10px; font-size:11.5px; text-align:center; box-shadow:0 2px 10px rgba(0,0,0,.45); transform:translate(-50%,calc(-100% - 12px)); line-height:1.35; }
+  #tip small { color:var(--dim); display:block; }
+
+  /* forecast card */
+  #fc { position:absolute; top:10px; right:56px; z-index:7; width:min(320px,88vw); padding:16px; display:none; max-height:calc(100vh - 100px); overflow-y:auto; animation:pop .18s ease-out; }
+  @keyframes pop { from { opacity:0; transform:translateY(-6px) scale(.98); } }
+  #fc .x { position:absolute; top:10px; right:12px; background:none; border:none; color:var(--dim); cursor:pointer; font-size:16px; }
+  #fc h3 { font-size:15px; font-weight:800; padding-right:22px; }
+  #fc .sub { color:var(--dim); font-size:12.5px; margin-top:2px; }
+  #fc .cur { display:flex; align-items:center; gap:12px; margin:12px 0 4px; }
+  #fc .cur .emo { font-size:40px; }
+  #fc .cur b { font-size:40px; font-weight:800; }
+  #fc .cur .desc { font-size:13.5px; color:var(--dim); line-height:1.35; }
+  #fc svg { width:100%; height:56px; margin:10px 0 2px; }
+  #fc table { width:100%; font-size:13px; border-collapse:collapse; margin-top:10px; }
+  #fc td { padding:5px 0; border-top:1px solid var(--line); }
+  #fc td.emo { font-size:17px; width:30px; }
+  #fc td.rng { text-align:right; font-variant-numeric:tabular-nums; }
+  #fc td.rng span { color:var(--dim); }
+  #fc td.pp { text-align:right; width:44px; color:var(--blue2); font-size:12px; }
+  #fc .warns { display:flex; flex-direction:column; gap:6px; margin-top:10px; }
+  #fc .warn { border-left:4px solid; border-radius:6px; background:#ffffff0d; padding:7px 10px; }
+  #fc .warn b { font-size:13px; display:block; }
+  #fc .warn small { color:var(--dim); font-size:11.5px; }
+  #fc .warn summary { cursor:pointer; list-style:none; position:relative; padding-right:16px; }
+  #fc .warn summary::after { content:'▸'; position:absolute; right:0; top:2px; color:var(--dim); font-size:11px; transition:transform .15s; }
+  #fc .warn details[open] summary::after { transform:rotate(90deg); }
+  #fc .warn .body { margin-top:6px; font-size:12px; line-height:1.45; color:#c8d2dc; white-space:pre-line; max-height:220px; overflow-y:auto; }
+  #fc .warn .body i { color:var(--dim); font-style:normal; display:block; margin-top:6px; }
+
+  #spin { position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:8; width:20px; height:20px; border:3px solid #ffffff22; border-top-color:var(--blue2); border-radius:50%; animation:spin .8s linear infinite; display:none; }
+  @keyframes spin { to { transform:translateX(-50%) rotate(360deg); } }
+  #err { position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:9; background:#ff453a; color:#fff; padding:8px 14px; border-radius:8px; display:none; font-size:13px; box-shadow:0 6px 20px rgba(0,0,0,.4); }
+  .maplibregl-popup-content { background:var(--bg); color:#fff; border-radius:10px; font-family:inherit; box-shadow:0 8px 28px rgba(0,0,0,.5); padding:12px 14px; }
+  .maplibregl-popup-tip { border-top-color:var(--bg) !important; }
+  .maplibregl-popup-content small { color:var(--dim); }
+  .maplibregl-popup-close-button { color:var(--dim); }
+  canvas.overlay { position:absolute; inset:0; z-index:3; pointer-events:none; }
+  .maplibregl-ctrl-attrib { display:none; }
+  @supports (height:100dvh) { html,body,#map { height:100dvh; } }
+
+  @media (max-width:640px), (pointer:coarse) {
+    #brand { top:calc(8px + env(safe-area-inset-top)); width:150px; padding:7px 10px; }
+    #brand span { font-size:13px; }
+    #panel { top:calc(52px + env(safe-area-inset-top)); width:150px; }
+    #search { font-size:16px; }
+    #timeline { bottom:calc(10px + env(safe-area-inset-bottom)); max-width:96vw; }
+    #histchips { display:none; }
+    #legend { bottom:calc(70px + env(safe-area-inset-bottom)); width:160px; }
+    #fc { left:10px; right:10px; width:auto; max-height:calc(100dvh - 100px - env(safe-area-inset-bottom)); }
+    #coords { display:none; }
+    /* touch targets ≥ 40px; flex:none so the tight row shrinks the scrub bar, not the buttons */
+    .rbtn { width:44px; height:44px; }
+    #zoomctl button { width:44px; height:42px; }
+    #play { width:44px; height:44px; }
+    #tstep { width:40px; height:44px; flex:none; }
+    #live { padding:13px 9px; flex:none; }
+    #scrubwrap { width:min(120px,22vw); }
+    #fttime { min-width:66px; }
+  }
+  @media (pointer:coarse) { #tip { display:none !important; } } /* no hover on touch; beats inline style set on mousemove */
+</style>
+</head>
+<body>
+<div id="map"></div>
+<canvas id="gridcv" class="overlay"></canvas>
+<canvas id="windcv" class="overlay"></canvas>
+
+<div id="brand" class="card">
+  <svg viewBox="0 0 100 60" aria-label="Batman WX">
+    <ellipse cx="50" cy="30" rx="48" ry="28" fill="#ffd60a"/>
+    <path fill="#0b0f14" d="M50 10 L46.5 18 L43 12.5 L39.5 18.5 C24 17 10 27 6 41 C17 33.5 26 34 31 39.5 C35 36 40.5 37.5 43 44 L46.5 38.5 L50 48 L53.5 38.5 L57 44 C59.5 37.5 65 36 69 39.5 C74 34 83 33.5 94 41 C90 27 76 17 60.5 18.5 L57 12.5 L53.5 18 Z"/>
+  </svg>
+  <span>BATMAN <b>WX</b></span>
+</div>
+<div id="panel" class="card">
+  <h2>WEATHER MAPS <span class="chev">▲</span></h2>
+  <div class="row" data-l="SATELLITE"><span class="ic">🛰</span>Satellite</div>
+  <div class="row" data-l="RADAR"><span class="ic">🌧</span>Radar</div>
+  <div class="row" data-l="PRECIP"><span class="ic">💧</span>Precipitation</div>
+  <div class="row" data-l="WIND"><span class="ic">💨</span>Wind</div>
+  <div class="row" data-l="TEMP"><span class="ic">🌡</span>Temperature</div>
+  <div class="row" data-l="HUMIDITY"><span class="ic">💦</span>Humidity</div>
+  <div class="row" data-l="PRESSURE"><span class="ic">⏲</span>Pressure</div>
+  <div class="sect">
+    <div class="row on" id="ltgbtn"><span class="ic">⚡</span>Lightning<span class="dot"></span></div>
+    <div class="row" id="stormbtn"><span class="ic">🌪</span>Storm tracks<span class="dot"></span></div>
+    <div class="row on" id="tropbtn"><span class="ic">🌀</span>Tropical<span class="dot"></span></div>
+    <div class="row on" id="alertbtn2"><span class="ic">⚠️</span>Alerts<span class="dot"></span></div>
+    <div class="row" id="spcbtn"><span class="ic">🎯</span>Day 1 Outlook<span class="dot"></span></div>
+    <div class="row" id="mcdbtn"><span class="ic">📝</span>Meso Discussions<span class="dot"></span></div>
+  </div>
+</div>
+
+<div id="rail">
+  <button class="rbtn" id="searchbtn" title="Search">🔍</button>
+  <button class="rbtn" id="geo2" title="My location">◎</button>
+  <button class="rbtn" id="radbtn" title="Radar sites">📡</button>
+  <button class="rbtn" id="alertbtn" title="Active alerts"><span id="acount">–</span>⚠️</button>
+</div>
+<div id="zoomctl"><button id="zin">+</button><button id="zout">−</button></div>
+
+<div id="searchwrap">
+  <input id="search" placeholder="Search place, address, or lat, lon…" autocomplete="off">
+  <div id="results" class="card"></div>
+</div>
+<div id="sites" class="card"><input id="sitefilter" placeholder="Filter radar sites…" autocomplete="off"><div id="sitelist"></div></div>
+
+<div id="timeline" class="card">
+  <button id="play">▶</button>
+  <div id="scrubwrap">
+    <input id="scrub" type="range" min="0" max="0" value="0" step="1">
+    <div id="nowmark"></div>
+  </div>
+  <span id="ftdate">—</span>
+  <span id="fttime">—</span>
+  <button id="live" title="Jump to live radar">LIVE</button>
+  <button id="tstep" title="Step forward">⏭</button>
+  <div id="histchips">
+    <button class="chip on" data-h="2">2h</button>
+    <button class="chip" data-h="6">6h</button>
+    <button class="chip" data-h="12">12h</button>
+    <button class="chip" data-h="24">24h</button>
+    <button class="chip" id="speed" data-s="1">1×</button>
+  </div>
+</div>
+
+<div id="legend" class="card">
+  <span id="legendtitle">Radar</span>
+  <div id="legendbar"></div>
+  <div id="legendlbl"><span id="lmin">Light</span><span id="lmid">Moderate</span><span id="lmax">Heavy</span></div>
+  <div id="lx"></div>
+</div>
+<div id="coords"></div>
+<div id="attr">© <a href="https://batman.zip">batman.zip</a> · OpenStreetMap · NOAA · RainViewer · NASA · Open-Meteo · Esri</div>
+<div id="tip"></div>
+
+<div id="fc" class="card"><button class="x">✕</button><div id="fcbody"></div></div>
+<div id="spin"></div>
+<div id="err"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const err = m => { $('err').textContent = m; $('err').style.display = 'block'; setTimeout(() => $('err').style.display = 'none', 6000); };
+let busy = 0;
+const spin = on => { busy = Math.max(0, busy + (on ? 1 : -1)); $('spin').style.display = busy ? 'block' : 'none'; };
+
+/* ---------- zoom.earth palette LUTs (exact 512-entry strips lifted from their app) ---------- */
+const LUT = {}; // name → Uint8ClampedArray(512*4)
+function loadLUTs() {
+  return Promise.all(Object.entries(PALETTE_PNG).map(([k, uri]) => new Promise(res => {
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas'); c.width = 512; c.height = 1;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.drawImage(im, 0, 0);
+      LUT[k] = x.getImageData(0, 0, 512, 1).data;
+      res();
+    };
+    im.onerror = res;
+    im.src = uri;
+  })));
+}
+const lutColor = (name, frac) => { // frac 0..1 → [r,g,b]
+  const d = LUT[name]; if (!d) return [0, 0, 0];
+  const i = Math.max(0, Math.min(511, Math.round(frac * 511))) * 4;
+  return [d[i], d[i + 1], d[i + 2]];
+};
+const lutCSS = name => { // palette strip → CSS gradient for legends
+  const stops = [];
+  for (let i = 0; i <= 10; i++) { const [r, g, b] = lutColor(name, i / 10); stops.push(`rgb(${r},${g},${b}) ${i * 10}%`); }
+  return `linear-gradient(90deg,${stops.join(',')})`;
+};
+/* zoom.earth radar index curve: idx = 511·(v·1.35)^5.5, v = normalized reflectivity */
+const radarIdx = v => Math.max(0, Math.min(511, Math.floor(511 * Math.pow(Math.min(1, v * 1.35), 5.5))));
+
+/* NEXRAD BR reflectivity color table (dBZ). 3-value stops blend into the next stop;
+   6-value stops carry their own gradient end, then jump to the next stop's start. */
+const BR_STOPS = [
+  [-35, [254, 254, 254]],
+  [-5,  [24, 24, 24],    [24, 24, 24]],
+  [0,   [5, 5, 66]],
+  [15,  [97, 97, 206],   [130, 130, 249]],
+  [20,  [108, 252, 108]],
+  [35,  [24, 113, 24],   [0, 60, 0]],
+  [40,  [255, 249, 106]],
+  [45,  [255, 181, 51],  [255, 112, 2]],
+  [50,  [252, 0, 1]],
+  [60,  [143, 0, 0],     [93, 0, 0]],
+  [75,  [93, 0, 0]],
+];
+function brColor(dbz) {
+  if (dbz <= BR_STOPS[0][0]) return BR_STOPS[0][1];
+  for (let i = 0; i < BR_STOPS.length - 1; i++) {
+    const [d0, c0, cEnd] = BR_STOPS[i], [d1, c1] = BR_STOPS[i + 1];
+    if (dbz < d1) {
+      const t = (dbz - d0) / (d1 - d0), e = cEnd || c1;
+      return c0.map((v, j) => Math.round(v + (e[j] - v) * t));
+    }
+  }
+  return BR_STOPS[BR_STOPS.length - 1][1];
+}
+const brCSS = () => { // legend gradient over 0…75 dBZ
+  const stops = [];
+  for (let i = 0; i <= 15; i++) { const [r, g, b] = brColor(i * 5); stops.push(`rgb(${r},${g},${b}) ${(i * 100 / 15).toFixed(0)}%`); }
+  return `linear-gradient(90deg,${stops.join(',')})`;
+};
+/* RainViewer BW gray → dBZ (nowcast frames only — RainViewer clips heavy rain,
+   so cap below red; past frames use IEM N0Q with exact dBZ) */
+const grayDbz = g => Math.min(48, (g - 40) * 0.245);
+
+/* exact reverse lookup for IEM N0Q colors → dBZ, nearest-color fallback memoized */
+const n0qMap = new Map(N0Q_TABLE.map(([d, c]) => [c, d]));
+function n0qDbz(r, g, b) {
+  const c = (r << 16) | (g << 8) | b;
+  let d = n0qMap.get(c);
+  if (d !== undefined) return d;
+  let best = null, bd = Infinity;
+  for (const [dz, pc] of N0Q_TABLE) {
+    const dr = r - (pc >> 16), dg = g - ((pc >> 8) & 255), db = b - (pc & 255);
+    const dist = dr * dr + dg * dg + db * db;
+    if (dist < bd) { bd = dist; best = dz; }
+  }
+  n0qMap.set(c, best); // memoize the miss
+  return best;
+}
+
+/* ---------- URL hash state ---------- */
+function parseHash() {
+  const m = location.hash.match(/map=([\d.]+)\/(-?[\d.]+)\/(-?[\d.]+)/);
+  const l = location.hash.match(/m=(\w+)/);
+  return { zoom: m ? +m[1] : 7, lat: m ? +m[2] : 33.14, lon: m ? +m[3] : -96.11, layer: l ? l[1] : 'RADAR' }; // default: Greenville TX
+}
+function writeHash() {
+  const c = map.getCenter();
+  history.replaceState(null, '', `#map=${map.getZoom().toFixed(2)}/${c.lat.toFixed(2)}/${c.lng.toFixed(2)}&m=${mainLayer}`);
+}
+
+/* IEM archive timestamp: UTC YYYYMMDDHHMM on 5-min marks */
+const iemTs = sec => { const d = new Date(sec * 1000); const p = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}`; };
+console.assert(iemTs(Date.UTC(2026, 6, 10, 9, 30) / 1000) === '202607100930', 'iemTs self-check failed');
+console.assert(radarIdx(0) === 0 && radarIdx(1) === 511 && radarIdx(.6) > 100 && radarIdx(.6) < 350, 'radarIdx self-check failed');
+
+const init = parseHash();
+const VALID = ['RADAR','SATELLITE','PRECIP','WIND','TEMP','HUMIDITY','PRESSURE'];
+let mainLayer = VALID.includes(init.layer) ? init.layer : 'RADAR';
+const toggles = { ALERTS: true, LTG: true, TROP: true, STORMS: false, SPC: false, MCD: false }; // storm cells off by default — zoom.earth keeps radar clean
+
+/* ---------- map ---------- */
+const map = new maplibregl.Map({
+  container: 'map',
+  style: { version: 8,
+    sources: { esri: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19 } },
+    layers: [{ id: 'esri', type: 'raster', source: 'esri' }] },
+  center: [init.lon, init.lat], zoom: init.zoom,
+  attributionControl: false
+});
+/* permanent focal point: Greenville TX — DOM marker sits above all canvas/raster layers at every zoom */
+{
+  const el = document.createElement('div'); el.id = 'gv';
+  el.innerHTML = '<span>Greenville</span>';
+  new maplibregl.Marker({ element: el }).setLngLat([-96.1108, 33.1384]).addTo(map);
+}
+$('zin').onclick = () => map.zoomIn();
+$('zout').onclick = () => map.zoomOut();
+map.on('moveend', writeHash);
+
+/* zoom.earth look: satellite imagery base (Esri World Imagery), toned down,
+   with CARTO vector labels/boundaries/roads layered on top */
+async function applyBasemap() {
+  try {
+    const s = await (await fetch('https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json')).json();
+    const keep = [];
+    for (const l of s.layers) {
+      const p = l.paint = l.paint || {}, lay = l.layout = l.layout || {};
+      if (l.type === 'symbol') {
+        p['text-color'] = '#fff'; p['text-halo-color'] = 'rgba(0,10,20,.75)'; p['text-halo-width'] = 1.4;
+        if (l.id === 'place_state') { lay['text-transform'] = 'uppercase'; lay['text-letter-spacing'] = 0.18; }
+        keep.push(l);
+      } else if (l.type === 'line' && /boundary/.test(l.id)) {
+        p['line-color'] = '#ffffff'; p['line-opacity'] = l.id === 'boundary_state' ? .28 : .45; p['line-width'] = 1;
+        keep.push(l);
+      } else if (l.type === 'line' && /mot|trunk/.test(l.id) && !/case/.test(l.id)) {
+        p['line-color'] = '#ffd9a0'; p['line-opacity'] = .55;
+        p['line-width'] = ['interpolate', ['linear'], ['zoom'], 4, .8, 8, 2, 12, 3.5];
+        if (l.minzoom > 4) l.minzoom = 4;
+        keep.push(l);
+      } else if (l.type === 'line' && /water|river/.test(l.id)) {
+        p['line-color'] = '#0e1621'; p['line-opacity'] = .5;
+        keep.push(l);
+      }
+    }
+    // interstate/highway shields synthesized from the tiles' route `ref` numbers
+    const nameL = s.layers.find(l => l.id === 'roadname_pri');
+    keep.push({ id: 'road-shields', type: 'symbol', source: nameL?.source || 'carto',
+      'source-layer': 'transportation_name', minzoom: 5,
+      filter: ['all', ['has', 'ref'], ['match', ['get', 'class'], ['motorway', 'trunk'], true, false]],
+      layout: { 'symbol-placement': 'line', 'symbol-spacing': 380, 'text-field': ['get', 'ref'],
+        'text-font': nameL?.layout?.['text-font'] || ['Montserrat Regular'], 'text-size': 11,
+        'text-rotation-alignment': 'viewport', 'text-pitch-alignment': 'viewport', 'text-max-angle': 30, 'text-padding': 4 },
+      paint: { 'text-color': '#fff',
+        'text-halo-color': ['match', ['get', 'network'], 'us-interstate', '#3d5fc0', '#54606e'],
+        'text-halo-width': 2.4 } });
+    s.layers = [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#0b0f14' } },
+      { id: 'esri', type: 'raster', source: 'esri',
+        paint: { 'raster-saturation': -0.25, 'raster-brightness-max': 0.82, 'raster-contrast': 0.05 } },
+      ...keep
+    ];
+    s.sources.esri = { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19 };
+    map.setStyle(s);
+    await new Promise(r => map.once('styledata', r));
+  } catch { /* raster fallback stays */ }
+}
+const labelAnchor = () => map.getStyle().layers.find(x => x.type === 'symbol')?.id;
+const roadAnchor = () => map.getStyle().layers.find(x => x.type === 'symbol' || /boundary|mot|trunk/.test(x.id))?.id;
+
+/* ---------- radar recolor: IEM N0Q (exact dBZ) + RainViewer nowcast → BR color table ---------- */
+const tileCache = new Map(); // url → { val: Uint8ClampedArray of (dBZ+32)*2, n } for cursor sampling
+maplibregl.addProtocol('zr', async (params, abort) => {
+  const url = params.url.replace(/^zr:\/\//, 'https://');
+  const isIEM = url.includes('mesonet');
+  const r = await fetch(url, { signal: abort?.signal });
+  if (!r.ok) throw new Error('tile ' + r.status);
+  const bmp = await createImageBitmap(await r.blob());
+  const n = bmp.width;
+  const c = new OffscreenCanvas(n, n), x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(bmp, 0, 0);
+  const d = x.getImageData(0, 0, n, n).data;
+  // pass 1: decode to a dBZ field at native res + keep the tooltip cache native (512²×400 LRU would be ~100MB)
+  const val = new Uint8ClampedArray(n * n);
+  const F = new Float32Array(n * n).fill(-32); // ponytail: no-echo = -32 dBZ so bilinear fades echo edges through the <4 cutoff instead of hard-stepping
+  for (let i = 0, px = 0; i < d.length; i += 4, px++) {
+    if (d[i + 3] < 8) continue;
+    const dbz = isIEM ? n0qDbz(d[i], d[i + 1], d[i + 2]) : d[i] < 40 ? -99 : grayDbz(d[i]);
+    if (dbz < 4) continue;
+    F[px] = dbz; val[px] = (dbz + 32) * 2;
+  }
+  // pass 2: colorize; IEM gets a 2× bilinear upsample in dBZ space (smooth data, crisp palette). RV path is S=1 identity.
+  // ponytail: no cross-tile apron — edge rows clamp-replicate; fetch 4 neighbours only if seams ever show at a tile border.
+  const S = isIEM ? 2 : 1, m = n * S;
+  const out = new ImageData(m, m), o = out.data;
+  for (let y = 0; y < m; y++) {
+    const fy = Math.max(0, (y + .5) / S - .5), y0 = Math.min(n - 1, fy | 0), y1 = Math.min(n - 1, y0 + 1), ty = fy - y0;
+    for (let xp = 0; xp < m; xp++) {
+      const fx = Math.max(0, (xp + .5) / S - .5), x0 = Math.min(n - 1, fx | 0), x1 = Math.min(n - 1, x0 + 1), tx = fx - x0;
+      const dbz = (F[y0 * n + x0] * (1 - tx) + F[y0 * n + x1] * tx) * (1 - ty)
+                + (F[y1 * n + x0] * (1 - tx) + F[y1 * n + x1] * tx) * ty;
+      if (dbz < 4) continue;
+      const j = (y * m + xp) * 4, [cr, cg, cb] = brColor(dbz);
+      o[j] = cr; o[j + 1] = cg; o[j + 2] = cb; o[j + 3] = dbz < 20 ? 200 : 235; // light band translucent, like NEXRAD BR
+    }
+  }
+  const oc = new OffscreenCanvas(m, m);
+  oc.getContext('2d').putImageData(out, 0, 0);
+  if (tileCache.size > 400) tileCache.delete(tileCache.keys().next().value);
+  tileCache.set(params.url, { val, n });
+  const blob = await oc.convertToBlob({ type: 'image/png' });
+  return { data: await blob.arrayBuffer() };
+});
+console.assert((() => { // upsample index math (mirrors fx/fy above): S=1 exact, S=2 pixel-centered, edges clamp
+  const idx = (i, S, n) => { const f = Math.max(0, (i + .5) / S - .5), a = Math.min(n - 1, f | 0); return [a, Math.min(n - 1, a + 1), f - a]; };
+  const [a0, , t0] = idx(3, 1, 4);        // S=1 → identity, no interpolation
+  const [b0, b1, tb] = idx(1, 2, 4);      // S=2 out px1 → src 0.25 between 0 and 1
+  const [e0, e1] = idx(7, 2, 4);          // S=2 out px7 (last) → clamp at src 3
+  return a0 === 3 && t0 === 0 && b0 === 0 && b1 === 1 && Math.abs(tb - .25) < 1e-9 && e0 === 3 && e1 === 3;
+})(), 'radar upsample index self-check failed');
+
+/* ---------- radar / satellite timeline ---------- */
+const FRAME_OPACITY = 0.82, SUB = 20, BASE_FPS = 1.4;
+let frames = { RADAR: [], SATELLITE: [] }, playing = false, pos = 0, atEnd = false, holdUntil = 0;
+let historyHrs = 2, speed = 1, nowcast = [], rvHost = '', preloadGen = 0;
+const added = new Set();
+const STEP = { 2: 10, 6: 20, 12: 40, 24: 80 };
+
+let rvPast = [];
+async function loadNowcast() {
+  try {
+    const j = await (await fetch('https://api.rainviewer.com/public/weather-maps.json')).json();
+    rvHost = j.host;
+    rvPast = j.radar.past.map(f => ({ time: f.time, rv: f.path }));
+    nowcast = j.radar.nowcast.map(f => ({ time: f.time, rv: f.path, fcast: true }));
+  } catch { rvPast = []; nowcast = []; }
+}
+function buildFrames() {
+  { // past frames: IEM N0Q composite — true dBZ, no RainViewer saturation clip
+    const liveT = Math.floor(Date.now() / 1000 / 300) * 300;          // freshest 5-min composite (IEM "-0" alias)
+    const latest = Math.floor((Date.now() / 1000 - 10 * 60) / 300) * 300;
+    const step = STEP[historyHrs] * 60, n = Math.round(historyHrs * 3600 / step);
+    frames.RADAR = Array.from({ length: n + 1 }, (_, i) => {
+      const time = latest - (n - i) * step;
+      return { time, iem: iemTs(time) };
+    });
+    frames.RADAR.push({ time: liveT, iem: '0' });                     // real-time frame, ~2 min old
+    if (historyHrs === 2) frames.RADAR = frames.RADAR.concat(nowcast.filter(f => f.time > liveT));
+  }
+  const sl = Math.floor((Date.now() / 1000 - 35 * 60) / 600) * 600;
+  const sstep = Math.max(600, STEP[historyHrs] * 60), sn = Math.round(Math.min(historyHrs, 24) * 3600 / sstep);
+  frames.SATELLITE = Array.from({ length: sn + 1 }, (_, i) => {
+    const time = sl - (sn - i) * sstep;
+    return { time, gibs: new Date(time * 1000).toISOString().replace(/\.\d+Z/, 'Z') };
+  });
+}
+/* RainViewer BW tiles (color 0, smoothed) go through the zr recolor protocol */
+const rvTilePath = f => `${rvHost.replace(/^https:\/\//, '')}${f.rv}/512/{z}/{x}/{y}/0/1_0.png`;
+/* IEM "-0" alias = latest published composite (~2 min old). Cache-bust per 5-min epoch so each live frame refetches. */
+const iemTilePath = f => `mesonet.agron.iastate.edu/cache/tile.py/1.0.0/ridge::USCOMP-N0Q-${f.iem}/{z}/{x}/{y}.png${f.iem === '0' ? '?_=' + f.time : ''}`;
+const tileURL = f =>
+  f.iem ? `zr://${iemTilePath(f)}` :
+  f.rv ? `zr://${rvTilePath(f)}` :
+  `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/${f.gibs}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`;
+const frameId = f => 'fr-' + (f.iem || f.rv || f.gibs);
+
+function ensureFrame(f) {
+  const id = frameId(f);
+  if (added.has(id)) return;
+  added.add(id);
+  map.addSource(id, { type: 'raster', tiles: [tileURL(f)], tileSize: f.rv ? 512 : 256, maxzoom: f.iem ? 9 : f.rv ? 8 : 7 });
+  map.addLayer({ id, type: 'raster', source: id,
+    paint: { 'raster-opacity': 0, 'raster-opacity-transition': { duration: 0 }, 'raster-fade-duration': 0 } },
+    map.getLayer('alerts-wms') ? 'alerts-wms' : roadAnchor());
+}
+const srcReady = f => { const id = frameId(f); return added.has(id) && map.getSource(id) && map.isSourceLoaded(id); };
+function renderPos() {
+  const fr = frames[mainLayer]; if (!fr || !fr.length) return;
+  pos = Math.max(0, Math.min(fr.length - 1, pos));
+  const i = Math.min(Math.floor(pos), fr.length - 1), frac = Math.min(1, pos - i);
+  ensureFrame(fr[i]); if (fr[i + 1]) ensureFrame(fr[i + 1]);
+  const a = frameId(fr[i]), b = frac > 0 && fr[i + 1] ? frameId(fr[i + 1]) : null;
+  for (const lid of added) map.setPaintProperty(lid, 'raster-opacity',
+    lid === a ? FRAME_OPACITY * (1 - frac) : lid === b ? FRAME_OPACITY * frac : 0);
+  const ci = frac < .5 || !fr[i + 1] ? i : i + 1;
+  $('scrub').value = Math.round(pos * SUB);
+  $('scrub').style.background = `linear-gradient(90deg, var(--blue2) ${100 * pos / Math.max(1, fr.length - 1)}%, #39424d 0)`;
+  const d = new Date(fr[ci].time * 1000);
+  $('ftdate').textContent = d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  $('fttime').textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  $('fttime').className = fr[ci].fcast ? 'fcast' : '';
+}
+
+/* ---------- live mode: pin to the newest frame, auto-advance as new data lands ---------- */
+let live = false;
+const lastPastIdx = fr => { const i = fr.findIndex(f => f.fcast); return i > 0 ? i - 1 : fr.length - 1; };
+/* live loop start: last 12 frames ending on the newest, auto-advancing as new data lands */
+const liveLo = (fr, hi) => Math.max(0, hi - 11);
+function setLive(on) {
+  live = on;
+  $('live').classList.toggle('on', on);
+  if (on) {
+    const fr = frames[mainLayer];
+    if (fr && fr.length) { const hi = lastPastIdx(fr); pos = liveLo(fr, hi); atEnd = false; renderPos(); }
+    setPlaying(true);
+  }
+}
+$('live').onclick = () => setLive(!live);
+setInterval(() => { // poll for a fresh frame; rebuild only when the expected latest changes
+  if (!live || (mainLayer !== 'RADAR' && mainLayer !== 'SATELLITE')) return;
+  const fr = frames[mainLayer]; if (!fr || !fr.length) return;
+  const expected = mainLayer === 'RADAR'
+    ? Math.floor(Date.now() / 1000 / 300) * 300
+    : Math.floor((Date.now() / 1000 - 35 * 60) / 600) * 600;
+  if (fr[lastPastIdx(fr)].time < expected) { clearFrames(); setupTimeline(); setLive(true); }
+}, 60 * 1000);
+/* wake / rotate / restore: resize the canvas and, if live, jump back to the newest data */
+function onWake() {
+  map.resize();
+  if (live && (mainLayer === 'RADAR' || mainLayer === 'SATELLITE'))
+    loadNowcast().then(() => { clearFrames(); setupTimeline(); setLive(true); });
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) onWake(); });
+addEventListener('pageshow', () => map.resize());
+addEventListener('orientationchange', () => setTimeout(() => map.resize(), 300));
+let lastT = 0;
+requestAnimationFrame(function playLoop(t) {
+  requestAnimationFrame(playLoop);
+  const dt = Math.min(.1, (t - lastT) / 1000); lastT = t;
+  const fr = frames[mainLayer];
+  if (!playing || !fr || !fr.length) return;
+  if (t < holdUntil) return;
+  const hi = live ? lastPastIdx(fr) : fr.length - 1, lo = live ? liveLo(fr, hi) : 0;
+  if (atEnd) { atEnd = false; pos = lo; renderPos(); return; }
+  const ni = Math.floor(pos) + 1;
+  if (ni <= hi && !srcReady(fr[ni])) { ensureFrame(fr[ni]); return; }
+  pos += dt * BASE_FPS * speed;
+  if (pos >= hi) { pos = hi; atEnd = true; holdUntil = t + (live ? 1500 : 900); }
+  renderPos();
+});
+function clearFrames() { preloadGen++; for (const id of added) { map.removeLayer(id); map.removeSource(id); } added.clear(); }
+function setupTimeline() {
+  buildFrames();
+  const fr = frames[mainLayer];
+  $('scrub').max = Math.max(0, (fr.length - 1) * SUB);
+  const firstF = fr.findIndex(f => f.fcast);
+  $('nowmark').style.left = firstF > 0 ? `calc(${100 * (firstF - .5) / (fr.length - 1)}% - 1px)` : 'calc(100% - 2px)';
+  pos = firstF > 0 ? firstF - 1 : fr.length - 1; atEnd = false;
+  renderPos();
+  const gen = ++preloadGen;
+  fr.forEach((f, i) => setTimeout(() => { if (gen === preloadGen) ensureFrame(f); }, 200 + 120 * i));
+}
+function setPlaying(p) { playing = p; $('play').textContent = p ? '❚❚' : '▶'; }
+$('play').onclick = () => { setLive(false); setPlaying(!playing); };
+$('tstep').onclick = () => { setLive(false); setPlaying(false); pos = Math.min((frames[mainLayer]?.length || 1) - 1, Math.floor(pos) + 1); atEnd = false; renderPos(); };
+$('scrub').oninput = e => { setLive(false); setPlaying(false); pos = +e.target.value / SUB; atEnd = false; renderPos(); };
+document.querySelectorAll('.chip[data-h]').forEach(b => b.onclick = () => {
+  historyHrs = +b.dataset.h;
+  document.querySelectorAll('.chip[data-h]').forEach(x => x.classList.toggle('on', x === b));
+  clearFrames(); setupTimeline();
+});
+$('speed').onclick = () => {
+  speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1;
+  $('speed').textContent = (speed + '×').replace('0.5', '½');
+};
+addEventListener('keydown', e => { if (e.code === 'Space' && e.target.tagName !== 'INPUT') { e.preventDefault(); if ($('timeline').style.display !== 'none') { setLive(false); setPlaying(!playing); } } });
+
+/* ---------- NWS watches / warnings / advisories (nowCOAST WMS raster) ---------- */
+const wwaURL = () => 'https://opengeo.ncep.noaa.gov/geoserver/wwa/wms?service=WMS&version=1.3.0&request=GetMap' +
+  '&layers=wwa:hazards,wwa:warnings&styles=&format=image/png&transparent=true&crs=EPSG:3857' +
+  '&width=512&height=512&bbox={bbox-epsg-3857}&_=' + Math.floor(Date.now() / 300000);
+async function loadAlerts() {
+  if (!map.getSource('alerts')) {
+    map.addSource('alerts', { type: 'raster', tiles: [wwaURL()], tileSize: 512 });
+    map.addLayer({ id: 'alerts-wms', type: 'raster', source: 'alerts',
+      paint: { 'raster-opacity': 0.42, 'raster-fade-duration': 150 },
+      layout: { visibility: toggles.ALERTS ? 'visible' : 'none' } }, roadAnchor());
+  } else map.getSource('alerts').setTiles([wwaURL()]);
+  if (toggles.SPC && map.getSource('spc')) loadSPC();
+  if (toggles.MCD && map.getSource('mcd')) loadMCD();
+  try {
+    const t = await (await fetch('https://opengeo.ncep.noaa.gov/geoserver/wwa/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=wwa:hazards&resultType=hits')).text();
+    const n = +(t.match(/numberMatched="(\d+)"/)?.[1] || 0);
+    $('acount').textContent = n >= 2000 ? '2k+' : n || '–';
+  } catch { /* badge stays stale */ }
+}
+function setAlerts(on) {
+  toggles.ALERTS = on;
+  $('alertbtn').classList.toggle('off', !on);
+  $('alertbtn2').classList.toggle('on', on);
+  for (const l of ['alerts-wms', 'sps-fill', 'sps-line'])
+    map.getLayer(l) && map.setLayoutProperty(l, 'visibility', on ? 'visible' : 'none');
+}
+$('alertbtn').onclick = () => setAlerts(!toggles.ALERTS);
+$('alertbtn2').onclick = () => setAlerts(!toggles.ALERTS);
+function alertChipColor(ev) {
+  const t = [['Tornado','#ff2d55'],['Severe Thunderstorm','#ffa500'],['Flash Flood','#8b0000'],['Flood','#2e8b57'],
+    ['Extreme Heat','#c71585'],['Heat','#ff7a3d'],['Red Flag','#ff1493'],['Fire','#e8a33d'],['Winter','#8a2be2'],
+    ['Snow','#8a2be2'],['Ice','#9f5f9f'],['Freez','#4839c9'],['Frost','#6495ed'],['Wind','#d2b48c'],['Dust','#bdb76b'],
+    ['Fog','#708090'],['Air','#808080'],['Craft','#d8bfd8'],['Gale','#dda0dd'],['Marine','#ffa07a'],['Surf','#228b22'],
+    ['Rip','#40e0d0'],['Hurricane','#dc143c'],['Tropical','#ff5ce1']];
+  for (const [k, c] of t) if (ev.includes(k)) return c;
+  return '#7fb2ff';
+}
+
+/* ---------- storm cells (IEM NEXRAD attr table) ---------- */
+const dest = (lat, lon, brg, km) => {
+  const R = 6371, d = km / R, b = brg * Math.PI / 180, la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+  const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));
+  const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+  return [lo2 * 180 / Math.PI, la2 * 180 / Math.PI];
+};
+const compass = d => ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
+const SEV_COLOR = ['#8fb6d8', '#ffd35c', '#ff7a3d', '#ff2d55'];
+function stormLayers() {
+  if (map.getSource('storms')) return;
+  const vis = { visibility: mainLayer === 'RADAR' && toggles.STORMS ? 'visible' : 'none' };
+  map.addSource('storms', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('storm-tracks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'storm-tracks', type: 'line', source: 'storm-tracks', minzoom: 5, layout: vis,
+    paint: { 'line-color': '#fff', 'line-width': 1.4, 'line-opacity': .8, 'line-dasharray': [1.5, 2] } }, labelAnchor());
+  map.addLayer({ id: 'storm-ticks', type: 'circle', source: 'storm-tracks', minzoom: 5, layout: vis,
+    filter: ['==', '$type', 'Point'],
+    paint: { 'circle-radius': 2.4, 'circle-color': '#fff', 'circle-opacity': .85 } }, labelAnchor());
+  map.addLayer({ id: 'storm-cells', type: 'circle', source: 'storms', minzoom: 4.5, layout: vis,
+    paint: { 'circle-radius': ['+', 4.5, ['*', 1.5, ['get', 'sev']]],
+      'circle-color': ['to-color', ['at', ['get', 'sev'], ['literal', SEV_COLOR]]],
+      'circle-stroke-color': '#fff', 'circle-stroke-width': 1.6, 'circle-opacity': .92 } }, labelAnchor());
+}
+async function loadStorms() {
+  try {
+    const j = await (await fetch('https://mesonet.agron.iastate.edu/geojson/nexrad_attr.geojson')).json();
+    const cells = [], tracks = [];
+    for (const f of j.features) {
+      const p = f.properties, [lon, lat] = f.geometry.coordinates;
+      const sev = p.tvs !== 'NONE' ? 3 : p.meso !== 'NONE' ? 2 : (p.posh >= 50 || p.max_size >= 1) ? 1 : 0;
+      cells.push({ type: 'Feature', geometry: f.geometry, properties: { ...p, sev } });
+      if (p.sknt > 3) {
+        const toward = (p.drct + 180) % 360, pts = [[lon, lat]];
+        for (const m of [15, 30, 45, 60]) {
+          const pt = dest(lat, lon, toward, p.sknt * 1.852 * m / 60);
+          pts.push(pt);
+          tracks.push({ type: 'Feature', geometry: { type: 'Point', coordinates: pt }, properties: {} });
+        }
+        tracks.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: pts }, properties: {} });
+      }
+    }
+    stormLayers();
+    map.getSource('storms').setData({ type: 'FeatureCollection', features: cells });
+    map.getSource('storm-tracks').setData({ type: 'FeatureCollection', features: tracks });
+  } catch { /* keep last data */ }
+}
+map.on('click', 'storm-cells', e => {
+  const p = e.features[0].properties;
+  const row = (k, v) => `<tr><td style="color:#8a97a5;padding-right:10px">${k}</td><td style="text-align:right"><b>${v}</b></td></tr>`;
+  let h = `<b>Cell ${p.storm_id}</b> <small>· ${p.nexrad} radar</small>`;
+  if (p.tvs !== 'NONE') h += `<div style="color:#ff2d55;font-weight:700;margin-top:3px">⚠︎ Tornado vortex signature (${p.tvs})</div>`;
+  if (p.meso !== 'NONE') h += `<div style="color:#ff7a3d;font-weight:700;margin-top:3px">🌀 Mesocyclone (${p.meso})</div>`;
+  h += '<table style="margin-top:6px;font-size:12.5px;border-collapse:collapse">'
+    + row('Max reflectivity', `${p.max_dbz} dBZ @ ${p.max_dbz_height} kft`)
+    + row('Echo top', `${p.top} kft`) + row('VIL', `${p.vil} kg/m²`)
+    + (p.poh > 0 ? row('Hail probability', `${p.poh}%${p.posh > 0 ? ` · severe ${p.posh}%` : ''}`) : '')
+    + (p.max_size > 0 ? row('Max hail size', `${p.max_size}"`) : '')
+    + row('Motion', p.sknt > 3 ? `${compass((p.drct + 180) % 360)} at ${Math.round(p.sknt * 1.151)} mph` : 'nearly stationary')
+    + '</table>';
+  new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(e.features[0].geometry.coordinates).setHTML(h).addTo(map);
+});
+
+/* ---------- live lightning (Blitzortung) — zoom.earth style: white flash, fading white dot ---------- */
+let strikes = [];
+function ltgLZW(b) {
+  const dict = {}, data = b.split('');
+  let cur = data[0], oldPhrase = cur, code = 256, phrase;
+  const out = [cur];
+  for (let i = 1; i < data.length; i++) {
+    const cc = data[i].charCodeAt(0);
+    phrase = cc < 256 ? data[i] : (dict[cc] || oldPhrase + cur);
+    out.push(phrase);
+    cur = phrase.charAt(0);
+    dict[code++] = oldPhrase + cur;
+    oldPhrase = phrase;
+  }
+  return out.join('');
+}
+let ltgGot = false;
+function ltgConnect(n = 0) {
+  if (n > 11) { console.warn('lightning: could not reach blitzortung.org'); return; }
+  try {
+    const ws = new WebSocket('wss://ws' + [1, 3, 7, 8][n % 4] + '.blitzortung.org/');
+    ws.onopen = () => ws.send('{"a":111}');
+    ws.onmessage = m => {
+      try {
+        const j = JSON.parse(ltgLZW(m.data));
+        if (j.lat != null) { strikes.push({ lon: j.lon, lat: j.lat, t: Date.now() }); n = 0; if (!ltgGot) { ltgGot = true; drawLtg(); } }
+      } catch { /* skip bad frame */ }
+    };
+    ws.onclose = () => setTimeout(() => ltgConnect(n + 1), 4000);
+  } catch { setTimeout(() => ltgConnect(n + 1), 4000); }
+}
+function drawLtg() {
+  const now = Date.now();
+  strikes = strikes.filter(s => s.t > now - 5 * 60 * 1000).slice(-5000); // keep last 5 min
+  if (!map.getSource('ltg')) return;
+  map.getSource('ltg').setData({ type: 'FeatureCollection', features: strikes.map(s => ({
+    type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] }, properties: { age: (now - s.t) / 1000 } })) });
+}
+function ltgLayers() {
+  const vis = { visibility: toggles.LTG ? 'visible' : 'none' };
+  map.addSource('ltg', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  // flash: big soft white glow that pops in and decays over ~2 s (age in seconds)
+  map.addLayer({ id: 'ltg-glow', type: 'circle', source: 'ltg', layout: vis, filter: ['<', ['get', 'age'], 2.5],
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['get', 'age'], 0, 22, 2.5, 4],
+      'circle-color': '#ffffff', 'circle-blur': 1.3,
+      'circle-opacity': ['interpolate', ['linear'], ['get', 'age'], 0, .95, 2.5, 0] } }, labelAnchor());
+  // afterglow: small white dot fading out over 5 min
+  map.addLayer({ id: 'ltg', type: 'circle', source: 'ltg', layout: vis, paint: {
+    'circle-radius': ['interpolate', ['linear'], ['get', 'age'], 0, 2.4, 300, 1],
+    'circle-color': '#ffffff',
+    'circle-opacity': ['interpolate', ['linear'], ['get', 'age'], 0, 1, 30, .5, 300, .04] } }, labelAnchor());
+}
+
+/* ---------- tropical: NHC outlooks, tracks, cones, watches ---------- */
+const NHC = 'https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather_summary/MapServer';
+const nhcQ = l => fetch(`${NHC}/${l}/query?where=1%3D1&outFields=*&f=geojson`).then(r => r.json()).catch(() => ({ type: 'FeatureCollection', features: [] }));
+const RISK = ['match', ['get', 'risk7day'], 'High', '#ff4d5e', 'Medium', '#ff9a3d', '#ffd35c'];
+const TROP_LAYERS = ['trop-region-fill', 'trop-region-line', 'trop-x', 'trop-ww', 'trop-cone-fill', 'trop-cone-line', 'trop-past', 'trop-track', 'trop-points'];
+function tropLayers() {
+  if (map.getSource('trop-region')) return;
+  const vis = { visibility: toggles.TROP ? 'visible' : 'none' };
+  for (const s of ['trop-region', 'trop-x', 'trop-cone', 'trop-track', 'trop-past', 'trop-points', 'trop-ww'])
+    map.addSource(s, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  const A = labelAnchor();
+  map.addLayer({ id: 'trop-region-fill', type: 'fill', source: 'trop-region', layout: vis, paint: { 'fill-color': RISK, 'fill-opacity': .15 } }, A);
+  map.addLayer({ id: 'trop-region-line', type: 'line', source: 'trop-region', layout: vis, paint: { 'line-color': RISK, 'line-width': 1.8, 'line-dasharray': [3, 2] } }, A);
+  map.addLayer({ id: 'trop-x', type: 'circle', source: 'trop-x', layout: vis, paint: { 'circle-radius': 6, 'circle-color': '#ff9a3d', 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.6 } }, A);
+  map.addLayer({ id: 'trop-ww', type: 'line', source: 'trop-ww', layout: vis, paint: { 'line-width': 4, 'line-opacity': .9,
+    'line-color': ['match', ['get', 'tcww'], 'HWR', '#dc143c', 'HWA', '#ff69b4', 'TWR', '#3d6bff', 'TWA', '#ffd35c', '#dc143c'] } }, A);
+  map.addLayer({ id: 'trop-cone-fill', type: 'fill', source: 'trop-cone', layout: vis, paint: { 'fill-color': '#fff', 'fill-opacity': .13 } }, A);
+  map.addLayer({ id: 'trop-cone-line', type: 'line', source: 'trop-cone', layout: vis, paint: { 'line-color': '#fff', 'line-width': 1.2, 'line-opacity': .6 } }, A);
+  map.addLayer({ id: 'trop-past', type: 'line', source: 'trop-past', layout: vis, paint: { 'line-color': '#aab6c2', 'line-width': 1.6, 'line-dasharray': [2, 2] } }, A);
+  map.addLayer({ id: 'trop-track', type: 'line', source: 'trop-track', layout: vis, paint: { 'line-color': '#fff', 'line-width': 2.2 } }, A);
+  map.addLayer({ id: 'trop-points', type: 'circle', source: 'trop-points', layout: vis, paint: {
+    'circle-radius': 6.5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.6,
+    'circle-color': ['match', ['get', 'dvlbl'], 'M', '#c0159a', 'H', '#ff2d55', 'S', '#ff9a3d', 'D', '#ffd35c', '#8fb6d8'] } }, A);
+}
+async function loadTropical() {
+  const [region, x7, cone, track, past, pts, ww] = await Promise.all([3, 2, 7, 6, 11, 5, 8].map(nhcQ));
+  tropLayers();
+  map.getSource('trop-region').setData(region);
+  map.getSource('trop-x').setData(x7);
+  map.getSource('trop-cone').setData(cone);
+  map.getSource('trop-track').setData(track);
+  map.getSource('trop-past').setData(past);
+  map.getSource('trop-points').setData(pts);
+  map.getSource('trop-ww').setData(ww);
+}
+map.on('click', 'trop-region-fill', e => {
+  const p = e.features[0].properties;
+  new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(
+    `<b>Tropical development area</b> <small>· ${p.basin || ''}</small>
+     <table style="margin-top:6px;font-size:12.5px">
+     <tr><td style="color:#8a97a5;padding-right:10px">48-hour</td><td><b>${p.prob2day || '–'}</b> (${p.risk2day || '–'})</td></tr>
+     <tr><td style="color:#8a97a5">7-day</td><td><b>${p.prob7day || '–'}</b> (${p.risk7day || '–'})</td></tr></table>
+     <small>NHC Tropical Weather Outlook</small>`).addTo(map);
+});
+map.on('click', 'trop-points', e => {
+  const p = e.features[0].properties;
+  const kt = +p.maxwind || 0;
+  new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(e.features[0].geometry.coordinates).setHTML(
+    `<b>${p.stormname || 'Storm'}</b> <small>· ${p.tcdvlp || p.stormtype || ''}</small>
+     <table style="margin-top:6px;font-size:12.5px">
+     <tr><td style="color:#8a97a5;padding-right:10px">Winds</td><td><b>${kt ? Math.round(kt * 1.151) + ' mph' : '–'}</b>${+p.gust ? ` · gusts ${Math.round(p.gust * 1.151)}` : ''}</td></tr>
+     ${p.mslp && p.mslp !== 'null' ? `<tr><td style="color:#8a97a5">Pressure</td><td><b>${p.mslp} mb</b></td></tr>` : ''}
+     ${p.fldatelbl || p.datelbl ? `<tr><td style="color:#8a97a5">Valid</td><td>${p.fldatelbl || p.datelbl}</td></tr>` : ''}</table>
+     <small>NHC forecast</small>`).addTo(map);
+});
+$('tropbtn').onclick = () => {
+  toggles.TROP = !toggles.TROP;
+  $('tropbtn').classList.toggle('on', toggles.TROP);
+  for (const l of TROP_LAYERS) map.getLayer(l) && map.setLayoutProperty(l, 'visibility', toggles.TROP ? 'visible' : 'none');
+  legendExtra();
+};
+
+/* ---------- special weather statements ---------- */
+async function loadSPS() {
+  try {
+    const j = await (await fetch('https://api.weather.gov/alerts/active?event=Special%20Weather%20Statement', { headers: { accept: 'application/geo+json' } })).json();
+    const feats = (j.features || []).filter(f => f.geometry).map(f => ({ type: 'Feature', geometry: f.geometry,
+      properties: { headline: f.properties.headline || 'Special Weather Statement', area: f.properties.areaDesc || '',
+        ends: f.properties.ends || f.properties.expires, desc: (f.properties.description || '').slice(0, 1200) } }));
+    if (!map.getSource('sps')) {
+      const vis = { visibility: toggles.ALERTS ? 'visible' : 'none' };
+      map.addSource('sps', { type: 'geojson', data: { type: 'FeatureCollection', features: feats } });
+      map.addLayer({ id: 'sps-fill', type: 'fill', source: 'sps', layout: vis,
+        paint: { 'fill-color': '#ffe4b5', 'fill-opacity': .18 } }, labelAnchor());
+      map.addLayer({ id: 'sps-line', type: 'line', source: 'sps', layout: vis,
+        paint: { 'line-color': '#ffe4b5', 'line-width': 1.6, 'line-opacity': .9 } }, labelAnchor());
+    } else map.getSource('sps').setData({ type: 'FeatureCollection', features: feats });
+  } catch { /* keep last data */ }
+}
+map.on('click', 'sps-fill', e => {
+  const p = e.features[0].properties;
+  new maplibregl.Popup({ maxWidth: '320px' }).setLngLat(e.lngLat).setHTML(
+    `<b>Special Weather Statement</b><br><small>${p.area}</small>
+     <div style="font-size:12px;color:#8a97a5">until ${new Date(p.ends).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</div>
+     <div style="max-height:150px;overflow-y:auto;margin-top:6px;font-size:12.5px;line-height:1.4">${p.desc.replace(/\n\n/g, '<br><br>')}</div>`).addTo(map);
+});
+/* ---------- SPC Day 1 categorical outlook + mesoscale discussions ---------- */
+const SPC_URL = 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer/1/query?where=1%3D1&outFields=*&f=geojson';
+const MCD_URL = 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query?where=1%3D1&outFields=*&f=geojson';
+async function loadGeo(key, url, addLayers) {
+  try {
+    const j = await (await fetch(url)).json();
+    const fc = { type: 'FeatureCollection', features: j.features || [] };
+    if (!map.getSource(key)) { map.addSource(key, { type: 'geojson', data: fc }); addLayers(); }
+    else map.getSource(key).setData(fc);
+  } catch { /* keep last data */ }
+}
+const loadSPC = () => loadGeo('spc', SPC_URL, () => {
+  const vis = { visibility: toggles.SPC ? 'visible' : 'none' };
+  map.addLayer({ id: 'spc-fill', type: 'fill', source: 'spc', layout: vis,
+    paint: { 'fill-color': ['get', 'fill'], 'fill-opacity': .22 } }, labelAnchor());
+  map.addLayer({ id: 'spc-line', type: 'line', source: 'spc', layout: vis,
+    paint: { 'line-color': ['get', 'stroke'], 'line-width': 1.5, 'line-opacity': .9 } }, labelAnchor());
+});
+const loadMCD = () => loadGeo('mcd', MCD_URL, () => {
+  const vis = { visibility: toggles.MCD ? 'visible' : 'none' };
+  map.addLayer({ id: 'mcd-fill', type: 'fill', source: 'mcd', layout: vis,
+    paint: { 'fill-color': '#ff9500', 'fill-opacity': .1 } }, labelAnchor());
+  map.addLayer({ id: 'mcd-line', type: 'line', source: 'mcd', layout: vis,
+    paint: { 'line-color': '#ff9500', 'line-width': 2, 'line-dasharray': [3, 2] } }, labelAnchor());
+});
+function geoToggle(key, btn, layers, loader) {
+  toggles[key] = !toggles[key];
+  $(btn).classList.toggle('on', toggles[key]);
+  if (toggles[key] && !map.getSource(key.toLowerCase())) loader();
+  for (const l of layers) map.getLayer(l) && map.setLayoutProperty(l, 'visibility', toggles[key] ? 'visible' : 'none');
+}
+$('spcbtn').onclick = () => geoToggle('SPC', 'spcbtn', ['spc-fill', 'spc-line'], loadSPC);
+$('mcdbtn').onclick = () => geoToggle('MCD', 'mcdbtn', ['mcd-fill', 'mcd-line'], loadMCD);
+map.on('click', 'spc-fill', e => {
+  if (map.queryRenderedFeatures(e.point, { layers: ['mcd-fill'].filter(l => map.getLayer(l)) }).length) return; // MCD popup wins
+  const risks = e.features.map(f => f.properties);
+  const top = risks.reduce((a, b) => (b.dn > a.dn ? b : a));
+  new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(e.lngLat).setHTML(
+    `<b>SPC Day 1 Outlook</b>
+     <div style="margin-top:6px;font-size:13px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${top.fill};border:1px solid ${top.stroke};margin-right:6px"></span>${top.label2}</div>
+     <div style="font-size:11.5px;color:#8a97a5;margin-top:4px">valid until ${top.expire.slice(6, 8)}/${top.expire.slice(4, 6)} ${top.expire.slice(8, 10)}:${top.expire.slice(10)} UTC</div>`).addTo(map);
+});
+map.on('click', 'mcd-fill', async e => {
+  const p = e.features[0].properties;
+  const num = (p.name || '').match(/\d+/)?.[0];
+  const pop = new maplibregl.Popup({ maxWidth: '360px' }).setLngLat(e.lngLat)
+    .setHTML(`<b>${p.name}</b><br><small>${p.folderpath || ''}</small><div style="font-size:12px;color:#8a97a5;margin-top:4px">loading discussion…</div>`).addTo(map);
+  try {
+    const t = await (await fetch('https://mesonet.agron.iastate.edu/cgi-bin/afos/retrieve.py?pil=SWOMCD&limit=15&fmt=text')).text();
+    const prod = t.split(/\x01|\n(?=\d{3}\s*\nACUS)/).find(x => num && x.includes(`Mesoscale Discussion ${num}`));
+    const body = prod ? prod.slice(prod.indexOf('Mesoscale Discussion')).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) : null;
+    pop.setHTML(`<b>${p.name}</b>
+      <div style="max-height:260px;overflow-y:auto;margin-top:6px;font-size:12px;line-height:1.45;white-space:pre-wrap">${body || 'Full text unavailable — see '}${body ? '' : `<a href="${p.popupinfo}" target="_blank" style="color:#1a8cff">SPC</a>`}</div>`);
+  } catch { /* header popup stays */ }
+});
+for (const l of ['storm-cells', 'sps-fill', 'trop-points', 'trop-region-fill', 'mcd-fill', 'spc-fill']) {
+  map.on('mouseenter', l, () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', l, () => map.getCanvas().style.cursor = '');
+}
+
+/* ---------- Open-Meteo screen-space grid (temp/humidity/pressure/precip heatmaps + wind field) ---------- */
+// ponytail: point-grid + bilinear field, not raster tiles — swap in precomputed GFS tiles if quality matters
+const NX = 16, NY = 10;
+const gcv = $('gridcv'), gctx = gcv.getContext('2d');
+const wcv = $('windcv'), wctx = wcv.getContext('2d');
+const off = document.createElement('canvas'); off.width = NX; off.height = NY;
+let grid = null, gridAbort = null, moving = false;
+
+/* value → zoom.earth palette color, using their exact ranges:
+   temperature −89…60 °C · humidity 0…102 % · pressure 859.5…1085 hPa · wind (v+63.5)/127.5 m/s */
+const GRIDMAP = {
+  TEMP:     { pal: 'temperature',   f: g => ((g.t - 32) * 5 / 9 + 89) / 149, label: g => Math.round(g.t) + '°', unit: v => Math.round(v) + ' °F' },
+  HUMIDITY: { pal: 'humidity',      f: g => g.rh / 102,                      label: g => Math.round(g.rh) + '%', unit: v => Math.round(v) + ' %' },
+  PRESSURE: { pal: 'pressure',      f: g => (g.p - 859.5) / 225.5,           label: g => Math.round(g.p), unit: v => Math.round(v) + ' hPa' },
+  PRECIP:   { pal: 'precipitation', f: g => radarIdx(Math.min(1, g.pr / 12)) / 511, label: g => g.pr > 0 ? g.pr.toFixed(1) : '', unit: v => (v / 25.4).toFixed(2) + ' in/h' },
+};
+const GRID_LAYERS = ['TEMP', 'HUMIDITY', 'PRESSURE', 'PRECIP', 'WIND'];
+
+async function fetchGrid() {
+  if (gridAbort) gridAbort.abort();
+  gridAbort = new AbortController();
+  const lats = [], lons = [], w = innerWidth, h = innerHeight;
+  for (let y = 0; y < NY; y++) for (let x = 0; x < NX; x++) {
+    const ll = map.unproject([(x + .5) * w / NX, (y + .5) * h / NY]);
+    lats.push(Math.max(-85, Math.min(85, ll.lat)).toFixed(2));
+    lons.push((((ll.lng + 180) % 360 + 360) % 360 - 180).toFixed(2));
+  }
+  spin(true);
+  try {
+    const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}&current=temperature_2m,wind_speed_10m,wind_direction_10m,relative_humidity_2m,pressure_msl,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph`, { signal: gridAbort.signal })).json();
+    const arr = Array.isArray(j) ? j : [j];
+    grid = {
+      tl: map.unproject([0, 0]), br: map.unproject([w, h]),
+      pts: arr.map((p, i) => ({ lat: +lats[i], lon: +lons[i], t: p.current.temperature_2m, ws: p.current.wind_speed_10m,
+        wd: p.current.wind_direction_10m, rh: p.current.relative_humidity_2m, p: p.current.pressure_msl, pr: p.current.precipitation }))
+    };
+    paintGrid();
+    drawGrid();
+  } catch (e) { if (e.name !== 'AbortError') err('Weather grid failed: ' + e.message); }
+  finally { spin(false); }
+}
+function paintGrid() {
+  const gm = GRIDMAP[mainLayer]; if (!gm || !grid) return;
+  const img = off.getContext('2d').createImageData(NX, NY);
+  grid.pts.forEach((g, i) => {
+    const c = lutColor(gm.pal, gm.f(g));
+    img.data.set([...c, mainLayer === 'PRECIP' && g.pr <= 0 ? 0 : 255], i * 4);
+  });
+  off.getContext('2d').putImageData(img, 0, 0);
+}
+
+function gridRect() { const p0 = map.project(grid.tl), p1 = map.project(grid.br); return [p0.x, p0.y, p1.x - p0.x, p1.y - p0.y]; }
+function sizeCanvas(c, x) {
+  const dpr = devicePixelRatio || 1;
+  c.width = innerWidth * dpr; c.height = innerHeight * dpr;
+  c.style.width = innerWidth + 'px'; c.style.height = innerHeight + 'px';
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function drawGrid() {
+  sizeCanvas(gcv, gctx);
+  if (mainLayer === 'WIND') { // zoom.earth dims the basemap under the wind animation
+    gctx.fillStyle = 'rgba(8,12,18,.45)'; gctx.fillRect(0, 0, innerWidth, innerHeight);
+    return;
+  }
+  const gm = GRIDMAP[mainLayer];
+  if (!grid || !gm) return;
+  const [rx, ry, rw, rh] = gridRect();
+  gctx.globalAlpha = 0.62; gctx.imageSmoothingEnabled = true; gctx.imageSmoothingQuality = 'high';
+  gctx.drawImage(off, rx, ry, rw, rh);
+  gctx.globalAlpha = 1; gctx.fillStyle = '#fff'; gctx.font = '600 12px "Nunito Sans",system-ui'; gctx.textAlign = 'center';
+  gctx.shadowColor = 'rgba(0,0,0,.8)'; gctx.shadowBlur = 4;
+  grid.pts.forEach((g, i) => {
+    if ((i % NX) % 2 || Math.floor(i / NX) % 2) return;
+    const lbl = gm.label(g); if (!lbl) return;
+    const p = map.project([g.lon, g.lat]);
+    if (p.x > -20 && p.x < innerWidth + 20 && p.y > -20 && p.y < innerHeight + 20) gctx.fillText(lbl, p.x, p.y + 4);
+  });
+  gctx.shadowBlur = 0;
+}
+
+/* wind: particle flow tinted by the zoom.earth wind-speed ramp */
+let particles = [];
+function windAt(x, y) {
+  const [rx, ry, rw, rh] = gridRect();
+  const fx = Math.max(0, Math.min(NX - 1.001, (x - rx) / rw * NX - .5));
+  const fy = Math.max(0, Math.min(NY - 1.001, (y - ry) / rh * NY - .5));
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), kx = fx - x0, ky = fy - y0;
+  let u = 0, v = 0, s = 0;
+  for (const [dx, dy, w] of [[0,0,(1-kx)*(1-ky)],[1,0,kx*(1-ky)],[0,1,(1-kx)*ky],[1,1,kx*ky]]) {
+    const g = grid.pts[(y0 + dy) * NX + x0 + dx], a = (g.wd + 180) * Math.PI / 180;
+    u += w * g.ws * Math.sin(a); v += w * -g.ws * Math.cos(a); s += w * g.ws;
+  }
+  return { vx: u * 0.09, vy: v * 0.09, ws: s };
+}
+const windColor = mph => { const [r, g, b] = lutColor('wind-speed', (mph * 0.447 + 63.5) / 127.5); return `rgb(${r},${g},${b})`; };
+function spawn() { return { x: Math.random() * innerWidth, y: Math.random() * innerHeight, age: Math.random() * 90 | 0 }; }
+function stepParticles() {
+  const n = Math.min(600, Math.round(innerWidth * innerHeight / 3200));
+  while (particles.length < n) particles.push(spawn());
+  wctx.globalCompositeOperation = 'destination-in';
+  wctx.fillStyle = 'rgba(0,0,0,0.93)'; wctx.fillRect(0, 0, innerWidth, innerHeight);
+  wctx.globalCompositeOperation = 'source-over';
+  wctx.lineWidth = 2; wctx.lineCap = 'round';
+  for (const p of particles) {
+    const w = windAt(p.x, p.y);
+    const nx2 = p.x + w.vx, ny2 = p.y + w.vy;
+    wctx.strokeStyle = windColor(w.ws);
+    wctx.beginPath(); wctx.moveTo(p.x, p.y); wctx.lineTo(nx2, ny2); wctx.stroke();
+    p.x = nx2; p.y = ny2; p.age++;
+    if (p.age > 110 || p.x < 0 || p.x > innerWidth || p.y < 0 || p.y > innerHeight || w.ws < .3) Object.assign(p, spawn(), { age: 0 });
+  }
+}
+(function tick() {
+  if (mainLayer === 'WIND' && grid && !moving) stepParticles();
+  requestAnimationFrame(tick);
+})();
+
+map.on('movestart', () => { moving = true; sizeCanvas(wcv, wctx); particles = []; });
+map.on('move', drawGrid);
+let gridDeb;
+map.on('moveend', () => {
+  moving = false;
+  if (GRID_LAYERS.includes(mainLayer)) { clearTimeout(gridDeb); gridDeb = setTimeout(fetchGrid, 400); }
+});
+addEventListener('resize', () => { drawGrid(); sizeCanvas(wcv, wctx); });
+
+/* ---------- cursor tooltip + coordinates (zoom.earth style) ---------- */
+const fmtDMS = (v, pos, neg) => {
+  const h = v < 0 ? neg : pos, a = Math.abs(v);
+  const d = Math.floor(a), m = Math.floor((a - d) * 60), s = Math.round(((a - d) * 60 - m) * 60);
+  return `${d}° ${m}′ ${s}″ ${h}`;
+};
+function radarValueAt(lngLat) { // sample the recolored frame's grayscale cache at the cursor
+  const fr = frames.RADAR; if (!fr || !fr.length) return null;
+  const f = fr[Math.min(Math.round(pos), fr.length - 1)];
+  if (!f || (!f.rv && !f.iem)) return null;
+  const z = Math.max(0, Math.min(f.iem ? 9 : 8, Math.floor(map.getZoom())));
+  const n = Math.pow(2, z);
+  const xt = (lngLat.lng + 180) / 360 * n;
+  const la = lngLat.lat * Math.PI / 180;
+  const yt = (1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2 * n;
+  const tx = Math.floor(xt), ty = Math.floor(yt);
+  if (ty < 0 || ty >= n) return null;
+  const key = 'zr://' + (f.iem ? iemTilePath(f) : rvTilePath(f)).replace('{z}', z).replace('{x}', ((tx % n) + n) % n).replace('{y}', ty);
+  const t = tileCache.get(key); if (!t) return null;
+  const px = Math.min(t.n - 1, Math.floor((xt - tx) * t.n)), py = Math.min(t.n - 1, Math.floor((yt - ty) * t.n));
+  const v = t.val[py * t.n + px];
+  if (!v) return { dbz: null };
+  return { dbz: v / 2 - 32 };
+}
+function gridValueAt(pt) {
+  if (!grid) return null;
+  const [rx, ry, rw, rh] = gridRect();
+  const gx = Math.round((pt.x - rx) / rw * NX - .5), gy = Math.round((pt.y - ry) / rh * NY - .5);
+  if (gx < 0 || gx >= NX || gy < 0 || gy >= NY) return null;
+  return grid.pts[gy * NX + gx];
+}
+map.on('mousemove', e => {
+  $('coords').textContent = `${fmtDMS(e.lngLat.lat, 'N', 'S')}  ${fmtDMS(e.lngLat.lng, 'E', 'W')}`;
+  const tip = $('tip');
+  let html = '';
+  if (mainLayer === 'RADAR') {
+    const v = radarValueAt(e.lngLat);
+    if (v) {
+      if (v.dbz == null) html = `No Precipitation<small>0 in/h</small>`;
+      else { // Marshall–Palmer dBZ → rain rate
+        const mmh = Math.pow(Math.pow(10, v.dbz / 10) / 200, 1 / 1.6);
+        const lvl = v.dbz >= 50 ? 'Extreme' : v.dbz >= 40 ? 'Heavy' : v.dbz >= 25 ? 'Moderate' : 'Light';
+        html = `${lvl} Precipitation<small>${(mmh / 25.4).toFixed(2)} in/h · ${Math.round(v.dbz)} dBZ</small>`;
+      }
+    }
+  } else if (GRIDMAP[mainLayer] || mainLayer === 'WIND') {
+    const g = gridValueAt(e.point);
+    if (g) html = mainLayer === 'WIND' ? `Wind<small>${Math.round(g.ws)} mph ${compass((g.wd + 180) % 360)}</small>`
+      : mainLayer === 'TEMP' ? `Temperature<small>${Math.round(g.t)} °F</small>`
+      : mainLayer === 'HUMIDITY' ? `Humidity<small>${Math.round(g.rh)} %</small>`
+      : mainLayer === 'PRESSURE' ? `Pressure<small>${Math.round(g.p)} hPa</small>`
+      : `Precipitation<small>${(g.pr / 25.4).toFixed(2)} in/h</small>`;
+  }
+  if (html) { tip.innerHTML = html; tip.style.display = 'block'; tip.style.left = e.point.x + 'px'; tip.style.top = e.point.y + 'px'; }
+  else tip.style.display = 'none';
+});
+map.getCanvas().addEventListener('mouseleave', () => { $('tip').style.display = 'none'; $('coords').textContent = ''; });
+
+/* ---------- layer switching ---------- */
+const LEGENDS = { // [title, palette name | css, min, mid, max]
+  RADAR: ['Radar dBZ', 'BR', '0', '35', '75'],
+  PRECIP: ['Precipitation', 'precipitation', 'Light', 'Moderate', 'Heavy'],
+  SATELLITE: ['Satellite', 'linear-gradient(90deg,#1a2a3a,#8aa,#eee)', '', '', 'Clouds'],
+  TEMP: ['Temperature °F', 'temperature', '-40°', '30°', '110°'],
+  WIND: ['Wind mph', 'wind-speed', 'Calm', '', '60+'],
+  HUMIDITY: ['Humidity %', 'humidity', '0', '50', '100'],
+  PRESSURE: ['Pressure hPa', 'pressure', '860', '1010', '1085'],
+};
+function setLayer(name) {
+  if (name !== mainLayer) {
+    const keepPlaying = playing;
+    setPlaying(false); clearFrames();
+    mainLayer = name;
+    const timed = name === 'RADAR' || name === 'SATELLITE';
+    $('timeline').style.display = timed ? 'flex' : 'none';
+    if (timed) { setupTimeline(); if (keepPlaying) setPlaying(true); else setLive(true); }
+    if (GRID_LAYERS.includes(name)) { if (grid) paintGrid(); fetchGrid(); }
+    sizeCanvas(wcv, wctx); particles = [];
+  }
+  for (const l of ['storm-tracks', 'storm-ticks', 'storm-cells'])
+    map.getLayer(l) && map.setLayoutProperty(l, 'visibility', mainLayer === 'RADAR' && toggles.STORMS ? 'visible' : 'none');
+  legendExtra();
+  const l = LEGENDS[name];
+  $('legendtitle').textContent = l[0];
+  $('legendbar').style.background = l[1] === 'BR' ? brCSS() : LUT[l[1]] ? lutCSS(l[1]) : l[1];
+  $('lmin').textContent = l[2]; $('lmid').textContent = l[3]; $('lmax').textContent = l[4];
+  drawGrid(); writeHash();
+  document.querySelectorAll('.row[data-l]').forEach(b => b.classList.toggle('on', b.dataset.l === mainLayer));
+}
+document.querySelectorAll('.row[data-l]').forEach(b => b.onclick = () => setLayer(b.dataset.l));
+$('panel').querySelector('h2').onclick = () => $('panel').classList.toggle('closed');
+if (matchMedia('(max-width:640px),(pointer:coarse)').matches) $('panel').classList.add('closed'); // ponytail: boot-collapsed on mobile to save radar space; h2 tap reopens
+$('ltgbtn').onclick = () => {
+  toggles.LTG = !toggles.LTG;
+  $('ltgbtn').classList.toggle('on', toggles.LTG);
+  for (const l of ['ltg', 'ltg-glow'])
+    map.getLayer(l) && map.setLayoutProperty(l, 'visibility', toggles.LTG ? 'visible' : 'none');
+  legendExtra();
+};
+$('stormbtn').onclick = () => {
+  toggles.STORMS = !toggles.STORMS;
+  $('stormbtn').classList.toggle('on', toggles.STORMS);
+  for (const l of ['storm-tracks', 'storm-ticks', 'storm-cells'])
+    map.getLayer(l) && map.setLayoutProperty(l, 'visibility', mainLayer === 'RADAR' && toggles.STORMS ? 'visible' : 'none');
+  legendExtra();
+};
+function legendExtra() {
+  let h = '';
+  if (mainLayer === 'RADAR' && toggles.STORMS) h +=
+    `<div class="lsec">Storm cells</div><div class="lgrid">
+     <span><i style="background:#8fb6d8"></i>cell</span><span><i style="background:#ffd35c"></i>hail</span>
+     <span><i style="background:#ff7a3d"></i>meso</span><span><i style="background:#ff2d55"></i>tornado</span></div>`;
+  if (mainLayer === 'RADAR' && toggles.LTG) h +=
+    `<div class="lsec">Lightning</div><div class="bar"></div>
+     <div style="display:flex;justify-content:space-between"><span>now</span><span>5 min</span></div>`;
+  if (toggles.TROP) h +=
+    `<div class="lsec">Tropical outlook</div><div class="lgrid">
+     <span><i style="background:#ffd35c"></i>low</span><span><i style="background:#ff9a3d"></i>medium</span>
+     <span><i style="background:#ff4d5e"></i>high</span><span><i style="background:#ffffff"></i>cone</span></div>`;
+  $('lx').innerHTML = h;
+}
+/* radar site picker */
+let sitesLoaded = false;
+$('radbtn').onclick = async () => {
+  const s = $('sites'), open = s.style.display !== 'block';
+  s.style.display = open ? 'block' : 'none';
+  if (open && !sitesLoaded) {
+    try {
+      const j = await (await fetch('https://mesonet.agron.iastate.edu/geojson/network/NEXRAD.geojson')).json();
+      sitesLoaded = true;
+      const feats = j.features.sort((a, b) => (a.properties.state + a.id).localeCompare(b.properties.state + b.id));
+      $('sitelist').innerHTML = feats.map(f =>
+        `<div data-ll="${f.geometry.coordinates}"><b>K${f.id}</b><small>${f.properties.sname}, ${f.properties.state}</small></div>`).join('');
+      $('sitelist').querySelectorAll('div').forEach(el => el.onclick = () => {
+        const [lon, lat] = el.dataset.ll.split(',');
+        map.flyTo({ center: [+lon, +lat], zoom: 8.2, duration: 1800 });
+        s.style.display = 'none';
+      });
+    } catch { err('Radar site list failed to load'); }
+  }
+  if (open) $('sitefilter').focus();
+};
+$('sitefilter').oninput = e => {
+  const q = e.target.value.toLowerCase();
+  $('sitelist').querySelectorAll('div').forEach(el => el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
+};
+document.addEventListener('click', e => {
+  if (!$('sites').contains(e.target) && e.target !== $('radbtn')) $('sites').style.display = 'none';
+});
+
+/* ---------- click → point forecast ---------- */
+const WMOE = c => c === 0 ? ['☀️','Clear'] : c === 1 ? ['🌤️','Mostly clear'] : c === 2 ? ['⛅','Partly cloudy'] : c === 3 ? ['☁️','Overcast']
+  : c <= 48 ? ['🌫️','Fog'] : c <= 57 ? ['🌦️','Drizzle'] : c <= 67 ? ['🌧️','Rain'] : c <= 77 ? ['🌨️','Snow']
+  : c <= 82 ? ['🌦️','Showers'] : c <= 86 ? ['🌨️','Snow showers'] : ['⛈️','Thunderstorm'];
+map.on('click', async e => {
+  const hit = map.queryRenderedFeatures(e.point, { layers: ['storm-cells', 'sps-fill', 'trop-points', 'trop-region-fill', 'mcd-fill', 'spc-fill'].filter(l => map.getLayer(l)) });
+  if (hit.length) return;
+  const { lat, lng } = e.lngLat;
+  spin(true);
+  try {
+    const [j, place, al] = await Promise.all([
+      (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m&forecast_hours=24&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`)).json(),
+      fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`).then(r => r.json()).catch(() => null),
+      toggles.ALERTS ? fetch(`https://api.weather.gov/alerts/active?point=${lat.toFixed(3)},${lng.toFixed(3)}`, { headers: { accept: 'application/geo+json' } }).then(r => r.json()).catch(() => null) : null
+    ]);
+    const c = j.current, d = j.daily, [emo, desc] = WMOE(c.weather_code);
+    const name = place && (place.city || place.locality) ? `${place.city || place.locality}, ${place.principalSubdivisionCode?.split('-')[1] || place.countryCode}` : `${lat.toFixed(2)}, ${lng.toFixed(2)}`;
+    const hs = j.hourly.temperature_2m, hmin = Math.min(...hs), hmax = Math.max(...hs);
+    const pts = hs.map((t, i) => `${(i / (hs.length - 1) * 288).toFixed(1)},${(50 - (hmax === hmin ? 25 : (t - hmin) / (hmax - hmin) * 44 + 3)).toFixed(1)}`).join(' ');
+    const alerts = (al?.features || []).map(f => f.properties);
+    const esc = s => (s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const alertHTML = alerts.length ? `<div class="warns">${alerts.map(a => `
+      <div class="warn" style="border-color:${alertChipColor(a.event)}">
+        <details open>
+          <summary>
+            <b>${a.event}</b>
+            <small>until ${new Date(a.ends || a.expires).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</small>
+          </summary>
+          <div class="body">${esc(a.headline)}
+${esc(a.description)}${a.instruction ? `<i>${esc(a.instruction)}</i>` : ''}<i>${esc(a.senderName)} · ${a.severity} · ${a.certainty}</i></div>
+        </details>
+      </div>`).join('')}</div>` : '';
+    $('fcbody').innerHTML = `
+      <h3>${name}</h3><div class="sub">${desc} · Humidity ${c.relative_humidity_2m}% · Wind ${Math.round(c.wind_speed_10m)} mph</div>
+      ${alertHTML}
+      <div class="cur"><span class="emo">${emo}</span><b>${Math.round(c.temperature_2m)}°</b><span class="desc">Feels like<br>${Math.round(c.apparent_temperature)}°</span></div>
+      <svg viewBox="0 0 288 56" preserveAspectRatio="none">
+        <polyline points="${pts}" fill="none" stroke="#1a8cff" stroke-width="2"/>
+        <polygon points="0,56 ${pts} 288,56" fill="#1a8cff22"/>
+        <text x="2" y="10" fill="#8a97a5" font-size="9">next 24 h · ${Math.round(hmin)}°–${Math.round(hmax)}°</text>
+      </svg>
+      <table>${d.time.map((t, i) => `<tr>
+        <td>${i === 0 ? 'Today' : new Date(t + 'T12:00').toLocaleDateString([], { weekday: 'short' })}</td>
+        <td class="emo">${WMOE(d.weather_code[i])[0]}</td>
+        <td class="pp">${d.precipitation_probability_max[i] > 5 ? '💧' + d.precipitation_probability_max[i] + '%' : ''}</td>
+        <td class="rng"><b>${Math.round(d.temperature_2m_max[i])}°</b> <span>${Math.round(d.temperature_2m_min[i])}°</span></td>
+      </tr>`).join('')}</table>`;
+    $('fc').style.display = 'block';
+  } catch (e2) { err('Forecast failed: ' + e2.message); }
+  finally { spin(false); }
+});
+$('fc').querySelector('.x').onclick = () => $('fc').style.display = 'none';
+
+/* ---------- search (Photon geocoder) ---------- */
+let searchDeb, searchAbort, hits = [], sel = -1, searchMarker = null;
+$('searchbtn').onclick = () => {
+  const w = $('searchwrap');
+  const open = w.style.display !== 'block';
+  w.style.display = open ? 'block' : 'none';
+  if (open) $('search').focus(); else $('results').style.display = 'none';
+};
+const TYPE_ICO = { city: '🏙️', town: '🏘️', village: '🏘️', hamlet: '🏘️', country: '🌍', state: '🗺️', county: '🗺️', street: '🛣️', house: '🏠', district: '🏙️' };
+const fmtHit = p => ({
+  title: p.name || [p.housenumber, p.street].filter(Boolean).join(' ') || '?',
+  sub: [p.city, p.state || p.county, p.country].filter(x => x && x !== p.name).slice(0, 2).join(', '),
+  ico: TYPE_ICO[p.type] || '📍'
+});
+function renderHits() {
+  const r = $('results');
+  r.innerHTML = hits.length
+    ? hits.map((f, i) => { const v = fmtHit(f.properties);
+        return `<div class="${i === sel ? 'sel' : ''}" data-i="${i}"><span class="ico">${v.ico}</span><div>${v.title}<small>${v.sub}</small></div></div>`; }).join('')
+    : '<div class="empty"><small>No results</small></div>';
+  r.style.display = 'block';
+  r.querySelectorAll('div[data-i]').forEach(el => el.onmousedown = e => { e.preventDefault(); pick(+el.dataset.i); });
+}
+function pick(i) {
+  const f = hits[i]; if (!f) return;
+  const p = f.properties, [lon, lat] = f.geometry.coordinates, v = fmtHit(p);
+  $('search').value = v.title + (v.sub ? ', ' + v.sub : '');
+  $('results').style.display = 'none'; $('search').blur(); $('searchwrap').style.display = 'none';
+  if (searchMarker) searchMarker.remove();
+  searchMarker = new maplibregl.Marker({ color: '#0a84ff' }).setLngLat([lon, lat]).addTo(map);
+  if (p.extent) {
+    const [w, n, e, s] = p.extent;
+    map.fitBounds([[w, s], [e, n]], { padding: 90, duration: 2000, maxZoom: 14 });
+  } else map.flyTo({ center: [lon, lat], zoom: { country: 4, state: 6, county: 8, city: 10, town: 11, village: 13, street: 15, house: 16 }[p.type] || 11, duration: 2000 });
+}
+async function doSearch(q) {
+  if (searchAbort) searchAbort.abort();
+  const ll = q.match(/^(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)$/);
+  if (ll && Math.abs(+ll[1]) <= 90 && Math.abs(+ll[2]) <= 180) {
+    hits = [{ properties: { name: `${(+ll[1]).toFixed(3)}, ${(+ll[2]).toFixed(3)}`, type: 'locality' }, geometry: { coordinates: [+ll[2], +ll[1]] } }];
+    sel = 0; renderHits(); return;
+  }
+  searchAbort = new AbortController();
+  try {
+    const c = map.getCenter();
+    const j = await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&lat=${c.lat.toFixed(2)}&lon=${c.lng.toFixed(2)}`, { signal: searchAbort.signal })).json();
+    const seen = new Set();
+    hits = (j.features || []).filter(f => {
+      const v = fmtHit(f.properties), k = v.title + '|' + v.sub;
+      return seen.has(k) ? false : (seen.add(k), true);
+    }).slice(0, 6);
+    sel = hits.length ? 0 : -1; renderHits();
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      try {
+        const j = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6`)).json();
+        hits = (j.results || []).map(p => ({ properties: { name: p.name, state: p.admin1, country: p.country, type: 'city' }, geometry: { coordinates: [p.longitude, p.latitude] } }));
+        sel = hits.length ? 0 : -1; renderHits();
+      } catch { /* both geocoders down */ }
+    }
+  }
+}
+$('search').oninput = e => {
+  clearTimeout(searchDeb);
+  const q = e.target.value.trim();
+  if (q.length < 2) { $('results').style.display = 'none'; hits = []; sel = -1; return; }
+  searchDeb = setTimeout(() => doSearch(q), 250);
+};
+$('search').onkeydown = e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!hits.length) return;
+    sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % hits.length;
+    renderHits();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const q = e.target.value.trim();
+    if ($('results').style.display !== 'none' && hits.length) pick(Math.max(0, sel));
+    else if (q.length >= 2) { clearTimeout(searchDeb); doSearch(q).then(() => pick(0)); }
+  } else if (e.key === 'Escape') { $('results').style.display = 'none'; $('searchwrap').style.display = 'none'; }
+};
+document.addEventListener('click', e => {
+  if (!$('searchwrap').contains(e.target) && e.target !== $('searchbtn') && !$('searchbtn').contains(e.target)) $('results').style.display = 'none';
+});
+$('geo2').onclick = () => navigator.geolocation.getCurrentPosition(
+  p => map.flyTo({ center: [p.coords.longitude, p.coords.latitude], zoom: 9, duration: 2200 }),
+  () => err('Location unavailable'));
+
+/* ---------- boot ---------- */
+sizeCanvas(wcv, wctx);
+map.on('load', async () => {
+  await loadLUTs(); // palettes must be ready before the zr protocol recolors tiles
+  await applyBasemap();
+  loadAlerts(); setInterval(loadAlerts, 5 * 60 * 1000);
+  loadStorms(); setInterval(loadStorms, 2 * 60 * 1000);
+  loadSPS(); setInterval(loadSPS, 5 * 60 * 1000);
+  ltgLayers(); ltgConnect(); setInterval(drawLtg, 400); // fast tick so the flash decay animates
+  loadTropical(); setInterval(loadTropical, 15 * 60 * 1000);
+  await loadNowcast();
+  setInterval(() => loadNowcast().then(() => {
+    if ((mainLayer === 'RADAR' || mainLayer === 'SATELLITE') && playing) { clearFrames(); setupTimeline(); }
+  }), 10 * 60 * 1000);
+  const target = mainLayer; mainLayer = ''; // force full layer setup on boot
+  setLayer(target);
+  if (target === 'RADAR' || target === 'SATELLITE') setLive(true); // default: live mode
+  // touchscreen laid out wide = Chrome "Desktop site" is on, ignoring the viewport meta.
+  // ponytail: maxTouchPoints (hardware) survives desktop-site's UA/pointer spoofing; no pointer:coarse gate
+  // (desktop-site can report pointer:fine). Rare false positive on a wide touchscreen laptop — mild hint, fine.
+  if (navigator.maxTouchPoints > 0 && document.documentElement.clientWidth > 700)
+    err('Turn OFF "Desktop site" in the Chrome ⋮ menu for the mobile layout');
+});
+/* ?debug — remote diagnosis overlay: what the device actually reports for viewport/canvas */
+if (/\bdebug\b/.test(location.search)) {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:0;left:0;z-index:99;background:#000c;color:#0f0;font:11px/1.4 monospace;padding:6px;white-space:pre;pointer-events:none';
+  const upd = () => { const cv = document.querySelector('#map canvas.maplibregl-canvas');
+    d.textContent = `inner ${innerWidth}×${innerHeight}\nclientW ${document.documentElement.clientWidth}\ndpr ${devicePixelRatio}\ncanvas attr ${cv?.width}×${cv?.height}\ncanvas css ${cv?.style.width} ${cv?.style.height}\nvv ${visualViewport.width.toFixed(0)}×${visualViewport.height.toFixed(0)} s${visualViewport.scale.toFixed(2)}`; };
+  document.body.appendChild(d); upd(); setInterval(upd, 500);
+}
+</script>
+</body>
+</html>

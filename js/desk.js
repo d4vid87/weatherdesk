@@ -1,0 +1,101 @@
+// 01 Desk — current conditions, near-term forecast, alerts, AQI.
+import * as api from './api.js';
+import { settings, coords, configured, U, num, timeStr, dayStr, notify, every } from './app.js';
+
+let latestForecast = null;
+export const forecast = () => latestForecast;
+
+const $ = (id) => document.getElementById(id);
+
+const ICON = {
+  'clear-day': '☀️', 'clear-night': '🌙', 'cloudy': '☁️', 'foggy': '🌫️',
+  'partly-cloudy-day': '⛅', 'partly-cloudy-night': '☁️', 'possibly-rainy-day': '🌦️',
+  'possibly-rainy-night': '🌦️', 'possibly-sleet-day': '🌨️', 'possibly-sleet-night': '🌨️',
+  'possibly-snow-day': '🌨️', 'possibly-snow-night': '🌨️', 'possibly-thunderstorm-day': '⛈️',
+  'possibly-thunderstorm-night': '⛈️', 'rainy': '🌧️', 'sleet': '🌨️', 'snow': '❄️',
+  'thunderstorm': '⛈️', 'windy': '💨',
+};
+export const icon = (k) => ICON[k] || '·';
+
+export async function refreshDesk() {
+  if (!configured()) return;
+  const fc = await api.betterForecast();
+  latestForecast = fc;
+  renderCurrent(fc.current_conditions);
+  renderTenDay(fc.forecast.daily);
+  window.dispatchEvent(new CustomEvent('wd:forecast', { detail: fc }));
+}
+
+function renderCurrent(c) {
+  if (!c) return;
+  document.title = `${num(c.air_temperature)}${U.temp()} · WeatherDesk`;
+  if (c.wind_gust >= settings().windGustAlert) {
+    notify({
+      id: `gust-${Math.floor(c.time / 1800)}`, category: 'wind',
+      title: 'High wind', body: `Gust ${num(c.wind_gust, 1)} ${U.wind()}`,
+    });
+  }
+}
+
+function renderTenDay(daily = []) {
+  $('tenday').innerHTML = daily.slice(0, 10).map((d) => `<div class="tenday-row">
+      <span class="td-day">${dayStr(d.day_start_local)}</span>
+      <span class="td-icon">${icon(d.icon)}</span>
+      <span class="td-cond">${d.conditions || ''}</span>
+      <span class="td-pop">${num(d.precip_probability)}%</span>
+      <span class="td-hi">${num(d.air_temp_high)}°</span>
+      <span class="td-lo">${num(d.air_temp_low)}°</span>
+    </div>`).join('');
+}
+
+export async function refreshAlerts() {
+  if (coords().lat == null) return;
+  const j = await api.alerts();
+  const feats = j.features || [];
+  $('alerts').innerHTML = feats.length
+    ? feats.map((f) => {
+        const p = f.properties;
+        return `<div class="alert sev-${(p.severity || '').toLowerCase()}">
+          <div class="alert-head">${p.event} <span>${p.severity}</span></div>
+          <div class="alert-time">until ${new Date(p.ends || p.expires).toLocaleString()}</div>
+          <details><summary>details</summary><p>${(p.description || '').replace(/</g, '&lt;')}</p></details>
+        </div>`;
+      }).join('')
+    : '<div class="muted">No active alerts</div>';
+  feats.forEach((f) => notify({
+    id: f.properties.id, category: 'severe',
+    title: f.properties.event, body: f.properties.headline || '',
+  }));
+}
+
+export async function refreshAqi() {
+  if (coords().lat == null) return;
+  const j = await api.aqi();
+  const i = j.hourly.time.findIndex((t) => new Date(t) > new Date()) - 1;
+  const v = j.hourly.us_aqi[Math.max(i, 0)];
+  $('aqi-val').textContent = num(v);
+  $('aqi-label').textContent = aqiLabel(v);
+  $('aqi-val').className = `aqi-${aqiBand(v)}`;
+  $('aqi-detail').textContent = `PM2.5 ${num(j.hourly.pm2_5[Math.max(i, 0)], 1)} µg/m³`;
+}
+
+const aqiBand = (v) => (v <= 50 ? 'good' : v <= 100 ? 'mod' : v <= 150 ? 'usg' : v <= 200 ? 'bad' : 'vbad');
+const aqiLabel = (v) => ({ good: 'Good', mod: 'Moderate', usg: 'Unhealthy (sensitive)', bad: 'Unhealthy', vbad: 'Very unhealthy' }[aqiBand(v)]);
+
+export async function refreshObs() {
+  if (!configured()) return;
+  const j = await api.stationObs();
+  const o = j.obs?.[0];
+  if (!o) return;
+  // stn obs has no conditions/icon — keep the ones from the last better_forecast
+  const cc = latestForecast?.current_conditions;
+  renderCurrent({ ...o, conditions: cc?.conditions, icon: cc?.icon, time: o.timestamp });
+  window.dispatchEvent(new CustomEvent('wd:obs', { detail: o }));
+}
+
+export function initDesk() {
+  every('desk-forecast', 300, refreshDesk);
+  every('desk-obs', settings().refreshSec, refreshObs);
+  every('desk-alerts', 300, refreshAlerts);
+  every('desk-aqi', 1800, refreshAqi);
+}
