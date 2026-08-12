@@ -30,6 +30,16 @@ export function stationObs(id = settings().stationId) {
   return getJSON(`${SWD}/observations/stn/${id}?${qs({ token: settings().token, ...unitParams() })}`);
 }
 
+// obs_st tuple layout, per the Tempest UDP/REST reference. One copy: two drifting
+// copies of a positional index map is a silently-wrong chart.
+// ponytail: device history may come back in SI regardless of the unit params below —
+// unverified without a live token. If your imperial charts read metric, that's why.
+export const OBS = {
+  time: 0, windLull: 1, windAvg: 2, windGust: 3, windDir: 4, windInterval: 5,
+  press: 6, temp: 7, rh: 8, lux: 9, uv: 10, solar: 11, rain: 12, precipType: 13,
+  strikeDist: 14, strikes: 15, battery: 16, reportInterval: 17, dayRain: 18,
+};
+
 // history: epoch seconds range, device-level (1min buckets)
 export function deviceObs(deviceId, timeStart, timeEnd) {
   return getJSON(`${SWD}/observations/device/${deviceId}?${qs({

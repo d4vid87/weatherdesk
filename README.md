@@ -28,7 +28,9 @@ every call goes browser-direct to a free public API.
 ## Running it
 
 ```sh
-python3 -m http.server 8088 --bind 0.0.0.0 --directory ~/weatherdesk
+git clone https://github.com/d4vid87/weatherdesk
+cd weatherdesk
+python3 -m http.server 8088 --bind 0.0.0.0
 ```
 
 Open `http://<box>:8088`, then paste a WeatherFlow personal access token

@@ -10,8 +10,7 @@ const SVGNS = 'http://www.w3.org/2000/svg';
 let history = [];      // last 3h of device obs, for trends
 let consensus = null;  // model temp at this hour
 
-// obs_st tuple indices
-const I = { time: 0, windAvg: 2, windGust: 3, windDir: 4, press: 6, temp: 7, rh: 8, uv: 10, solar: 11, rain: 12, strikeDist: 14, strikes: 15, battery: 16 };
+const I = api.OBS;
 
 // ---------- hero ----------
 

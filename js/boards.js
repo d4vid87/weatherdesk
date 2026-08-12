@@ -8,8 +8,7 @@ import { forecast as deskForecast } from './desk.js';
 
 const $ = (id) => document.getElementById(id);
 const DAY = 86400;
-// obs_st tuple indices
-const I = { time: 0, windAvg: 2, windGust: 3, press: 6, temp: 7, rh: 8, uv: 10, rain: 12, strikes: 15, dayRain: 18 };
+const I = api.OBS;
 
 let history = [];
 
