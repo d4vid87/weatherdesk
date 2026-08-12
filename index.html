@@ -116,7 +116,8 @@
   #hero-icon { position: absolute; right: max(40px, calc((100% - 1500px) / 2 + 40px)); top: 30px;
     font-size: 90px; opacity: .9; }
   #hero-feels { margin-top: 18px; font-size: 14px; }
-  #hero-temp { font-size: 78px; font-weight: 300; line-height: .95; margin: 2px 0; }
+  /* `auto` sides, not 0: the shorthand here would otherwise beat the centring above. */
+  #hero-temp { font-size: 78px; font-weight: 300; line-height: .95; margin: 2px auto; }
   #hero-cond { font-size: 26px; font-weight: 600; }
   #hero-hilo { font-size: 14px; }
   .live { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: #ffffff22; }
