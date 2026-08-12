@@ -39,6 +39,10 @@ log — lives in `localStorage`; there is nothing to configure on the server.
 
 For a permanent install, a systemd user unit running that same command is enough.
 
+## License
+
+MIT. See [LICENSE](LICENSE).
+
 ## Notes
 
 No service worker and no PWA install: the app is useless offline because every source is a cloud
