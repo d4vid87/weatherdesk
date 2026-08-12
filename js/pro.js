@@ -84,9 +84,15 @@ function renderTicker(fc) {
   if (strikes) items.push(['LIGHTNING', `${strikes} strikes detected in the last 3h`]);
   if (!items.length) items.push(['QUIET', 'No notable signals — steady conditions']);
 
-  $('ticker-track').innerHTML = items
+  const html = items
     .map(([tag, text]) => `<span class="tick"><b>${tag}</b>${text}</span>`)
     .join('<span class="tick-sep">·</span>');
+  const track = $('ticker-track');
+  // two copies: the animation runs 0 → -50%, so the list wraps seamlessly instead of the first
+  // item sliding off and never coming back.
+  track.innerHTML = `${html}<span class="tick-sep">·</span>${html}`;
+  // a short list on a wide screen already fits — scrolling it only hides text
+  track.classList.toggle('still', track.scrollWidth / 2 <= track.clientWidth);
 }
 
 // ---------- trend strip ----------

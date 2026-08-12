@@ -105,12 +105,16 @@
   #desk > .grid, #ticker, #trends, #c48, #desk-radar, #daycards, #gauges { margin: var(--gap) auto; max-width: 1500px; }
   #desk > .grid { padding: 0 var(--gap); }
 
+  /* full-bleed sky, but the text tracks the same 1500px column as every panel below it —
+     otherwise the temperature and the sun sit a metre apart on an ultrawide. */
   #hero { padding: 14px 18px 22px; color: #fff; position: relative; overflow: hidden; }
+  #hero > * { max-width: 1500px; margin-left: auto; margin-right: auto; }
   .hero-top { display: flex; justify-content: space-between; font-size: 13px; }
   .hero-right { text-align: right; }
   .hero-dim { opacity: .75; }
   #hero-place { font-size: 17px; font-weight: 600; }
-  #hero-icon { position: absolute; right: 40px; top: 30px; font-size: 90px; opacity: .9; }
+  #hero-icon { position: absolute; right: max(40px, calc((100% - 1500px) / 2 + 40px)); top: 30px;
+    font-size: 90px; opacity: .9; }
   #hero-feels { margin-top: 18px; font-size: 14px; }
   #hero-temp { font-size: 78px; font-weight: 300; line-height: .95; margin: 2px 0; }
   #hero-cond { font-size: 26px; font-weight: 600; }
@@ -122,7 +126,10 @@
     border-radius: 10px; overflow: hidden; padding: 8px 10px; }
   #ticker-track { flex: 1; white-space: nowrap; overflow: hidden; display: flex; gap: 14px; align-items: center;
     animation: tick 60s linear infinite; }
-  @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-40%); } }
+  /* the track holds the item list twice, so -50% lands exactly on the copy and the first item
+     never scrolls away for good. */
+  @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  #ticker-track.still { animation: none; }
   .tick b { background: var(--panel2); border: 1px solid var(--line); color: var(--accent); font-size: 10px;
     letter-spacing: .1em; padding: 2px 6px; border-radius: 4px; margin-right: 8px; }
   .tick-sep { color: var(--muted); }
