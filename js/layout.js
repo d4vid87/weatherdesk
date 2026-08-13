@@ -10,9 +10,14 @@
 // is the input this dashboard is actually built for. Pointer events cover mouse, pen and finger
 // with one code path.
 //
-// ponytail: panels reorder within their own container, not across containers. Dragging a gauge
-// into the day-card row would need a shared grid and a placeholder; upgrade path if it's ever
-// wanted is one flat container with explicit grid spans.
+// The Desk is one flat 12-column grid, so any panel can be dragged to any slot — the radar was
+// previously boxed inside a two-column row and could not be lifted above it. A horizontal resize
+// edits the panel's column span; a vertical one sets an explicit height.
+//
+// While a drag is in flight the panel is taken out of flow (position: fixed, following the
+// pointer) and a placeholder holds the slot. Moving the panel itself through the grid on every
+// pointermove was what made dragging feel glitchy: each insert reflowed the grid, which moved the
+// panel under the pointer, which picked a different target, and the two fought each other.
 
 const KEY = 'wd.layout';
 const $ = (id) => document.getElementById(id);
@@ -24,29 +29,36 @@ const save = () => localStorage.setItem(KEY, JSON.stringify(state));
 const entry = (id) => (state[id] ||= {});
 
 // Containers whose direct children are rearrangeable, in the order they appear on the Desk.
-const CONTAINERS = ['desk-stack', 'mid', 'mid-right', 'daycards', 'gauges', 'desk-grid'];
+const CONTAINERS = ['desk-stack', 'daycards', 'gauges', 'desk-grid'];
 
 let dragged = null;
 
-// A flex item's width is decided by its basis, not by `width`, so setting one on a child of the
-// radar row did nothing at all. Write whichever property the parent actually honours.
-const inFlexRow = (el) => {
-  const p = getComputedStyle(el.parentElement);
-  return p.display === 'flex' && !p.flexDirection.startsWith('column');
-};
+// Grid children are sized in columns, not pixels: a `width` on a grid item is ignored by the
+// track it sits in, so a resize has to be translated into a span.
+const COLS = 12;
+
+const isGridChild = (el) => getComputedStyle(el.parentElement).display === 'grid';
+
+function colsFor(el, px) {
+  const p = el.parentElement;
+  const gap = parseFloat(getComputedStyle(p).columnGap) || 0;
+  const track = (p.clientWidth - gap * (COLS - 1)) / COLS;
+  return Math.max(2, Math.min(COLS, Math.round((px + gap) / (track + gap))));
+}
 
 function setWidth(el, px) {
   if (px == null) {
     el.style.width = '';
-    el.style.flex = '';
-  } else if (inFlexRow(el)) {
-    el.style.flex = `0 0 ${px}px`;
+    el.style.gridColumn = '';
+  } else if (isGridChild(el)) {
+    el.style.gridColumn = `span ${colsFor(el, px)}`;
   } else {
     el.style.width = `${px}px`;
   }
 }
 
-const widthOf = (el) => (el.style.width || el.style.flex ? Math.round(el.getBoundingClientRect().width) : null);
+const widthOf = (el) => (el.style.width || el.style.gridColumn
+  ? Math.round(el.getBoundingClientRect().width) : null);
 
 function applySaved(el) {
   const s = state[el.dataset.panel];
@@ -81,6 +93,7 @@ function recordOrder(container) {
 // of gauges as readily as a single row.
 function insertPoint(container, x, y) {
   const kids = [...container.children].filter((c) => c.dataset.panel && c !== dragged);
+
   if (!kids.length) return null;
 
   let best = null, bestDist = Infinity, bestDx = 0, bestDy = 0;
@@ -164,23 +177,51 @@ function wire(container) {
     // Pointer events rather than HTML5 drag-and-drop: DnD never fires for touch, and this
     // dashboard's home is a tablet. Only the grip starts a move — dragging from the panel body
     // would fight text selection and the radar iframe.
+    let ph = null, offX = 0, offY = 0;
+
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      dragged = el;
+      const r = el.getBoundingClientRect();
+      offX = e.clientX - r.left;
+      offY = e.clientY - r.top;
+
+      // The placeholder inherits the panel's footprint so the grid doesn't collapse the moment
+      // the panel leaves the flow.
+      ph = document.createElement('div');
+      ph.className = 'ph';
+      ph.style.height = `${r.height}px`;
+      ph.style.gridColumn = getComputedStyle(el).gridColumn;
+      container.insertBefore(ph, el);
+
+      Object.assign(el.style, {
+        width: `${r.width}px`, height: `${r.height}px`,
+        left: `${r.left}px`, top: `${r.top}px`,
+      });
       el.classList.add('dragging');
       document.body.classList.add('resizing'); // same iframe/selection guard as a resize
+      dragged = el;
       grip.setPointerCapture(e.pointerId);
     });
+
     grip.addEventListener('pointermove', (e) => {
       if (!grip.hasPointerCapture(e.pointerId) || dragged !== el) return;
+      el.style.left = `${e.clientX - offX}px`;
+      el.style.top = `${e.clientY - offY}px`;
       const before = insertPoint(container, e.clientX, e.clientY);
-      if (before !== el) container.insertBefore(el, before);
+      if (before !== ph) container.insertBefore(ph, before);
     });
+
     const drop = (e) => {
       if (!grip.hasPointerCapture(e.pointerId)) return;
       grip.releasePointerCapture(e.pointerId);
       el.classList.remove('dragging');
       document.body.classList.remove('resizing');
+      container.insertBefore(el, ph);
+      ph.remove();
+      ph = null;
+      // Restore whatever the panel's own rules say; a saved size is reapplied on top.
+      el.style.left = el.style.top = el.style.width = el.style.height = '';
+      applySaved(el);
       dragged = null;
       recordOrder(container);
     };

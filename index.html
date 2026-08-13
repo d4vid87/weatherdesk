@@ -102,14 +102,20 @@
 
   /* ---- pro desk ---- */
   #desk { padding: 0; }
-  #desk-stack { max-width: 1560px; margin: 0 auto; padding: 0 var(--gap) var(--gap); }
-  #desk-stack > * { margin: var(--gap) 0; }
-  #hero { margin-top: 0 !important; }
+  /* One flat 12-column grid holds every Desk panel, so anything can be dragged anywhere —
+     the radar included. Column span is what a horizontal resize edits. */
+  #desk-stack { max-width: 1560px; margin: 0 auto; padding: var(--gap); display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); align-items: start; }
+  #desk-stack > * { grid-column: span 12; }
+  #desk-radar { grid-column: span 6; grid-row: span 2; }
+  #trends, #c48 { grid-column: span 6; }
 
   /* Every panel carries a drag grip and three resize handles. Overflow stays hidden so a resized
      panel clips instead of spilling over its neighbour. */
   [data-panel] { position: relative; overflow: hidden; min-width: 160px; min-height: 60px; }
-  [data-panel].dragging { opacity: .45; outline: 2px dashed var(--accent); }
+  [data-panel].dragging { position: fixed; z-index: 40; pointer-events: none; opacity: .9;
+    box-shadow: 0 18px 40px #000a; outline: 2px solid var(--accent); }
+  .ph { border: 2px dashed var(--accent); border-radius: 12px; background: #4fb8ff14; }
   [data-panel].resizing { outline: 2px solid var(--accent); }
   .grip { position: absolute; top: 5px; right: 5px; width: 30px; height: 30px; border-radius: 8px;
     display: flex; align-items: center; justify-content: center; cursor: grab; color: #cdd7e2;
@@ -180,12 +186,8 @@
     border-radius: 6px; cursor: pointer; padding: 2px 8px; }
 
   /* radar beside the numbers, the way the reference reads */
-  /* flex, not grid: a grid track ignores a width set on its item, so a resized radar snapped
-     straight back to its column. Flex items take an explicit basis. */
-  #mid { display: flex; gap: var(--gap); align-items: stretch; }
-  #mid > * { flex: 1 1 0; min-width: 260px; }
-  #mid-right { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-  #desk-radar { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; min-height: 380px; }
+  #desk-radar { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; min-height: 420px;
+    height: 100%; }
   #desk-radar-frame { width: 100%; height: 100%; border: 0; display: block; }
 
   #trends { display: grid; grid-template-columns: repeat(3, 1fr);
@@ -199,7 +201,7 @@
   #trends .muted { font-size: 12px; }
 
   #c48 { display: flex; flex-direction: column; gap: 8px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; flex: 1; min-height: 240px; }
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-height: 240px; }
   #c48-summary { font-size: 15px; color: #cdd7e2; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
   #c48-summary .big { font-size: 20px; color: var(--text); font-weight: 600; }
   #c48-rows { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; }
@@ -341,9 +343,8 @@
 
     <div id="ticker" data-panel="ticker"><div id="ticker-track"></div><button id="ticker-pause">❚❚</button></div>
 
-    <div id="mid" data-panel="mid">
-      <div id="desk-radar" data-panel="radar"><iframe id="desk-radar-frame" title="Radar loop"></iframe></div>
-      <div id="mid-right" data-panel="mid-right">
+    <div id="desk-radar" data-panel="radar"><iframe id="desk-radar-frame" title="Radar loop"></iframe></div>
+
         <div id="trends" data-panel="trends">
           <div><h3>Station vs model</h3><div id="t-model" class="warm">--</div><div id="t-model-sub" class="muted"></div></div>
           <div><h3>Temperature trend</h3><div id="t-temp">--</div><div class="muted">Tempest last 3h</div></div>
@@ -359,8 +360,6 @@
             <div class="c48-row"><span class="c48-lab"></span><div id="c48-axis" class="c48-plot"></div></div>
           </div>
         </div>
-      </div>
-    </div>
 
     <div id="daycards"></div>
 

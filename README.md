@@ -19,9 +19,10 @@ every call goes browser-direct to a free public API.
 
 ## Moving things around
 
-Hover any panel for its grip in the top-right corner. Drag the grip to reorder within its row or
-column, drag the highlighted right edge, bottom edge or corner to resize, and double-click the grip
-to restore that one panel. Settings → **Reset panel layout** puts everything back.
+The Desk is one 12-column grid and every panel is a free agent. Drag a panel by the grip in its
+top-right corner to drop it anywhere in the grid; drag its right edge to change how many columns it
+spans, its bottom edge for height, the corner for both. Double-click the grip to restore one panel,
+or Settings → **Reset panel layout** to put everything back.
 
 Both gestures are pointer events, so they work the same with a mouse, a pen or a finger — the
 tablet case is the one that matters, and HTML5 drag-and-drop never fires for touch.
