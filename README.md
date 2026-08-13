@@ -7,6 +7,9 @@ every call goes browser-direct to a free public API.
 Radar comes from [Hook Echo-WX](https://github.com/d4vid87/hookecho) — my own NEXRAD viewer,
 embedded here and centered on the station.
 
+![The Desk in motion: live radar on the Desk, then the radar panel dragged to the top of the stack
+by its grip and resized to full width from its corner handle](docs/hero.gif)
+
 ![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
 gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
 chart](docs/screenshot.png)
