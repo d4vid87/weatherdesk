@@ -45,14 +45,13 @@ fn main() {
                 }
             });
 
-            WebviewWindowBuilder::new(
-                app,
-                "main",
-                WebviewUrl::External(format!("http://localhost:{port}").parse()?),
-            )
-            .title(format!("WeatherDesk — tablet: http://{}:{}", lan_ip(), port))
-            .inner_size(1280.0, 800.0)
-            .build()?;
+            // The window loads through Tauri's own asset protocol, not the LAN server: the
+            // server's port moves when 8088 is taken, and WebKit keys localStorage per origin,
+            // so a moving port would wipe the token and layout on every restart.
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                .title(format!("WeatherDesk — tablet: http://{}:{}", lan_ip(), port))
+                .inner_size(1280.0, 800.0)
+                .build()?;
 
             Ok(())
         })
