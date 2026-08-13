@@ -1,9 +1,14 @@
 // Move and resize anything on the Desk.
 //
-// Reorder is HTML5 drag-and-drop between siblings; resize is the browser's own `resize: both`
-// handle, watched by a ResizeObserver. Both write to one localStorage blob keyed by panel id, so a
-// tablet keeps its arrangement across reloads. No drag library: the whole interaction is four
-// events and a rect comparison.
+// Reorder is HTML5 drag-and-drop between siblings; resize is three pointer-driven handles (right
+// edge, bottom edge, corner). Both write to one localStorage blob keyed by panel id, so a tablet
+// keeps its arrangement across reloads. No drag library: the whole interaction is four events and
+// a rect comparison.
+//
+// The browser's own `resize: both` was the first cut and was wrong twice over: its grab target is
+// a ~16px corner that is invisible on a dark panel, and it does not respond to touch at all, which
+// is the input this dashboard is actually built for. Pointer events cover mouse, pen and finger
+// with one code path.
 //
 // ponytail: panels reorder within their own container, not across containers. Dragging a gauge
 // into the day-card row would need a shared grid and a placeholder; upgrade path if it's ever
@@ -61,6 +66,60 @@ function insertPoint(container, x, y) {
   }) || null;
 }
 
+// One handle per edge the panel can grow along. `e` widens, `s` heightens, `se` does both.
+// Pointer capture means the drag survives the pointer leaving the handle — without it, a fast
+// drag detaches after a few pixels, which is most of what made the old corner feel broken.
+function resizeHandle(el, dir) {
+  const h = document.createElement('div');
+  h.className = `rz rz-${dir}`;
+  h.title = 'Drag to resize · double-click to reset';
+
+  let startX = 0, startY = 0, startW = 0, startH = 0;
+
+  h.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const r = el.getBoundingClientRect();
+    [startX, startY, startW, startH] = [e.clientX, e.clientY, r.width, r.height];
+    h.setPointerCapture(e.pointerId);
+    el.classList.add('resizing');
+    // Pointer capture doesn't cross into an iframe's document, so a drag over the radar would
+    // otherwise die the moment the pointer entered it.
+    document.body.classList.add('resizing');
+  });
+
+  h.addEventListener('pointermove', (e) => {
+    if (!h.hasPointerCapture(e.pointerId)) return;
+    if (dir !== 's') el.style.width = `${Math.max(160, startW + e.clientX - startX)}px`;
+    if (dir !== 'e') el.style.height = `${Math.max(60, startH + e.clientY - startY)}px`;
+  });
+
+  const end = (e) => {
+    if (!h.hasPointerCapture(e.pointerId)) return;
+    h.releasePointerCapture(e.pointerId);
+    el.classList.remove('resizing');
+    document.body.classList.remove('resizing');
+    const s = entry(el.dataset.panel);
+    // Only remember a dimension the user actually dragged — anything still at its natural size
+    // must stay fluid, or the first window resize leaves it stranded at a stale pixel width.
+    if (el.style.width) s.w = Math.round(el.getBoundingClientRect().width);
+    if (el.style.height) s.h = Math.round(el.getBoundingClientRect().height);
+    save();
+  };
+  h.addEventListener('pointerup', end);
+  h.addEventListener('pointercancel', end);
+
+  h.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    el.style.width = ''; el.style.height = '';
+    const s = entry(el.dataset.panel);
+    delete s.w; delete s.h;
+    save();
+  });
+
+  return h;
+}
+
 function wire(container) {
   [...container.children].filter((c) => c.dataset.panel).forEach((el) => {
     applySaved(el);
@@ -68,23 +127,35 @@ function wire(container) {
 
     const grip = document.createElement('div');
     grip.className = 'grip';
-    grip.title = 'Drag to move · corner to resize · double-click to reset this panel';
+    grip.title = 'Drag to move · edges to resize · double-click to reset this panel';
     grip.innerHTML = '<span>⠿</span>';
-    // Only the grip starts a drag: an iframe or a chart would otherwise swallow the gesture, and
-    // text selection inside a panel would keep tripping it.
-    grip.draggable = true;
-    grip.addEventListener('dragstart', (e) => {
+
+    // Pointer events rather than HTML5 drag-and-drop: DnD never fires for touch, and this
+    // dashboard's home is a tablet. Only the grip starts a move — dragging from the panel body
+    // would fight text selection and the radar iframe.
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
       dragged = el;
       el.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', el.dataset.panel);
-      e.dataTransfer.setDragImage(el, 30, 20);
+      document.body.classList.add('resizing'); // same iframe/selection guard as a resize
+      grip.setPointerCapture(e.pointerId);
     });
-    grip.addEventListener('dragend', () => {
+    grip.addEventListener('pointermove', (e) => {
+      if (!grip.hasPointerCapture(e.pointerId) || dragged !== el) return;
+      const before = insertPoint(container, e.clientX, e.clientY);
+      if (before !== el) container.insertBefore(el, before);
+    });
+    const drop = (e) => {
+      if (!grip.hasPointerCapture(e.pointerId)) return;
+      grip.releasePointerCapture(e.pointerId);
       el.classList.remove('dragging');
+      document.body.classList.remove('resizing');
       dragged = null;
       recordOrder(container);
-    });
+    };
+    grip.addEventListener('pointerup', drop);
+    grip.addEventListener('pointercancel', drop);
+
     grip.addEventListener('dblclick', () => {
       el.style.width = ''; el.style.height = '';
       const s = entry(el.dataset.panel);
@@ -92,25 +163,8 @@ function wire(container) {
       save();
     });
     el.appendChild(grip);
-
-    new ResizeObserver(() => {
-      // Only remember a size the user actually dragged to — an element still at its natural size
-      // must stay fluid, or the first window resize leaves it stranded.
-      if (!el.style.width && !el.style.height) return;
-      const s = entry(el.dataset.panel);
-      if (el.style.width) s.w = Math.round(el.getBoundingClientRect().width);
-      if (el.style.height) s.h = Math.round(el.getBoundingClientRect().height);
-      save();
-    }).observe(el);
+    ['e', 's', 'se'].forEach((dir) => el.appendChild(resizeHandle(el, dir)));
   });
-
-  container.addEventListener('dragover', (e) => {
-    if (!dragged || !container.contains(dragged)) return;
-    e.preventDefault();
-    const before = insertPoint(container, e.clientX, e.clientY);
-    if (before !== dragged) container.insertBefore(dragged, before);
-  });
-  container.addEventListener('drop', (e) => e.preventDefault());
 }
 
 export function resetLayout() {

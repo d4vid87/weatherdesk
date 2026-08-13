@@ -106,18 +106,41 @@
   #desk-stack > * { margin: var(--gap) 0; }
   #hero { margin-top: 0 !important; }
 
-  /* Every panel carries a drag grip and the browser's own resize handle. `resize` needs a
-     non-visible overflow to show its corner, which is also what keeps a resized panel clipped
-     instead of spilling over its neighbour. */
-  [data-panel] { position: relative; resize: both; overflow: hidden; min-width: 160px; min-height: 60px; }
+  /* Every panel carries a drag grip and three resize handles. Overflow stays hidden so a resized
+     panel clips instead of spilling over its neighbour. */
+  [data-panel] { position: relative; overflow: hidden; min-width: 160px; min-height: 60px; }
   [data-panel].dragging { opacity: .45; outline: 2px dashed var(--accent); }
-  .grip { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 6px;
-    display: flex; align-items: center; justify-content: center; cursor: grab; color: var(--muted);
-    background: #0b111a99; border: 1px solid var(--line); opacity: 0; transition: opacity .15s;
-    font-size: 12px; line-height: 1; z-index: 5; user-select: none; }
-  [data-panel]:hover > .grip { opacity: 1; }
+  [data-panel].resizing { outline: 2px solid var(--accent); }
+  .grip { position: absolute; top: 5px; right: 5px; width: 30px; height: 30px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; cursor: grab; color: #cdd7e2;
+    background: #0b111ad9; border: 1px solid var(--line); opacity: 0; transition: opacity .15s;
+    font-size: 15px; line-height: 1; z-index: 6; user-select: none; touch-action: none; }
   .grip:active { cursor: grabbing; }
   .panel-hidden { display: none; }
+
+  /* Fat, visible, touch-sized targets. `touch-action: none` is what lets a finger drag them
+     instead of scrolling the page. */
+  .rz { position: absolute; z-index: 6; opacity: 0; transition: opacity .15s; touch-action: none;
+    background: var(--accent); }
+  .rz-e { top: 12%; bottom: 12%; right: 0; width: 12px; cursor: ew-resize;
+    border-radius: 6px 0 0 6px; }
+  .rz-s { left: 12%; right: 12%; bottom: 0; height: 12px; cursor: ns-resize;
+    border-radius: 6px 6px 0 0; }
+  .rz-se { right: 0; bottom: 0; width: 26px; height: 26px; cursor: nwse-resize; border-radius: 8px 0 0 0;
+    background: linear-gradient(135deg, transparent 42%, var(--accent) 42%); }
+
+  /* Handles stay out of the way until the panel is hovered, then sit at a quarter strength so
+     they read as chrome rather than content. Touch has no hover, so they are always faintly on. */
+  [data-panel]:hover > .grip { opacity: 1; }
+  [data-panel]:hover > .rz { opacity: .55; }
+  .rz:hover, .rz:active { opacity: .95 !important; }
+  body.resizing iframe { pointer-events: none; }
+  body.resizing { user-select: none; }
+  @media (hover: none) {
+    .grip { opacity: .85; }
+    .rz { opacity: .4; }
+  }
+  #hero .rz-e, #hero .rz-se { background-image: linear-gradient(135deg, transparent 42%, #ffffffcc 42%); }
 
   /* hero */
   #hero { padding: 16px 20px 20px; color: #fff; overflow: hidden; border-radius: 12px;
