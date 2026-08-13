@@ -9,7 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  # The three build jobs run in parallel and would each create their own draft,
+  # so the release has to exist before any of them start.
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" --draft \
+            --title "WeatherDesk ${{ github.ref_name }}" \
+            --notes "Download the installer for your OS below. See the README for first-run notes (the apps are unsigned)."
+          echo "id=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} -q .id)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -47,8 +65,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: WeatherDesk ${{ github.ref_name }}
-          releaseBody: "Download the installer for your OS below. See the README for first-run notes (the apps are unsigned)."
-          releaseDraft: true
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
