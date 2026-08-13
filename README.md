@@ -4,6 +4,9 @@ A self-hosted weather dashboard for a WeatherFlow Tempest station, built for a w
 LAN. Vanilla JS, native ES modules, no build step, no framework, no chart library, no backend —
 every call goes browser-direct to a free public API.
 
+Radar comes from [Hook Echo-WX](https://github.com/d4vid87/hookecho) — my own NEXRAD viewer,
+embedded here and centered on the station.
+
 ![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
 gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
 chart](docs/screenshot.png)
@@ -37,7 +40,7 @@ tablet case is the one that matters, and HTML5 drag-and-drop never fires for tou
 | Live 3-second wind, lightning strikes | `wss://ws.weatherflow.com/swd/data` |
 | Watches and warnings, gridpoint forecast | `api.weather.gov` |
 | Multi-model agreement, 15-minute nowcast, AQI | `api.open-meteo.com` |
-| Radar | Hook Echo-WX |
+| Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.netlify.app` |
 | Place search | `photon.komoot.io` |
 
 ## Running it
