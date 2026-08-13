@@ -1,0 +1,19 @@
+[package]
+name = "weatherdesk"
+version = "1.0.0"
+description = "Self-hosted WeatherFlow Tempest dashboard"
+authors = ["David May"]
+license = "MIT"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tiny_http = "0.12"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

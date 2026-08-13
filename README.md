@@ -43,12 +43,30 @@ tablet case is the one that matters, and HTML5 drag-and-drop never fires for tou
 | Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.netlify.app` |
 | Place search | `photon.komoot.io` |
 
-## Running it
+## Download & run
+
+Grab the installer for your OS from [Releases](https://github.com/d4vid87/weatherdesk/releases) and
+double-click it. The app opens in its own window *and* serves the same dashboard to the rest of your
+network on port 8088 — the wall tablet just opens the URL shown in the window title. Nothing else to
+install; leave the app running.
+
+- **Windows** — run the `.msi`. The app is unsigned, so SmartScreen shows a warning: **More info →
+  Run anyway**. Allow the Windows Firewall prompt on first launch, or the tablet can't connect.
+- **macOS** — open the `.dmg`, drag WeatherDesk to Applications. Unsigned, so on first launch macOS
+  refuses it: **System Settings → Privacy & Security → Open Anyway**, or in a terminal
+  `xattr -dr com.apple.quarantine /Applications/WeatherDesk.app`.
+- **Linux** — `sudo apt install ./WeatherDesk_*_amd64.deb`, or run the `.AppImage`
+  (`chmod +x`; needs `libfuse2` installed).
+
+To start it automatically: macOS System Settings → General → Login Items; Windows put a shortcut in
+`shell:startup`; Linux add a `.desktop` file to `~/.config/autostart`.
+
+## No-install / development option
 
 ```sh
 git clone https://github.com/d4vid87/weatherdesk
 cd weatherdesk
-python3 -m http.server 8088 --bind 0.0.0.0
+python3 -m http.server 8088 --bind 0.0.0.0 --directory site
 ```
 
 Open `http://<box>:8088`, then paste a WeatherFlow personal access token
@@ -58,6 +76,13 @@ refresh interval, saved places, notification categories, forecast snapshots and 
 log — lives in `localStorage`; there is nothing to configure on the server.
 
 For a permanent install, a systemd user unit running that same command is enough.
+
+The desktop app serves from its own origin, so settings saved in a browser install (token included)
+don't carry over — paste the token once more in the app.
+
+Building the desktop app yourself: `cargo tauri build` in `src-tauri/` (Rust + the Tauri
+[prerequisites](https://tauri.app/start/prerequisites/) for your OS). Iterate on the HTML/JS with
+the python command above; the app embeds `site/` at compile time.
 
 ## License
 
