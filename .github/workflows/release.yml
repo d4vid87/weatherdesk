@@ -24,7 +24,11 @@ jobs:
           gh release create "${{ github.ref_name }}" --draft \
             --title "WeatherDesk ${{ github.ref_name }}" \
             --notes "Download the installer for your OS below. See the README for first-run notes (the apps are unsigned)."
-          echo "id=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} -q .id)" >> "$GITHUB_OUTPUT"
+          # A draft has no tag yet, so releases/tags/<tag> 404s — list and match instead.
+          id=$(gh api repos/${{ github.repository }}/releases \
+            -q '[.[] | select(.tag_name == "${{ github.ref_name }}")][0].id')
+          test -n "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
 
   build:
     needs: create-release
