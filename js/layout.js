@@ -28,10 +28,30 @@ const CONTAINERS = ['desk-stack', 'mid', 'mid-right', 'daycards', 'gauges', 'des
 
 let dragged = null;
 
+// A flex item's width is decided by its basis, not by `width`, so setting one on a child of the
+// radar row did nothing at all. Write whichever property the parent actually honours.
+const inFlexRow = (el) => {
+  const p = getComputedStyle(el.parentElement);
+  return p.display === 'flex' && !p.flexDirection.startsWith('column');
+};
+
+function setWidth(el, px) {
+  if (px == null) {
+    el.style.width = '';
+    el.style.flex = '';
+  } else if (inFlexRow(el)) {
+    el.style.flex = `0 0 ${px}px`;
+  } else {
+    el.style.width = `${px}px`;
+  }
+}
+
+const widthOf = (el) => (el.style.width || el.style.flex ? Math.round(el.getBoundingClientRect().width) : null);
+
 function applySaved(el) {
   const s = state[el.dataset.panel];
   if (!s) return;
-  if (s.w) el.style.width = `${s.w}px`;
+  if (s.w) setWidth(el, s.w);
   if (s.h) el.style.height = `${s.h}px`;
   if (s.hidden) el.classList.add('panel-hidden');
 }
@@ -90,7 +110,7 @@ function resizeHandle(el, dir) {
 
   h.addEventListener('pointermove', (e) => {
     if (!h.hasPointerCapture(e.pointerId)) return;
-    if (dir !== 's') el.style.width = `${Math.max(160, startW + e.clientX - startX)}px`;
+    if (dir !== 's') setWidth(el, Math.max(160, startW + e.clientX - startX));
     if (dir !== 'e') el.style.height = `${Math.max(60, startH + e.clientY - startY)}px`;
   });
 
@@ -102,7 +122,8 @@ function resizeHandle(el, dir) {
     const s = entry(el.dataset.panel);
     // Only remember a dimension the user actually dragged — anything still at its natural size
     // must stay fluid, or the first window resize leaves it stranded at a stale pixel width.
-    if (el.style.width) s.w = Math.round(el.getBoundingClientRect().width);
+    const w = widthOf(el);
+    if (w) s.w = w;
     if (el.style.height) s.h = Math.round(el.getBoundingClientRect().height);
     save();
   };
@@ -111,7 +132,7 @@ function resizeHandle(el, dir) {
 
   h.addEventListener('dblclick', (e) => {
     e.stopPropagation();
-    el.style.width = ''; el.style.height = '';
+    setWidth(el, null); el.style.height = '';
     const s = entry(el.dataset.panel);
     delete s.w; delete s.h;
     save();
@@ -157,7 +178,7 @@ function wire(container) {
     grip.addEventListener('pointercancel', drop);
 
     grip.addEventListener('dblclick', () => {
-      el.style.width = ''; el.style.height = '';
+      setWidth(el, null); el.style.height = '';
       const s = entry(el.dataset.panel);
       delete s.w; delete s.h;
       save();
@@ -171,7 +192,7 @@ export function resetLayout() {
   state = {};
   localStorage.removeItem(KEY);
   document.querySelectorAll('[data-panel]').forEach((el) => {
-    el.style.width = ''; el.style.height = '';
+    setWidth(el, null); el.style.height = '';
     el.classList.remove('panel-hidden');
   });
   CONTAINERS.map($).filter(Boolean).forEach(applyOrder);
