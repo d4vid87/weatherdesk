@@ -69,8 +69,18 @@ function applySaved(el) {
 }
 
 // Children come back in the saved order; anything new (a panel added by an update) lands last.
+//
+// This only ever touches panels, and it reorders by appending — so a container holding anything
+// that is not a panel would have every panel shoved past it on each render. Every direct child of
+// a layout container is a panel for exactly that reason; the guard below keeps a stray one from
+// silently rearranging the page.
 function applyOrder(container) {
+  if (dragged) return; // a background refresh must not yank panels out from under a live drag
   const kids = [...container.children].filter((c) => c.dataset.panel);
+  if (kids.length !== container.children.length) {
+    console.warn('layout: non-panel child in', container.id, '— leaving order alone');
+    return;
+  }
   kids
     .slice()
     .sort((a, b) => {
