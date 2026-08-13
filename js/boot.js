@@ -109,11 +109,14 @@ window.addEventListener('wd:settings', loadDeskRadar);
 
 initNav();
 initPlaces();
+// panel chrome doesn't depend on a token — wire it before the data path so an unconfigured
+// dashboard is still arrangeable
+initLayout();
 
 if (!configured()) {
   fillDrawer();
   openDrawer(true);
 } else {
   // lat/lon must land before the open-meteo/NWS jobs start
-  hydrateStation().then(() => { initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initLayout(); loadDeskRadar(); });
+  hydrateStation().then(() => { initDesk(); initIntel(); initSignals(); initBoards(); initPro(); loadDeskRadar(); });
 }

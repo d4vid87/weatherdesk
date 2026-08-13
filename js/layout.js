@@ -74,16 +74,26 @@ function recordOrder(container) {
   save();
 }
 
-// Insert before the first sibling whose midpoint is past the pointer. Works for both a row and a
-// column because it compares on whichever axis the container actually flows.
+// Where the dragged panel should land. The first cut guessed the container's flow by comparing
+// two siblings' tops, which silently broke the two-panel radar row: excluding the dragged panel
+// leaves a single candidate, the guess falls back to "vertical", and dragging sideways then never
+// crosses a boundary. Nearest-centre needs no orientation at all, and it handles a wrapping grid
+// of gauges as readily as a single row.
 function insertPoint(container, x, y) {
   const kids = [...container.children].filter((c) => c.dataset.panel && c !== dragged);
-  const horizontal = kids.length > 1
-    && Math.abs(kids[1].getBoundingClientRect().top - kids[0].getBoundingClientRect().top) < 20;
-  return kids.find((k) => {
+  if (!kids.length) return null;
+
+  let best = null, bestDist = Infinity, bestDx = 0, bestDy = 0;
+  for (const k of kids) {
     const r = k.getBoundingClientRect();
-    return horizontal ? x < r.left + r.width / 2 : y < r.top + r.height / 2;
-  }) || null;
+    const dx = x - (r.left + r.width / 2);
+    const dy = y - (r.top + r.height / 2);
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) { bestDist = dist; best = k; bestDx = dx; bestDy = dy; }
+  }
+  // Past the centre on whichever axis the pointer is furthest along means "drop after this one".
+  const after = Math.abs(bestDx) > Math.abs(bestDy) ? bestDx > 0 : bestDy > 0;
+  return after ? best.nextElementSibling : best;
 }
 
 // One handle per edge the panel can grow along. `e` widens, `s` heightens, `se` does both.
@@ -217,5 +227,21 @@ if (location.search.includes('selftest')) {
   });
   applyOrder(box);
   console.assert([...box.children].map((c) => c.dataset.panel).join('') === 'bca', 'layout order');
+
+  // A two-panel row: dragging the left panel past the right one's centre must place it after.
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;width:400px;position:fixed;top:0;left:0';
+  ['l', 'r'].forEach((n) => {
+    const d = document.createElement('div');
+    d.dataset.panel = n;
+    d.style.cssText = 'flex:1 1 0;height:80px';
+    row.appendChild(d);
+  });
+  document.body.appendChild(row);
+  dragged = row.firstElementChild;
+  console.assert(insertPoint(row, 380, 40) === null, 'drop after the right-hand panel');
+  console.assert(insertPoint(row, 220, 40) === row.lastElementChild, 'drop before it');
+  dragged = null;
+  row.remove();
   state = JSON.parse(before);
 }

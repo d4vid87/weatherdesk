@@ -129,10 +129,12 @@
   .rz-se { right: 0; bottom: 0; width: 26px; height: 26px; cursor: nwse-resize; border-radius: 8px 0 0 0;
     background: linear-gradient(135deg, transparent 42%, var(--accent) 42%); }
 
-  /* Handles stay out of the way until the panel is hovered, then sit at a quarter strength so
-     they read as chrome rather than content. Touch has no hover, so they are always faintly on. */
+  /* Faintly on at all times so the affordance is findable, full strength on hover. Hiding them
+     until hover meant nobody could tell a panel was movable in the first place. */
+  .grip { opacity: .4; }
+  .rz { opacity: .18; }
   [data-panel]:hover > .grip { opacity: 1; }
-  [data-panel]:hover > .rz { opacity: .55; }
+  [data-panel]:hover > .rz { opacity: .6; }
   .rz:hover, .rz:active { opacity: .95 !important; }
   body.resizing iframe { pointer-events: none; }
   body.resizing { user-select: none; }
