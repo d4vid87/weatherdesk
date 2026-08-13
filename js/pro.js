@@ -3,12 +3,15 @@
 import * as api from './api.js';
 import { settings, U, num, timeStr, deg2compass, every } from './app.js';
 import { forecast as deskForecast } from './desk.js';
+import * as icon from './icons.js';
+import { initLayout } from './layout.js';
 
 const $ = (id) => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
 
 let history = [];      // last 3h of device obs, for trends
 let consensus = null;  // model temp at this hour
+let qpf = null;        // open-meteo daily precipitation totals, for the day cards
 
 const I = api.OBS;
 
@@ -32,7 +35,28 @@ function moon() {
   const illum = Math.round(((1 - Math.cos((2 * Math.PI * age) / SYNODIC)) / 2) * 100);
   const names = ['New', 'Waxing crescent', 'First quarter', 'Waxing gibbous', 'Full', 'Waning gibbous', 'Last quarter', 'Waning crescent'];
   const name = names[Math.floor(((age / SYNODIC) * 8 + 0.5) % 8)];
-  return { age, illum, name };
+  // the next new or full moon, whichever comes first — the one date people actually plan around
+  const toNew = SYNODIC - age;
+  const toFull = (SYNODIC / 2 - age + SYNODIC) % SYNODIC;
+  const [nextName, days] = toNew < toFull ? ['New moon', toNew] : ['Full moon', toFull];
+  return { age, illum, name, nextName, nextDate: new Date(Date.now() + days * 86400000) };
+}
+
+// a lit disc drawn with two arcs — the terminator is an ellipse whose width is the illuminated
+// fraction, which is exactly how the phase looks from the ground
+function moonGlyph(age, size = 13) {
+  const f = age / SYNODIC;
+  const r = size / 2 - 1;
+  const k = Math.abs(Math.cos(2 * Math.PI * f));
+  const waxing = f < 0.5;
+  const sweep = waxing ? 1 : 0;
+  const inner = f < 0.25 || f > 0.75 ? sweep : 1 - sweep;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:-2px">
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="#ffffff33"/>
+    <path fill="#eef4ff" d="M ${size / 2} ${size / 2 - r}
+      A ${r} ${r} 0 0 ${sweep} ${size / 2} ${size / 2 + r}
+      A ${(r * k).toFixed(2)} ${r} 0 0 ${inner} ${size / 2} ${size / 2 - r} z"/>
+  </svg>`;
 }
 
 function renderHero(fc) {
@@ -48,8 +72,9 @@ function renderHero(fc) {
   $('hero-feels').textContent = `Now · Feels like ${num(c.feels_like)}° · ${muggy}`;
   $('hero-sun').textContent = `Sunset ${timeStr(d.sunset)} · Sunrise ${timeStr(fc.forecast.daily[1]?.sunrise || d.sunrise)}`;
   const m = moon();
-  $('hero-moon').textContent = `${m.name} · ${m.illum}%`;
-  $('hero-icon').textContent = ({ 'clear-day': '☀️', 'clear-night': '🌙' }[c.icon]) || (c.icon?.includes('night') ? '🌙' : '⛅');
+  $('hero-moon').innerHTML = `${moonGlyph(m.age)} ${m.name} · ${m.illum}%`;
+  $('hero-moonset').textContent = `${m.nextName} ${m.nextDate.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric' })}`;
+  $('hero-icon').innerHTML = icon.wxHero(c.icon, 150);
 }
 
 function renderStatus() {
@@ -134,32 +159,40 @@ function render48(fc) {
   const y = (t) => H - 12 - ((t - lo) / Math.max(hi - lo, 1)) * (H - 30);
 
   const path = hrs.map((h, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(h.air_temperature).toFixed(1)}`).join('');
-  // label every 6th hour
-  const labels = hrs.map((h, i) => (i % 6 === 0
-    ? `<text x="${x(i)}" y="${y(h.air_temperature) - 7}" class="c-lbl">${num(h.air_temperature)}°</text>` : '')).join('');
-  $('c48-temp').innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <path d="${path}" fill="none" stroke="#ff9d4f" stroke-width="2.5"/>${labels}</svg>`;
+  // a dot and a reading every 6th hour, so the line has anchors instead of floating
+  const marks = hrs.map((h, i) => (i % 6 === 0
+    ? `<circle cx="${x(i).toFixed(1)}" cy="${y(h.air_temperature).toFixed(1)}" r="3.5" fill="#0d141c"
+         stroke="#ff9d4f" stroke-width="2"/>`
+      + `<text x="${x(i).toFixed(1)}" y="${(y(h.air_temperature) + 16).toFixed(1)}" class="c-lbl">${num(h.air_temperature)}°</text>`
+    : '')).join('');
+  $('c48-temp').innerHTML = `<svg viewBox="0 0 ${W} ${H}">
+    <path d="${path}" fill="none" stroke="#ff9d4f" stroke-width="2.5" vector-effect="non-scaling-stroke"/>
+    ${marks}</svg>`;
 
+  // dots, not bars: diameter carries the chance and a 0% hour still leaves a visible baseline
   const maxPop = Math.max(10, ...hrs.map((h) => h.precip_probability || 0));
   $('c48-rain').innerHTML = hrs.map((h, i) => {
     const pop = h.precip_probability || 0;
+    const d = 4 + (pop / maxPop) * 16;
     return `<div class="rbar" title="${timeStr(h.time)} ${pop}%">
-      <i style="height:${Math.max(3, (pop / maxPop) * 100)}%;opacity:${0.35 + 0.65 * (pop / maxPop)}"></i>
+      <i style="width:${d.toFixed(1)}px;height:${d.toFixed(1)}px;opacity:${(0.4 + 0.6 * (pop / maxPop)).toFixed(2)}"></i>
       ${i % 6 === 0 ? `<u>${num(pop)}%</u>` : ''}</div>`;
   }).join('');
 
   $('c48-wind').innerHTML = hrs.filter((_, i) => i % 2 === 0).map((h, j) => `<div class="wcell">
       <span class="warrow" style="transform:rotate(${(h.wind_direction || 0) + 180}deg)">↑</span>
       ${j % 3 === 0 ? `<u>${num(h.wind_avg)}</u>` : '<u></u>'}</div>`).join('');
+  $('c48-unit').textContent = `°${settings().units === 'metric' ? 'C' : 'F'}`;
+  $('c48-wunit').textContent = U.wind();
 
   $('c48-axis').innerHTML = hrs.filter((_, i) => i % 6 === 0)
     .map((h, j) => `<span>${j === 0 ? 'Now' : new Date(h.time * 1000).toLocaleTimeString([], { hour: 'numeric' }).replace(' ', '')}</span>`).join('');
 
   const nextRain = hrs.find((h) => (h.precip_probability || 0) >= 30);
-  $('c48-summary').innerHTML = `<div>48 hr forecast</div>
-    <div class="big">${num(lo)}°–${num(hi)}°</div>
-    <div>Peak rain ${num(Math.max(...hrs.map((h) => h.precip_probability || 0)))}%</div>
-    <div>${nextRain ? `Next rain ${num(nextRain.precip_probability)}% ${timeStr(nextRain.time)}` : 'No rain signal'}</div>`;
+  $('c48-summary').innerHTML = `<span>48 hr forecast</span>
+    <span class="big">${num(lo)}°–${num(hi)}°</span>
+    <span>Peak rain ${num(Math.max(...hrs.map((h) => h.precip_probability || 0)))}%</span>
+    <span>${nextRain ? `Next rain ${num(nextRain.precip_probability)}% ${timeStr(nextRain.time)}` : 'No rain signal'}</span>`;
 }
 
 // ---------- day cards ----------
@@ -170,8 +203,8 @@ function tempArc(lo, hi, domainLo = 0, domainHi = 110) {
   const R = 46, C = 2 * Math.PI * R;
   const start = f(lo), len = Math.max(0.04, f(hi) - f(lo));
   return `<svg class="daysvg" viewBox="0 0 110 110">
-    <circle cx="55" cy="55" r="${R}" fill="none" stroke="#253141" stroke-width="4"/>
-    <circle cx="55" cy="55" r="${R}" fill="none" stroke="#4fb8ff" stroke-width="4" stroke-linecap="round"
+    <circle cx="55" cy="55" r="${R}" fill="none" stroke="#22303f" stroke-width="5"/>
+    <circle cx="55" cy="55" r="${R}" fill="none" stroke="#4fb8ff" stroke-width="5" stroke-linecap="round"
       stroke-dasharray="${(len * C).toFixed(1)} ${C.toFixed(1)}" stroke-dashoffset="${(-start * C).toFixed(1)}"
       transform="rotate(-90 55 55)"/></svg>`;
 }
@@ -182,15 +215,16 @@ function renderDays(fc) {
   $('daycards').innerHTML = days.map((d, i) => {
     const date = new Date(d.day_start_local * 1000);
     const name = labels[i] || date.toLocaleDateString([], { weekday: 'short' });
-    return `<div class="daycard">
-      <div class="dc-head"><span>${name}</span><span class="muted">${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span></div>
+    const amount = qpf?.[i];
+    return `<div class="daycard" data-panel="day-${i}">
+      <div class="dc-head"><span>${name}</span><span>${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span></div>
       <div class="dc-body">
         ${tempArc(d.air_temp_low, d.air_temp_high)}
         <div class="dc-mid">
-          <div class="dc-icon">${d.icon?.includes('thunder') ? '⛈️' : d.icon?.includes('rain') ? '🌧️' : d.icon?.includes('snow') ? '❄️' : d.icon?.includes('cloudy') ? '⛅' : '☀️'}</div>
+          <div class="dc-icon">${icon.wx(d.icon, 30)}</div>
           <div class="dc-temp"><b>${num(d.air_temp_high)}°</b><span>/${num(d.air_temp_low)}°</span></div>
           <div class="dc-cond">${d.conditions || ''}</div>
-          <div class="dc-pop">${num(d.precip_probability)}%${d.precip_icon ? '' : ''}</div>
+          <div class="dc-pop">${num(d.precip_probability)}%${amount != null ? ` · ${num(amount, 2)}"` : ''}</div>
         </div>
       </div>
     </div>`;
@@ -199,15 +233,9 @@ function renderDays(fc) {
 
 // ---------- dial gauges ----------
 
-function ringSVG(frac, color, inner) {
-  const R = 42, C = 2 * Math.PI * R;
-  const f = Math.max(0, Math.min(1, frac || 0));
-  return `<div class="gwrap"><svg viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r="${R}" fill="none" stroke="#253141" stroke-width="4"/>
-      <circle cx="50" cy="50" r="${R}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round"
-        stroke-dasharray="${(f * C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 50 50)"/>
-    </svg><div class="ginner">${inner}</div></div>`;
-}
+// A gauge is its face plus the readout layered over it; the face decides what the value looks
+// like (compass needle, barometer dial, filling droplet) rather than every quantity being a ring.
+const gauge = (face, inner) => `<div class="gwrap">${face}<div class="ginner">${inner}</div></div>`;
 
 function renderGauges(fc) {
   const c = fc.current_conditions;
@@ -215,36 +243,36 @@ function renderGauges(fc) {
   const metric = settings().units === 'metric';
 
   const windMax = metric ? 60 : 40;
-  $('g-wind').innerHTML = ringSVG(c.wind_avg / windMax, '#4fdc8b',
+  $('g-wind').innerHTML = gauge(icon.compass(c.wind_direction, c.wind_avg / windMax),
     `<b>${num(c.wind_avg)}</b><small>${U.wind()}</small><span>1h gust ${num(c.wind_gust)} · ${deg2compass(c.wind_direction)}</span>`);
 
   const rain = c.precip_accum_local_day || 0;
-  $('g-rain').innerHTML = ringSVG(rain / (metric ? 25 : 1), '#4fb8ff',
+  $('g-rain').innerHTML = gauge(icon.rainRing(rain / (metric ? 25 : 1), rain > 0),
     `<b>${rain > 0 ? num(rain, 2) : 'Dry'}</b><span>${num(rain, 2)} ${U.precip()} today</span>`);
 
   const rhT = trend(I.rh, 3);
-  $('g-hum').innerHTML = ringSVG(c.relative_humidity / 100, '#4fb8ff',
+  $('g-hum').innerHTML = gauge(icon.ring(c.relative_humidity / 100, '#4fb8ff'),
     `<b>${num(c.relative_humidity)}%</b><span>${rhT == null ? '' : `${rhT >= 0 ? '↑' : '↓'} ${num(Math.abs(rhT))} pts / 3h`}</span>`);
 
   const pLo = metric ? 970 : 28.5, pHi = metric ? 1040 : 31;
   const pT = trend(I.press, 3);
-  $('g-press').innerHTML = ringSVG((c.sea_level_pressure - pLo) / (pHi - pLo), '#c9a6ff',
+  $('g-press').innerHTML = gauge(icon.dial((c.sea_level_pressure - pLo) / (pHi - pLo)),
     `<b>${num(c.sea_level_pressure, 2)}</b><small>${U.press()}</small><span>${pT == null ? '' : `${pT >= 0 ? '↑' : '↓'} ${num(Math.abs(pT), 2)} / 3h`}</span>`);
 
   const dT = trend(I.temp, 3, true);
-  $('g-dew').innerHTML = ringSVG(c.dew_point / (metric ? 30 : 85), '#4f8bff',
+  $('g-dew').innerHTML = gauge(icon.droplet(c.dew_point / (metric ? 30 : 85)),
     `<b>${num(c.dew_point)}°</b><span>${dT == null ? '' : `${Math.abs(dT) < 0.3 ? '→ steady' : dT > 0 ? '↑ rising' : '↓ falling'} / 3h`}</span>`);
 
-  $('g-uv').innerHTML = ringSVG(c.uv / 12, c.uv >= 8 ? '#ff5f56' : c.uv >= 6 ? '#ffb84f' : '#4fdc8b',
+  $('g-uv').innerHTML = gauge(icon.uvRing(c.uv),
     `<b>UV ${num(c.uv)}</b><span>${uvWord(c.uv)}${c.solar_radiation ? ` · ${num(c.solar_radiation)} W/m²` : ''}</span>`);
 
   const strikes = history.reduce((a, o) => a + (o[I.strikes] || 0), 0);
   const dist = last[I.strikeDist];
-  $('g-ltg').innerHTML = ringSVG(Math.min(strikes / 20, 1), '#ffb84f',
+  $('g-ltg').innerHTML = gauge(icon.boltRing(Math.min(strikes / 20, 1), strikes > 0),
     `<b>${strikes || 'None'}</b><span>${strikes ? `nearest ${num(dist)} ${U.dist()} · 3h` : 'No strikes'}</span>`);
 
   const wb = c.wet_bulb_temperature;
-  $('g-wet').innerHTML = ringSVG((wb - (metric ? 0 : 32)) / (metric ? 35 : 60), '#4fdc8b',
+  $('g-wet').innerHTML = gauge(icon.thermometer((wb - (metric ? 0 : 32)) / (metric ? 35 : 60)),
     `<b>${num(wb)}°</b><span>Air ${num(c.air_temperature)}°</span>`);
 }
 
@@ -275,6 +303,13 @@ async function loadConsensus() {
   } catch { consensus = null; }
 }
 
+async function loadQpf() {
+  try {
+    const j = await api.dailyPrecip();
+    qpf = j.daily?.precipitation_sum || null;
+  } catch { qpf = null; }
+}
+
 export function renderPro(fc = deskForecast()) {
   if (!fc) return;
   renderHero(fc);
@@ -283,12 +318,16 @@ export function renderPro(fc = deskForecast()) {
   render48(fc);
   renderDays(fc);
   renderGauges(fc);
+  // the day cards are rebuilt from scratch each render, so their grips and saved sizes have to
+  // be reattached; initLayout skips anything already wired.
+  initLayout();
 }
 
 export function initPro() {
   window.addEventListener('wd:forecast', (e) => renderPro(e.detail));
   every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
   every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
+  every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
   every('pro-clock', 60, () => { if (deskForecast()) renderHero(deskForecast()); });
 
   $('ticker-pause').onclick = () => {

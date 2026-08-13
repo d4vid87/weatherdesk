@@ -7,6 +7,7 @@ import { initSignals, refreshSignals } from './signals.js';
 import { initBoards } from './boards.js';
 import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
+import { initLayout } from './layout.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,7 +40,7 @@ $('btn-save').onclick = async () => {
   await hydrateStation();
   openDrawer(false);
   initDesk(); // idempotent: every() replaces existing jobs
-  initIntel(); initSignals(); initBoards(); initPro();
+  initIntel(); initSignals(); initBoards(); initPro(); initLayout();
 };
 
 // station meta fills name/lat/lon and the Tempest device id when blank
@@ -114,5 +115,5 @@ if (!configured()) {
   openDrawer(true);
 } else {
   // lat/lon must land before the open-meteo/NWS jobs start
-  hydrateStation().then(() => { initDesk(); initIntel(); initSignals(); initBoards(); initPro(); loadDeskRadar(); });
+  hydrateStation().then(() => { initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initLayout(); loadDeskRadar(); });
 }

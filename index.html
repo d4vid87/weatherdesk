@@ -102,97 +102,125 @@
 
   /* ---- pro desk ---- */
   #desk { padding: 0; }
-  #desk > .grid, #ticker, #trends, #c48, #desk-radar, #daycards, #gauges { margin: var(--gap) auto; max-width: 1500px; }
-  #desk > .grid { padding: 0 var(--gap); }
+  #desk-stack { max-width: 1560px; margin: 0 auto; padding: 0 var(--gap) var(--gap); }
+  #desk-stack > * { margin: var(--gap) 0; }
+  #hero { margin-top: 0 !important; }
 
-  /* full-bleed sky, but the text tracks the same 1500px column as every panel below it —
-     otherwise the temperature and the sun sit a metre apart on an ultrawide. */
-  #hero { padding: 14px 18px 22px; color: #fff; position: relative; overflow: hidden; }
-  #hero > * { max-width: 1500px; margin-left: auto; margin-right: auto; }
-  .hero-top { display: flex; justify-content: space-between; font-size: 13px; }
+  /* Every panel carries a drag grip and the browser's own resize handle. `resize` needs a
+     non-visible overflow to show its corner, which is also what keeps a resized panel clipped
+     instead of spilling over its neighbour. */
+  [data-panel] { position: relative; resize: both; overflow: hidden; min-width: 160px; min-height: 60px; }
+  [data-panel].dragging { opacity: .45; outline: 2px dashed var(--accent); }
+  .grip { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; cursor: grab; color: var(--muted);
+    background: #0b111a99; border: 1px solid var(--line); opacity: 0; transition: opacity .15s;
+    font-size: 12px; line-height: 1; z-index: 5; user-select: none; }
+  [data-panel]:hover > .grip { opacity: 1; }
+  .grip:active { cursor: grabbing; }
+  .panel-hidden { display: none; }
+
+  /* hero */
+  #hero { padding: 16px 20px 20px; color: #fff; overflow: hidden; border-radius: 12px;
+    background: linear-gradient(160deg, #1f6fb8, #7fb6e6); }
+  .hero-top { display: flex; justify-content: space-between; font-size: 14px; }
   .hero-right { text-align: right; }
-  .hero-dim { opacity: .75; }
-  #hero-place { font-size: 17px; font-weight: 600; }
-  #hero-icon { position: absolute; right: max(40px, calc((100% - 1500px) / 2 + 40px)); top: 30px;
-    font-size: 90px; opacity: .9; }
-  #hero-feels { margin-top: 18px; font-size: 14px; }
-  /* `auto` sides, not 0: the shorthand here would otherwise beat the centring above. */
-  #hero-temp { font-size: 78px; font-weight: 300; line-height: .95; margin: 2px auto; }
-  #hero-cond { font-size: 26px; font-weight: 600; }
-  #hero-hilo { font-size: 14px; }
-  .live { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: #ffffff22; }
+  .hero-dim { opacity: .78; }
+  #hero-place { font-size: 22px; font-weight: 600; }
+  #hero-sun { font-size: 17px; font-weight: 500; }
+  #hero-icon { position: absolute; right: 34%; top: 4px; opacity: .95; pointer-events: none; }
+  #hero-icon svg { filter: drop-shadow(0 0 26px #ffe9a877); }
+  #hero-feels { margin-top: 20px; font-size: 15px; }
+  .hero-now { display: flex; align-items: baseline; gap: 16px; }
+  #hero-temp { font-size: 84px; font-weight: 300; line-height: .95; }
+  #hero-cond { font-size: 30px; font-weight: 600; }
+  #hero-hilo { font-size: 16px; }
+  .live { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: #0f1c2b; color: #fff;
+    display: inline-flex; align-items: center; gap: 5px; }
   .live.on { color: #7dffb0; }
 
+  /* ticker */
   #ticker { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; overflow: hidden; padding: 8px 10px; }
+    border-radius: 10px; padding: 8px 10px; }
   #ticker-track { flex: 1; white-space: nowrap; overflow: hidden; display: flex; gap: 14px; align-items: center;
     animation: tick 60s linear infinite; }
   /* the track holds the item list twice, so -50% lands exactly on the copy and the first item
      never scrolls away for good. */
   @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   #ticker-track.still { animation: none; }
-  .tick b { background: var(--panel2); border: 1px solid var(--line); color: var(--accent); font-size: 10px;
-    letter-spacing: .1em; padding: 2px 6px; border-radius: 4px; margin-right: 8px; }
+  .tick { font-size: 15px; }
+  .tick b { background: #1a2432; border: 1px solid var(--line); color: var(--warn); font-size: 11px;
+    letter-spacing: .1em; padding: 3px 8px; border-radius: 5px; margin-right: 9px; }
   .tick-sep { color: var(--muted); }
   #ticker-pause { background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
     border-radius: 6px; cursor: pointer; padding: 2px 8px; }
 
-  #trends { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
-  #trends > div { padding: 12px 16px; border-left: 1px solid var(--line); }
-  #trends > div:first-child { border-left: 0; }
-  #trends h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; }
-  #trends .warm { color: var(--warn); font-size: 20px; }
-  #trends .cool { color: var(--accent); font-size: 20px; }
-  #t-model { font-size: 20px; }
-
-  #c48 { display: flex; gap: 14px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 14px; }
-  #c48-summary { flex: 0 0 150px; font-size: 13px; color: var(--muted); }
-  #c48-summary .big { font-size: 20px; color: var(--text); margin: 4px 0; }
-  #c48-rows { flex: 1; min-width: 0; }
-  .c48-row { display: flex; align-items: center; gap: 10px; }
-  .c48-lab { flex: 0 0 62px; font-size: 11px; color: var(--muted); text-align: right; }
-  .c48-plot { flex: 1; min-width: 0; }
-  #c48-temp svg { width: 100%; height: 90px; overflow: visible; }
-  .c-lbl { fill: var(--muted); font-size: 11px; text-anchor: middle; }
-  #c48-rain { display: flex; align-items: flex-end; gap: 1px; height: 46px; }
-  .rbar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
-  .rbar i { display: block; width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; }
-  .rbar u { position: absolute; bottom: -14px; left: 0; font-size: 10px; color: var(--muted); text-decoration: none; }
-  #c48-rain { margin-bottom: 16px; }
-  #c48-wind { display: flex; gap: 1px; }
-  .wcell { flex: 1; text-align: center; position: relative; }
-  .warrow { display: inline-block; color: var(--good); font-size: 13px; }
-  .wcell u { display: block; font-size: 10px; color: var(--muted); text-decoration: none; }
-  #c48-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
-
-  /* ponytail: Hook Echo draws its own toolbars/legend inside the frame, so a short strip clips
-     them. Tie to viewport height instead of a fixed px. */
-  #desk-radar { height: clamp(520px, 78vh, 900px); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  /* radar beside the numbers, the way the reference reads */
+  #mid { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); gap: var(--gap);
+    align-items: stretch; resize: vertical; }
+  #mid-right { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+  #desk-radar { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; min-height: 380px; }
   #desk-radar-frame { width: 100%; height: 100%; border: 0; display: block; }
 
-  #daycards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--gap); }
-  .daycard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
-  .dc-head { display: flex; justify-content: space-between; font-size: 13px; }
-  .dc-body { position: relative; height: 120px; display: flex; align-items: center; justify-content: center; }
-  .daysvg { position: absolute; inset: 0; margin: auto; width: 120px; height: 120px; }
-  .dc-mid { position: relative; text-align: center; }
-  .dc-icon { font-size: 22px; }
-  .dc-temp b { font-size: 26px; }
-  .dc-temp span { color: var(--muted); }
-  .dc-cond, .dc-pop { font-size: 12px; color: var(--muted); }
+  #trends { display: grid; grid-template-columns: repeat(3, 1fr);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  #trends > div { padding: 10px 14px; border-left: 1px solid var(--line); }
+  #trends > div:first-child { border-left: 0; }
+  #trends h3 { margin: 0 0 3px; font-size: 13px; color: #cdd7e2; font-weight: 500; }
+  #trends .warm { color: var(--warn); font-size: 23px; font-weight: 600; }
+  #trends .cool { color: var(--accent); font-size: 23px; font-weight: 600; }
+  #t-model { font-size: 23px; font-weight: 600; color: var(--warn); }
+  #trends .muted { font-size: 12px; }
 
+  #c48 { display: flex; flex-direction: column; gap: 8px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; flex: 1; min-height: 240px; }
+  #c48-summary { font-size: 15px; color: #cdd7e2; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  #c48-summary .big { font-size: 20px; color: var(--text); font-weight: 600; }
+  #c48-rows { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; }
+  .c48-row { display: flex; align-items: center; gap: 10px; flex: 1; min-height: 0; }
+  .c48-lab { flex: 0 0 74px; font-size: 13px; color: #cdd7e2; }
+  .c48-lab.rain { color: var(--accent); }
+  .c48-lab.wind { color: var(--good); }
+  .c48-lab i { font-style: normal; color: var(--muted); font-size: 11px; }
+  .c48-plot { flex: 1; min-width: 0; }
+  #c48-temp svg { width: 100%; height: 74px; overflow: visible; display: block; }
+  .c-lbl { fill: #cdd7e2; font-size: 10px; text-anchor: middle; }
+  /* rain reads as a row of dots whose size tracks the chance, like the reference */
+  #c48-rain { display: flex; align-items: center; gap: 1px; height: 44px; position: relative; }
+  .rbar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+  .rbar i { display: block; border-radius: 999px; background: var(--accent); }
+  .rbar u { position: absolute; bottom: -13px; font-size: 10px; color: #cdd7e2; text-decoration: none; }
+  #c48-wind { display: flex; gap: 1px; height: 40px; align-items: center; }
+  .wcell { flex: 1; text-align: center; }
+  .warrow { display: block; color: var(--good); font-size: 15px; line-height: 1; }
+  .wcell u { display: block; font-size: 10px; color: #cdd7e2; text-decoration: none; margin-top: 2px; }
+  #c48-axis { display: flex; justify-content: space-between; font-size: 11px; color: #cdd7e2; }
+
+  /* day cards */
+  #daycards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--gap); }
+  .daycard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+  .dc-head { display: flex; justify-content: space-between; font-size: 14px; }
+  .dc-head span:last-child { color: var(--muted); }
+  .dc-body { position: relative; height: 128px; display: flex; align-items: center; justify-content: center; }
+  .daysvg { position: absolute; inset: 0; margin: auto; width: 128px; height: 128px; }
+  .dc-mid { position: relative; text-align: center; }
+  .dc-icon { height: 30px; margin-bottom: -2px; }
+  .dc-icon svg { vertical-align: top; }
+  .dc-temp b { font-size: 30px; font-weight: 600; }
+  .dc-temp span { color: var(--muted); font-size: 17px; }
+  .dc-cond { font-size: 13px; }
+  .dc-pop { font-size: 13px; color: var(--muted); }
+
+  /* gauges */
   #gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--gap); }
-  .gauge { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
-  .gauge h3 { margin: 0; font-size: 12px; color: var(--muted); font-weight: 600; }
-  .gwrap { position: relative; height: 130px; }
-  .gwrap svg { width: 130px; height: 130px; display: block; margin: 0 auto; }
+  .gauge { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px 12px; }
+  .gauge h3 { margin: 0; font-size: 15px; color: #cdd7e2; font-weight: 500; }
+  .gwrap { position: relative; height: 132px; }
+  .gwrap svg { width: 132px; height: 132px; display: block; margin: 0 auto; }
   .ginner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; text-align: center; }
-  .ginner b { font-size: 24px; font-weight: 500; }
+    justify-content: center; text-align: center; pointer-events: none; }
+  .ginner b { font-size: 26px; font-weight: 600; }
   .ginner small { font-size: 11px; color: var(--muted); }
-  .ginner span { font-size: 11px; color: var(--muted); max-width: 120px; }
+  .ginner span { font-size: 12px; color: #cdd7e2; max-width: 118px; }
 
   .chart { width: 100%; height: 150px; display: block; }
   #places { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -259,7 +287,8 @@
   <div id="notif-stack"></div>
 
   <section class="page" id="desk">
-    <div id="hero">
+    <div id="desk-stack">
+    <div id="hero" data-panel="hero">
       <div class="hero-top">
         <div>
           <div id="hero-place"></div>
@@ -268,59 +297,67 @@
         <div class="hero-right">
           <div id="hero-sun"></div>
           <div id="hero-moon" class="hero-dim"></div>
+          <div id="hero-moonset" class="hero-dim"></div>
           <div><span id="hero-live" class="live">● --</span> <span id="hero-batt" class="hero-dim"></span></div>
         </div>
       </div>
       <div id="hero-icon"></div>
       <div id="hero-feels" class="hero-dim"></div>
-      <div id="hero-temp">--°</div>
-      <div id="hero-cond"></div>
-      <div id="hero-hilo" class="hero-dim"></div>
-    </div>
-
-    <div id="ticker"><div id="ticker-track"></div><button id="ticker-pause">❚❚</button></div>
-
-    <div id="trends">
-      <div><h3>Station vs model</h3><div id="t-model" class="warm">--</div><div id="t-model-sub" class="muted"></div></div>
-      <div><h3>Temperature trend</h3><div id="t-temp">--</div><div class="muted">Tempest last 3h</div></div>
-      <div><h3>Pressure trend</h3><div id="t-press">--</div><div class="muted">Tempest last 3h</div></div>
-    </div>
-
-    <div id="c48">
-      <div id="c48-summary"></div>
-      <div id="c48-rows">
-        <div class="c48-row"><span class="c48-lab">Temp</span><div id="c48-temp" class="c48-plot"></div></div>
-        <div class="c48-row"><span class="c48-lab">Rain %</span><div id="c48-rain" class="c48-plot"></div></div>
-        <div class="c48-row"><span class="c48-lab">Wind</span><div id="c48-wind" class="c48-plot"></div></div>
-        <div class="c48-row"><span class="c48-lab"></span><div id="c48-axis" class="c48-plot"></div></div>
+      <div class="hero-now">
+        <div id="hero-temp">--°</div>
+        <div>
+          <div id="hero-cond"></div>
+          <div id="hero-hilo" class="hero-dim"></div>
+        </div>
       </div>
     </div>
 
-    <div id="desk-radar"><iframe id="desk-radar-frame" title="Radar loop"></iframe></div>
+    <div id="ticker" data-panel="ticker"><div id="ticker-track"></div><button id="ticker-pause">❚❚</button></div>
+
+    <div id="mid" data-panel="mid">
+      <div id="desk-radar" data-panel="radar"><iframe id="desk-radar-frame" title="Radar loop"></iframe></div>
+      <div id="mid-right">
+        <div id="trends" data-panel="trends">
+          <div><h3>Station vs model</h3><div id="t-model" class="warm">--</div><div id="t-model-sub" class="muted"></div></div>
+          <div><h3>Temperature trend</h3><div id="t-temp">--</div><div class="muted">Tempest last 3h</div></div>
+          <div><h3>Pressure trend</h3><div id="t-press">--</div><div class="muted">Tempest last 3h</div></div>
+        </div>
+
+        <div id="c48" data-panel="c48">
+          <div id="c48-summary"></div>
+          <div id="c48-rows">
+            <div class="c48-row"><span class="c48-lab">Temp <i id="c48-unit"></i></span><div id="c48-temp" class="c48-plot"></div></div>
+            <div class="c48-row"><span class="c48-lab rain">Rain %</span><div id="c48-rain" class="c48-plot"></div></div>
+            <div class="c48-row"><span class="c48-lab wind">Wind <i id="c48-wunit"></i></span><div id="c48-wind" class="c48-plot"></div></div>
+            <div class="c48-row"><span class="c48-lab"></span><div id="c48-axis" class="c48-plot"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div id="daycards"></div>
 
     <div id="gauges">
-      <div class="gauge"><h3>Wind</h3><div id="g-wind"></div></div>
-      <div class="gauge"><h3>Rain</h3><div id="g-rain"></div></div>
-      <div class="gauge"><h3>Humidity</h3><div id="g-hum"></div></div>
-      <div class="gauge"><h3>Pressure</h3><div id="g-press"></div></div>
-      <div class="gauge"><h3>Dew point</h3><div id="g-dew"></div></div>
-      <div class="gauge"><h3>UV / solar</h3><div id="g-uv"></div></div>
-      <div class="gauge"><h3>Lightning</h3><div id="g-ltg"></div></div>
-      <div class="gauge"><h3>Wet bulb</h3><div id="g-wet"></div></div>
+      <div class="gauge" data-panel="g-wind"><h3>Wind</h3><div id="g-wind"></div></div>
+      <div class="gauge" data-panel="g-rain"><h3>Rain</h3><div id="g-rain"></div></div>
+      <div class="gauge" data-panel="g-hum"><h3>Humidity</h3><div id="g-hum"></div></div>
+      <div class="gauge" data-panel="g-press"><h3>Pressure</h3><div id="g-press"></div></div>
+      <div class="gauge" data-panel="g-dew"><h3>Dew point</h3><div id="g-dew"></div></div>
+      <div class="gauge" data-panel="g-uv"><h3>UV / solar</h3><div id="g-uv"></div></div>
+      <div class="gauge" data-panel="g-ltg"><h3>Lightning</h3><div id="g-ltg"></div></div>
+      <div class="gauge" data-panel="g-wet"><h3>Wet bulb</h3><div id="g-wet"></div></div>
     </div>
 
-    <div class="grid">
-      <div class="card"><h2>10-day</h2><div id="tenday"></div></div>
-      <div class="card"><h2>Alert center</h2><div id="alerts" class="muted">--</div></div>
-      <div class="card" style="grid-column: span 2">
+    <div class="grid" id="desk-grid">
+      <div class="card" data-panel="tenday"><h2>10-day</h2><div id="tenday"></div></div>
+      <div class="card" data-panel="alerts"><h2>Alert center</h2><div id="alerts" class="muted">--</div></div>
+      <div class="card" data-panel="story" style="grid-column: span 2">
         <h2>Weather story · 24h</h2>
         <div id="story" class="muted">--</div>
         <div id="nowcast" style="margin-top:8px;color:var(--accent)"></div>
       </div>
 
-      <div class="card">
+      <div class="card" data-panel="agree">
         <h2>Model agreement</h2>
         <div id="agree-verdict" style="margin-bottom:6px"></div>
         <div id="agree-rows" class="kv-rows"></div>
@@ -328,15 +365,16 @@
         <div id="edge" class="muted" style="margin-top:4px;font-size:13px"></div>
       </div>
 
-      <div class="card"><h2>Forecast changes</h2><div id="changes" class="muted">--</div></div>
-      <div class="card"><h2>Forecast accuracy</h2><div id="verify" class="muted">--</div></div>
+      <div class="card" data-panel="changes"><h2>Forecast changes</h2><div id="changes" class="muted">--</div></div>
+      <div class="card" data-panel="verify"><h2>Forecast accuracy</h2><div id="verify" class="muted">--</div></div>
 
-      <div class="card">
+      <div class="card" data-panel="aqi">
         <h2>Air quality</h2>
         <div id="aqi-val">--</div>
         <div id="aqi-label" class="muted"></div>
         <div id="aqi-detail" class="muted" style="font-size:12px"></div>
       </div>
+    </div>
     </div>
   </section>
 
@@ -395,6 +433,13 @@
       <button class="primary" id="btn-save">Save</button>
       <button id="btn-diag">Diagnostics</button>
       <button id="btn-close">Close</button>
+    </div>
+    <div class="row">
+      <button id="btn-layout-reset">Reset panel layout</button>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:6px">
+      Hover a panel for its grip: drag the grip to move it, drag the bottom-right corner to resize,
+      double-click the grip to restore that panel's size.
     </div>
     <h2 style="font-size:13px;margin-top:18px">Places</h2>
     <div class="row" style="margin-top:6px">

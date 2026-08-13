@@ -87,6 +87,15 @@ export function nowcast(lat = coords().lat, lon = coords().lon) {
   })}`);
 }
 
+// Tempest's daily block carries a precip probability but no amount, and the day cards want both.
+export function dailyPrecip(lat = coords().lat, lon = coords().lon) {
+  const imperial = settings().units !== 'metric';
+  return getJSON(`https://api.open-meteo.com/v1/forecast?${qs({
+    latitude: lat, longitude: lon, daily: 'precipitation_sum', forecast_days: 7, timezone: 'auto',
+    ...(imperial ? { precipitation_unit: 'inch' } : {}),
+  })}`);
+}
+
 export function aqi(lat = coords().lat, lon = coords().lon) {
   return getJSON(`https://air-quality-api.open-meteo.com/v1/air-quality?${qs({
     latitude: lat, longitude: lon, hourly: 'us_aqi,pm2_5,ozone', forecast_days: 1, timezone: 'auto',
