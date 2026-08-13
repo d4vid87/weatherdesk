@@ -4,7 +4,9 @@ A self-hosted weather dashboard for a WeatherFlow Tempest station, built for a w
 LAN. Vanilla JS, native ES modules, no build step, no framework, no chart library, no backend —
 every call goes browser-direct to a free public API.
 
-![The Desk: sky hero, signal ticker, trend strip, 48h forecast chart and inline radar](docs/screenshot.png)
+![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
+gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
+chart](docs/screenshot.png)
 
 ## Sections
 
