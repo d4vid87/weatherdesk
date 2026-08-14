@@ -58,8 +58,9 @@ install; leave the app running.
 - **macOS** — open the `.dmg`, drag WeatherDesk to Applications. Unsigned, so on first launch macOS
   refuses it: **System Settings → Privacy & Security → Open Anyway**, or in a terminal
   `xattr -dr com.apple.quarantine /Applications/WeatherDesk.app`.
-- **Linux** — `sudo apt install ./WeatherDesk_*_amd64.deb`, or run the `.AppImage`
-  (`chmod +x`; needs `libfuse2` installed).
+- **Linux** — `sudo apt install ./WeatherDesk_*_amd64.deb` (Debian, Ubuntu, Mint, Pop!_OS). On other
+  distributions install `webkit2gtk-4.1` and build from source, below — there is no AppImage: it has
+  to carry its own WebKitGTK, and that copy crashes on hosts newer than the machine that built it.
 
 To start it automatically: macOS System Settings → General → Login Items; Windows put a shortcut in
 `shell:startup`; Linux add a `.desktop` file to `~/.config/autostart`.
