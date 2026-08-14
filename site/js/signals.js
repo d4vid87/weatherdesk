@@ -79,7 +79,10 @@ export function connectWs() {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'rapid_wind' && m.ob) renderRapid(m.ob[1], m.ob[2]);
-    else if (m.type === 'evt_strike' && m.evt) onStrike(m.evt);
+    else if (m.type === 'evt_strike' && m.evt) {
+      onStrike(m.evt);
+      window.dispatchEvent(new CustomEvent('wd:ws-strike', { detail: m.evt }));
+    }
     else if (m.type === 'obs_st' && m.obs?.[0]) window.dispatchEvent(new CustomEvent('wd:ws-obs', { detail: m.obs[0] }));
   };
 

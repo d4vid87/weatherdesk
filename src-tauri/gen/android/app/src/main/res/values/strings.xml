@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">"WeatherDesk"</string>
+    <string name="main_activity_title">"WeatherDesk"</string>
+</resources>

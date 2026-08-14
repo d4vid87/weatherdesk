@@ -18,15 +18,22 @@ chart](docs/screenshot.png)
 
 - **Desk** — every panel drags by its grip and resizes from its corner, with the arrangement kept
   in `localStorage`; sky-gradient hero (astro + moon phase + battery + live-observation age), signal ticker,
-  station-vs-model trend strip, 48h temp/rain/wind chart, click-to-load inline radar, six day cards with
+  station-vs-model trend strip, 48h temp/rain/wind chart, inline radar, six day cards with
   temperature arcs, eight dial gauges, 10-day list, alert center, weather story, model agreement,
   forecast changes, forecast accuracy, air quality.
 - **Forecast Lab** — radar, embedded from [Hook Echo-WX](https://hookecho.netlify.app/).
 
-The Desk radar waits for a click. A live radar loop repaints ten times a second, and the WebKit
+The Desk radar loads itself, in Hook Echo's embedded mode: no chrome, and one frame a minute until
+you touch it. That matters because a live radar loop repaints ten times a second, and the WebKit
 webview the desktop app uses on Linux and macOS redraws the whole Desk on every one of those
-frames — enough to saturate a CPU core and freeze the window. In a browser it is free; load it
-there, or in the Forecast Lab tab, which has the Desk hidden behind it.
+frames — enough to saturate a CPU core. Touch the map and it animates normally; the Forecast Lab
+tab is the full-chrome view.
+
+Settings → **Radar site** picks which radar, out of all 201 WSR-88D and TDWR sites, nearest first;
+leave it on *Nearest to my station* and it follows the station. Wherever you leave the map — site,
+product, tilt, basemap, zoom — is remembered here and handed back to the viewer on the next launch.
+It has to work that way round: browsers partition an iframe's storage, so the embedded viewer
+cannot remember anything on its own. The Desk and the Lab share one remembered view.
 - **Local Signals** — nearby-station comparison table, the Tempest live wind feed, a 24-hour
   lightning-strike log and the notification history.
 - **Data** — ten boards off 7-day device history, including a wind rose, plus multi-model output
@@ -61,6 +68,50 @@ tablet case is the one that matters, and HTML5 drag-and-drop never fires for tou
 | Multi-model agreement, 15-minute nowcast, AQI | `api.open-meteo.com` |
 | Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.netlify.app` |
 | Place search | `photon.komoot.io` |
+
+## Smart home
+
+WeatherDesk publishes the station to your own MQTT broker and reads a few Home Assistant entities
+back. Both halves are dark until you fill them in under Settings → **Smart home**.
+
+**Publishing.** Point *MQTT WebSocket URL* at a broker with a WebSocket listener — mosquitto wants
+
+```
+listener 9001
+protocol websockets
+```
+
+— and readings arrive on `weatherdesk/<station id>/temp`, `…/wind`, `…/gust`, `…/rain`,
+`…/pressure`, and the rest, retained, **in SI units** (°C, m/s, hPa, mm) whatever the dashboard is
+set to display. Events land on `weatherdesk/<station id>/event/{lightning,rain,gust}` and are not
+retained. `weatherdesk/<station id>/status` is `online`/`offline`, the second written by the
+broker's last-will when the dashboard goes away.
+
+Home Assistant discovers all of it by itself: the retained `homeassistant/…/config` topics
+materialize one device with every sensor under it, and they survive a Home Assistant restart with
+no dashboard open. Changing your station ID leaves the old device's retained configs behind —
+delete them with `mosquitto_pub -t 'homeassistant/sensor/wd_<old id>_temp/config' -r -n`, one per
+topic, if you care.
+
+**Reading back.** *Home Assistant URL* + a long-lived access token + a comma-separated list of
+entity ids puts their live states on the Desk. Home Assistant has to allow this origin —
+in `configuration.yaml`:
+
+```yaml
+http:
+  cors_allowed_origins:
+    - http://tauri.localhost
+    - http://<the LAN URL in the window title>
+```
+
+**HomeKit, Alexa, Google.** Through Home Assistant, which already bridges all three — there is no
+WeatherDesk-specific code for them and there shouldn't be. Add the MQTT integration (the device
+above appears), then Settings → Devices & Services → Add Integration → **HomeKit Bridge** and pick
+it; Alexa and Google go through Home Assistant Cloud or their own manual setups.
+
+Two limits worth knowing: publishing only happens while the dashboard is open somewhere (leave the
+desktop app running — that is the always-on copy), and a browser tab served over `https` cannot
+reach a `ws://` broker at all. The desktop app and the LAN URL are both plain origins, so they can.
 
 ## Download & run
 
@@ -117,6 +168,13 @@ For a permanent install, a systemd user unit running that same command is enough
 
 The desktop app serves from its own origin, so settings saved in a browser install (token included)
 don't carry over — paste the token once more in the app.
+
+**Android / Fire tablets.** `WeatherDesk.apk` is on the same Releases page. Sideload it — the
+tablet will ask you to allow installs from whatever app you downloaded it with (on Fire OS:
+Settings → Security & Privacy → Apps from Unknown Sources). One APK covers 64-bit and 32-bit
+devices, Fire OS 6 and newer. The phone build talks to WeatherFlow's websocket only: it neither
+listens for the hub's LAN broadcasts nor serves the dashboard to other devices, both of which stay
+desktop jobs. Paste the token once per device.
 
 Building the desktop app yourself: `cargo tauri build` in `src-tauri/` (Rust + the Tauri
 [prerequisites](https://tauri.app/start/prerequisites/) for your OS). Iterate on the HTML/JS with
