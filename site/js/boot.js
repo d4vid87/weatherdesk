@@ -9,6 +9,7 @@ import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
 import { initLayout, snapshot, restore } from './layout.js';
 import { initUdp } from './udp.js';
+import { initHome } from './home.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,6 +21,26 @@ function fillDrawer() {
   $('set-units').value = s.units;
   $('set-refresh').value = s.refreshSec;
   $('set-gust').value = s.windGustAlert;
+  $('set-mqtt-url').value = s.mqttUrl;
+  $('set-mqtt-user').value = s.mqttUser;
+  $('set-mqtt-pass').value = s.mqttPass;
+  $('set-ha-url').value = s.haUrl;
+  $('set-ha-token').value = s.haToken;
+  $('set-ha-entities').value = s.haEntities;
+  fillSites();
+}
+
+// Radar site picker: every site, nearest first, so the one the user wants is at the top of the
+// list rather than 200 rows down an alphabetical one.
+function fillSites() {
+  const el = $('set-radar-site');
+  if (!el || !SITES.length) return;
+  const s = settings();
+  const rows = s.lat == null ? SITES.map((x) => [x, null])
+    : SITES.map((x) => [x, milesBetween(s.lat, s.lon, x.lat, x.lon)]).sort((a, b) => a[1] - b[1]);
+  el.innerHTML = '<option value="">Nearest to my station</option>'
+    + rows.map(([x, d]) => `<option value="${x.id}">${x.id} — ${x.name}${d == null ? '' : ` (${Math.round(d)} mi)`}</option>`).join('');
+  el.value = s.radarSite || '';
 }
 
 const openDrawer = (open) => $('drawer').classList.toggle('open', open);
@@ -30,18 +51,33 @@ $('btn-full').onclick = fullscreen;
 $('btn-refresh').onclick = refreshAll;
 
 $('btn-save').onclick = async () => {
+  // A new radar site means the saved camera belongs to the old one — drop it so the fresh
+  // site-only link recenters.
+  if ($('set-radar-site').value !== (settings().radarSite || '')) store('wd.radar', null);
   saveSettings({
+    radarSite: $('set-radar-site').value,
     token: $('set-token').value.trim(),
     stationId: $('set-station').value.trim(),
     deviceId: $('set-device').value.trim(),
     units: $('set-units').value,
     refreshSec: +$('set-refresh').value || 60,
     windGustAlert: +$('set-gust').value || 30,
+    mqttUrl: $('set-mqtt-url').value.trim(),
+    mqttUser: $('set-mqtt-user').value.trim(),
+    mqttPass: $('set-mqtt-pass').value,
+    haUrl: $('set-ha-url').value.trim(),
+    haToken: $('set-ha-token').value.trim(),
+    haEntities: $('set-ha-entities').value.trim(),
   });
   await hydrateStation();
   openDrawer(false);
+  // Point the radars at whatever the settings now say (a changed site, or a first station fix).
+  for (const id of ['desk-radar-frame', 'lab-frame']) {
+    if ($(id).src) $(id).src = radarUrl(id === 'lab-frame' ? 8 : 6.5, id !== 'lab-frame');
+  }
+  loadDeskRadar();
   initDesk(); // idempotent: every() replaces existing jobs
-  initIntel(); initSignals(); initBoards(); initPro(); initLayout(); initUdp();
+  initIntel(); initSignals(); initBoards(); initPro(); initLayout(); initUdp(); initHome();
 };
 
 // station meta fills name/lat/lon and the Tempest device id when blank
@@ -126,27 +162,80 @@ window.addEventListener('wd:refresh', () => {
 });
 
 // Hook Echo-WX (own NEXRAD viewer) instead of the weathermap build. Deep link is
-// `#goto=[SITE],lon,lat,zoom` — site-less form is legal, and note lon before lat.
+// `#goto=SITE,lon,lat,zoom[,extras]` — note lon before lat, and unknown extras are ignored by
+// older builds, so adding to this string can never break a deployed viewer.
 const RADAR = 'https://hookecho.netlify.app/';
-const radarUrl = (zoom) => {
-  const s = settings();
-  return s.lat == null ? RADAR : `${RADAR}#goto=,${s.lon},${s.lat},${zoom}`;
-};
 
-// lazy-load the Lab iframe on first visit, centered on the station
+// The NEXRAD + TDWR registry, generated from Hook Echo's own site table
+// (`cargo run -p wxdata --example sites_json`). Frozen data — a live endpoint would be coupling
+// for nothing.
+let SITES = [];
+fetch('sites.json').then((r) => r.json()).then((j) => { SITES = j; fillSites(); }).catch(() => {});
+
+// Great-circle distance in miles. Site spacing is ~100 mi, so a spherical earth is plenty.
+export function milesBetween(aLat, aLon, bLat, bLon) {
+  const rad = Math.PI / 180, R = 3958.8;
+  const dLat = (bLat - aLat) * rad, dLon = (bLon - aLon) * rad;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+export function nearestSite(lat, lon, sites = SITES) {
+  let best = null, bestD = Infinity;
+  for (const s of sites) {
+    const d = milesBetween(lat, lon, s.lat, s.lon);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  return best;
+}
+
+// The site the radar should open on: the drawer pick, else the one nearest the station.
+function radarSite() {
+  const s = settings();
+  if (s.radarSite) return s.radarSite;
+  const n = s.lat == null ? null : nearestSite(s.lat, s.lon);
+  return n ? n.id : '';
+}
+
+// Hook Echo's own localStorage is partitioned (or dropped) inside our cross-origin iframe, so it
+// cannot remember anything for us — the saved view lives here and rides in on the deep link.
+// That is what stops the site and the camera resetting on every launch.
+export function radarUrl(zoom, embed = true) {
+  const s = settings(), v = load('wd.radar', null);
+  const site = v?.site || radarSite();
+  const lon = v ? v.lon : s.lon, lat = v ? v.lat : s.lat;
+  if (lat == null && !site) return RADAR;
+  const extras = v
+    ? [v.moment, v.tilt, `bm:${v.basemap}`, v.srv ? 'srv' : ''].filter(Boolean).join(',')
+    : '';
+  const q = embed ? '?embed' : '';
+  return `${RADAR}${q}#goto=${site},${lon ?? ''},${lat ?? ''},${v ? v.zoom : zoom}${extras ? ',' + extras : ''}`;
+}
+
+// The embedded viewer posts its view back once a second; persist it, but deliberately not through
+// saveSettings — a pan would fire `wd:settings` (and a full re-init) every second.
+window.addEventListener('message', (e) => {
+  if (e.origin !== new URL(RADAR).origin) return;
+  let v = e.data;
+  try { v = typeof v === 'string' ? JSON.parse(v) : v; } catch { return; }
+  if (v && v.hookecho === 1) store('wd.radar', v);
+});
+
+// lazy-load the Lab iframe on first visit — full chrome there, it is the roomier view
 window.addEventListener('wd:section', (e) => {
   const f = $('lab-frame');
   if (e.detail !== 'lab' || f.src) return;
-  f.src = radarUrl(8);
+  f.src = radarUrl(8, false);
 });
 
-// Inline radar strip on the Desk, same build, zoomed on the station. Click to load: a live radar
-// costs the desktop app's WebKit webview a whole core, and it takes the window down with it.
-$('desk-radar-load').onclick = () => {
+// Inline radar strip on the Desk: embedded, so it holds one frame a minute until touched. A live
+// radar loop otherwise costs the desktop app's WebKit webview a whole core.
+function loadDeskRadar() {
   const f = $('desk-radar-frame');
   if (!f.src) f.src = radarUrl(6.5);
   $('desk-radar').classList.add('loaded');
-};
+}
 
 initNav();
 initPlaces();
@@ -161,5 +250,20 @@ if (!configured()) {
   openDrawer(true);
 } else {
   // lat/lon must land before the open-meteo/NWS jobs start
-  hydrateStation().then(() => { initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initUdp(); });
+  hydrateStation().then(() => {
+    loadDeskRadar();
+    initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initUdp(); initHome();
+  });
+}
+
+// ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.
+if (location.search.includes('selftest')) {
+  const sites = [{ id: 'KTLX', name: 'Oklahoma City, OK', lat: 35.33, lon: -97.28 },
+    { id: 'KFWS', name: 'Dallas, TX', lat: 32.57, lon: -97.30 }];
+  console.assert(nearestSite(35.4, -97.5, sites).id === 'KTLX', 'nearest site');
+  console.assert(Math.round(milesBetween(35.33, -97.28, 32.57, -97.30)) === 191, 'distance mi');
+  store('wd.radar', { hookecho: 1, site: 'KFWS', moment: 'VEL', tilt: 2, srv: true, basemap: 'dark', lon: -97.3, lat: 32.6, zoom: 7 });
+  const u = radarUrl(6.5);
+  console.assert(u === `${RADAR}?embed#goto=KFWS,-97.3,32.6,7,VEL,2,bm:dark,srv`, 'radar url', u);
+  store('wd.radar', null);
 }

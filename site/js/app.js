@@ -5,6 +5,12 @@ const DEFAULTS = {
   units: 'imperial', refreshSec: 60, places: [], activePlace: null,
   nearbyStations: [], notif: { severe: true, precip: true, lightning: true, wind: true, winter: true, changes: true },
   windGustAlert: 30, layoutLocked: false,
+  // '' = whichever radar site is nearest the station. The camera itself lives in `wd.radar`,
+  // written once a second by the embedded viewer — not here, where it would re-init the app.
+  radarSite: '',
+  // Smart home: an MQTT broker to publish to, and a Home Assistant to read back from. Both dark
+  // until filled in.
+  mqttUrl: '', mqttUser: '', mqttPass: '', haUrl: '', haToken: '', haEntities: '',
 };
 
 let _settings = load('wd.settings', DEFAULTS);
