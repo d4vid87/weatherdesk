@@ -1,6 +1,6 @@
 [package]
 name = "weatherdesk"
-version = "1.0.2"
+version = "1.0.3"
 description = "Self-hosted WeatherFlow Tempest dashboard"
 authors = ["David May"]
 license = "MIT"

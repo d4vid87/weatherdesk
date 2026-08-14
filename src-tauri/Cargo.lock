@@ -3868,7 +3868,7 @@ dependencies = [
 
 [[package]]
 name = "weatherdesk"
-version = "1.0.1"
+version = "1.0.3"
 dependencies = [
  "tauri",
  "tauri-build",

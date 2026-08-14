@@ -18,10 +18,15 @@ chart](docs/screenshot.png)
 
 - **Desk** — every panel drags by its grip and resizes from its corner, with the arrangement kept
   in `localStorage`; sky-gradient hero (astro + moon phase + battery + live-observation age), signal ticker,
-  station-vs-model trend strip, 48h temp/rain/wind chart, inline radar, six day cards with
+  station-vs-model trend strip, 48h temp/rain/wind chart, click-to-load inline radar, six day cards with
   temperature arcs, eight dial gauges, 10-day list, alert center, weather story, model agreement,
   forecast changes, forecast accuracy, air quality.
 - **Forecast Lab** — radar, embedded from [Hook Echo-WX](https://hookecho.netlify.app/).
+
+The Desk radar waits for a click. A live radar loop repaints ten times a second, and the WebKit
+webview the desktop app uses on Linux and macOS redraws the whole Desk on every one of those
+frames — enough to saturate a CPU core and freeze the window. In a browser it is free; load it
+there, or in the Forecast Lab tab, which has the Desk hidden behind it.
 - **Local Signals** — nearby-station comparison table and the Tempest websocket live wind feed.
 - **Data** — nine boards off 7-day device history, multi-model output and the local verification log.
 

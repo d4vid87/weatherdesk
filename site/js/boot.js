@@ -99,13 +99,13 @@ window.addEventListener('wd:section', (e) => {
   f.src = radarUrl(8);
 });
 
-// inline radar strip on the Desk, same build, zoomed on the station
-function loadDeskRadar() {
+// Inline radar strip on the Desk, same build, zoomed on the station. Click to load: a live radar
+// costs the desktop app's WebKit webview a whole core, and it takes the window down with it.
+$('desk-radar-load').onclick = () => {
   const f = $('desk-radar-frame');
-  if (f.src || settings().lat == null) return;
-  f.src = radarUrl(6.5);
-}
-window.addEventListener('wd:settings', loadDeskRadar);
+  if (!f.src) f.src = radarUrl(6.5);
+  $('desk-radar').classList.add('loaded');
+};
 
 initNav();
 initPlaces();
