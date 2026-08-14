@@ -100,9 +100,26 @@ jobs:
           EOF
 
       - uses: tauri-apps/tauri-action@v0
+        if: matrix.mobile != 'android'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
-          mobile: ${{ matrix.mobile }}
+
+      # tauri-action has no notion of a mobile build — it would run `tauri build --apk`, which is
+      # not a thing. So the APK is built and uploaded by hand. The upload goes through the API with
+      # the release id: the release is still a draft here, and a draft can't be looked up by tag.
+      - name: Build and upload the APK
+        if: matrix.mobile == 'android'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm install -g @tauri-apps/cli@^2
+          tauri android build ${{ matrix.args }}
+          apk=$(find src-tauri/gen/android -name 'app-universal-release.apk' | head -1)
+          test -n "$apk"
+          gh api --method POST \
+            -H "Content-Type: application/vnd.android.package-archive" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ needs.create-release.outputs.release_id }}/assets?name=WeatherDesk_${{ github.ref_name }}.apk" \
+            --input "$apk"
