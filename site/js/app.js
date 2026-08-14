@@ -100,14 +100,30 @@ function chime() {
 
 const jobs = new Map();
 
+// Nothing here is worth a request or a repaint while the window is hidden — a wall tablet with
+// its screen off would otherwise poll every source all night. Whatever came due in the meantime
+// runs once on the way back.
 export function every(name, seconds, fn) {
-  if (jobs.has(name)) clearInterval(jobs.get(name));
-  const run = async () => {
+  const prev = jobs.get(name);
+  if (prev) clearInterval(prev.id);
+  const job = { due: false };
+  job.run = async () => {
+    if (document.hidden) { job.due = true; return; }
     try { await fn(); } catch (e) { console.warn(`job ${name}:`, e.message); }
   };
-  jobs.set(name, setInterval(run, seconds * 1000));
-  run();
+  job.id = setInterval(job.run, seconds * 1000);
+  jobs.set(name, job);
+  job.run();
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  for (const job of jobs.values()) {
+    if (!job.due) continue;
+    job.due = false;
+    job.run();
+  }
+});
 
 export function refreshAll() {
   window.dispatchEvent(new CustomEvent('wd:refresh'));
@@ -121,6 +137,9 @@ export function initNav() {
     tabs.forEach((t) => t.classList.toggle('active', t.dataset.section === id));
     document.querySelectorAll('section.page').forEach((s) => s.classList.toggle('active', s.id === id));
     location.hash = id;
+    // The ticker is a 60s transform animation: composited every frame, forever. Only let it run
+    // while the Desk is the section on screen.
+    document.body.classList.toggle('ticker-live', id === 'desk');
     window.dispatchEvent(new CustomEvent('wd:section', { detail: id }));
   };
   tabs.forEach((t) => (t.onclick = () => show(t.dataset.section)));

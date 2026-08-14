@@ -173,7 +173,9 @@
   #ticker { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 8px 10px; }
   #ticker-track { flex: 1; white-space: nowrap; overflow: hidden; display: flex; gap: 14px; align-items: center;
-    animation: tick 60s linear infinite; }
+    animation: tick 60s linear infinite; animation-play-state: paused; }
+  body.ticker-live #ticker-track { animation-play-state: running; }
+  body.ticker-live #ticker-track.paused { animation-play-state: paused; }
   /* the track holds the item list twice, so -50% lands exactly on the copy and the first item
      never scrolls away for good. */
   @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-50%); } }

@@ -330,10 +330,10 @@ export function initPro() {
   every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
   every('pro-clock', 60, () => { if (deskForecast()) renderHero(deskForecast()); });
 
+  // A class, not an inline style: inline would outrank the rule that stops the animation whenever
+  // the Desk isn't the section on screen.
   $('ticker-pause').onclick = () => {
-    const t = $('ticker-track');
-    const paused = t.style.animationPlayState === 'paused';
-    t.style.animationPlayState = paused ? 'running' : 'paused';
-    $('ticker-pause').textContent = paused ? '❚❚' : '▶';
+    const paused = $('ticker-track').classList.toggle('paused');
+    $('ticker-pause').textContent = paused ? '▶' : '❚❚';
   };
 }
