@@ -302,6 +302,15 @@
   .notif-wind, .notif-lightning { border-left-color: var(--warn); }
   .notif-title { font-weight: 600; }
   .notif-body { font-size: 12px; color: var(--muted); }
+  /* freshness: a panel showing the last good data says how old it is instead of lying quietly */
+  [data-ts].stale { position: relative; opacity: .7; }
+  [data-ts].stale::after { content: attr(data-age); position: absolute; top: 0; right: 0;
+    font-size: 10px; color: var(--muted); pointer-events: none; }
+  /* locked: the grips and resize handles are the whole interaction, so hiding them is the lock */
+  .layout-locked .grip, .layout-locked .rz { display: none !important; }
+  #layout-list > div { display: flex; align-items: center; gap: 4px; }
+  #layout-name { flex: 1; padding: 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit; }
   .notif-x { position: absolute; top: 4px; right: 6px; background: none; border: 0; color: var(--muted);
     font-size: 16px; cursor: pointer; }
 </style>
@@ -318,6 +327,7 @@
   <span id="station-name" class="muted"></span>
   <button class="iconbtn" id="btn-refresh">↻</button>
   <button class="iconbtn" id="btn-full">⛶</button>
+  <button class="iconbtn" id="btn-lock" title="Lock panel layout">🔓</button>
   <button class="iconbtn" id="btn-settings">⚙</button>
 </header>
 
@@ -432,6 +442,8 @@
         </div>
         <div class="muted" style="font-size:12px;margin-top:6px">socket: <span id="ws-state">idle</span></div>
         <div id="live-strike" class="muted" style="font-size:12px"></div>
+        <h3 style="font-size:13px;margin:12px 0 4px">Strikes · 24h</h3>
+        <div id="strike-log" class="kv-rows"></div>
       </div>
 
       <div class="card" style="grid-column: span 2">
@@ -442,6 +454,11 @@
         </div>
         <div id="signals-table"></div>
       </div>
+
+      <div class="card" style="grid-column: span 3">
+        <h2>Notification history</h2>
+        <div id="notif-log" class="kv-rows"></div>
+      </div>
     </div>
   </section>
   <section class="page" id="data">
@@ -449,6 +466,7 @@
       <div class="card"><h2 id="board-temp">Temperature</h2><canvas id="c-temp" class="chart"></canvas></div>
       <div class="card"><h2 id="board-rain">Rain</h2><canvas id="c-rain" class="chart"></canvas></div>
       <div class="card"><h2 id="board-wind">Wind</h2><canvas id="c-wind" class="chart"></canvas></div>
+      <div class="card"><h2 id="board-rose">Wind rose</h2><canvas id="c-rose" class="chart"></canvas></div>
       <div class="card"><h2 id="board-press">Pressure</h2><canvas id="c-press" class="chart"></canvas></div>
       <div class="card"><h2>Records · 7 days</h2><div id="extremes" class="kv-rows"></div></div>
       <div class="card" style="grid-column: span 2"><h2 id="board-models">Model comparison</h2><canvas id="c-models" class="chart"></canvas></div>
@@ -475,6 +493,11 @@
     <div class="row">
       <button id="btn-layout-reset">Reset panel layout</button>
     </div>
+    <div class="row">
+      <input id="layout-name" placeholder="layout name (e.g. tablet)">
+      <button id="btn-layout-save" style="flex:0 0 auto">Save layout</button>
+    </div>
+    <div id="layout-list"></div>
     <div class="muted" style="font-size:12px;margin-top:6px">
       Hover a panel for its grip: drag the grip to move it, drag the bottom-right corner to resize,
       double-click the grip to restore that panel's size.

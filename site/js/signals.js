@@ -1,6 +1,6 @@
 // 03 Local Signals — nearby public Tempest stations vs yours, plus the live websocket feed.
 import * as api from './api.js';
-import { settings, saveSettings, configured, U, num, deg2compass, every, notify } from './app.js';
+import { settings, saveSettings, configured, U, num, deg2compass, every, notify, store, load, notifHistory } from './app.js';
 
 const $ = (id) => document.getElementById(id);
 const MPS = { imperial: 2.23694, metric: 3.6 }; // rapid_wind is always m/s
@@ -97,7 +97,7 @@ export function disconnectWs() {
   try { ws?.close(); } catch { /* nothing open */ }
 }
 
-function renderRapid(mps, dir) {
+export function renderRapid(mps, dir) {
   const f = MPS[settings().units] || MPS.imperial;
   const v = mps * f;
   $('live-wind').textContent = num(v, 1);
@@ -107,18 +107,55 @@ function renderRapid(mps, dir) {
   if (needle) needle.style.transform = `rotate(${dir}deg)`;
 }
 
+// --- strikes: one line was the whole record, so a storm overwrote itself ---
+
+const strikes = load('wd.strikes', []);
+const miles = (km) => (settings().units === 'metric' ? km : km * 0.621371);
+const esc = (s) => String(s ?? '').replace(/</g, '&lt;');
+
 // evt: [epoch, distance (km), energy]
-function onStrike([t, distKm]) {
-  const s = settings();
-  const dist = s.units === 'metric' ? distKm : distKm * 0.621371;
+export function onStrike([t, distKm]) {
+  const dist = miles(distKm);
   $('live-strike').textContent = `Strike ${num(dist, 1)} ${U.dist()} away at ${new Date(t * 1000).toLocaleTimeString()}`;
+  if (!strikes.some((x) => x.t === t)) {
+    strikes.unshift({ t, km: distKm });
+    strikes.splice(200);
+    store('wd.strikes', strikes);
+  }
+  renderStrikes();
   notify({
     id: `strike-${t}`, category: 'lightning',
     title: 'Lightning nearby', body: `${num(dist, 1)} ${U.dist()} away`,
   });
 }
 
+function renderStrikes() {
+  const el = $('strike-log');
+  if (!el) return;
+  const cut = Date.now() / 1000 - 86400;
+  const recent = strikes.filter((x) => x.t >= cut);
+  el.innerHTML = recent.length
+    ? recent.map((x) => `<div><span>${new Date(x.t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>`
+      + `<span>${num(miles(x.km), 1)} ${U.dist()}</span></div>`).join('')
+    : '<div class="muted">No strikes in the last 24h</div>';
+}
+
+function renderNotifLog() {
+  const el = $('notif-log');
+  if (!el) return;
+  const rows = notifHistory();
+  el.innerHTML = rows.length
+    ? rows.map((n) => `<div><span>${new Date(n.t).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+      + ` · ${esc(n.category)}</span><span>${esc(n.title)}</span></div>`).join('')
+    : '<div class="muted">Nothing yet</div>';
+}
+
+// module level: initSignals re-runs on every settings save, and a listener per save adds up
+window.addEventListener('wd:notif', renderNotifLog);
+
 export function initSignals() {
+  renderStrikes();
+  renderNotifLog();
   $('btn-add-station').onclick = () => {
     const id = $('add-station-id').value.trim();
     if (!/^\d+$/.test(id)) return;

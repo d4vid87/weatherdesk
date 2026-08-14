@@ -27,8 +27,14 @@ The Desk radar waits for a click. A live radar loop repaints ten times a second,
 webview the desktop app uses on Linux and macOS redraws the whole Desk on every one of those
 frames — enough to saturate a CPU core and freeze the window. In a browser it is free; load it
 there, or in the Forecast Lab tab, which has the Desk hidden behind it.
-- **Local Signals** — nearby-station comparison table and the Tempest websocket live wind feed.
-- **Data** — nine boards off 7-day device history, multi-model output and the local verification log.
+- **Local Signals** — nearby-station comparison table, the Tempest live wind feed, a 24-hour
+  lightning-strike log and the notification history.
+- **Data** — ten boards off 7-day device history, including a wind rose, plus multi-model output
+  and the local verification log.
+
+A panel that has stopped updating keeps its last good numbers and marks itself with its age in the
+corner, rather than blanking or lying. The forecast and current observations are cached, so a
+reload during an outage still renders something.
 
 ## Moving things around
 
@@ -36,6 +42,10 @@ The Desk is one 12-column grid and every panel is a free agent. Drag a panel by 
 top-right corner to drop it anywhere in the grid; drag its right edge to change how many columns it
 spans, its bottom edge for height, the corner for both. Double-click the grip to restore one panel,
 or Settings → **Reset panel layout** to put everything back.
+
+Name an arrangement in Settings → **Save layout** to keep it, and load it back from the list below
+— one layout for the wall tablet, another for the desktop window. The padlock in the header hides
+every grip and handle, so a mounted tablet can't be rearranged by a passing sleeve.
 
 Both gestures are pointer events, so they work the same with a mouse, a pen or a finger — the
 tablet case is the one that matters, and HTML5 drag-and-drop never fires for touch.
@@ -46,6 +56,7 @@ tablet case is the one that matters, and HTML5 drag-and-drop never fires for tou
 |---|---|
 | Station meta, observations, forecast | `swd.weatherflow.com/swd/rest/` |
 | Live 3-second wind, lightning strikes | `wss://ws.weatherflow.com/swd/data` |
+| The same, straight off the hub's LAN broadcast (desktop app only) | UDP `50222` |
 | Watches and warnings, gridpoint forecast | `api.weather.gov` |
 | Multi-model agreement, 15-minute nowcast, AQI | `api.open-meteo.com` |
 | Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.netlify.app` |
@@ -57,6 +68,11 @@ Grab the installer for your OS from [Releases](https://github.com/d4vid87/weathe
 double-click it. The app opens in its own window *and* serves the same dashboard to the rest of your
 network on port 8088 — the wall tablet just opens the URL shown in the window title. Nothing else to
 install; leave the app running.
+
+The app also listens for your hub's UDP broadcasts on port 50222 and re-serves them to the tablet,
+so live wind and lightning keep flowing with the internet unplugged. A browser can't hold a UDP
+socket, so the no-install option below uses the cloud websocket only. If another Tempest app owns
+port 50222 first, WeatherDesk skips it and falls back to the websocket by itself.
 
 - **Windows** — run the `.msi`. The app is unsigned, so SmartScreen shows a warning: **More info →
   Run anyway**. Allow the Windows Firewall prompt on first launch, or the tablet can't connect.

@@ -133,6 +133,16 @@ function trend(idx, hours, perHour = false) {
   return perHour ? delta / Math.max(span, 0.25) : delta;
 }
 
+// NWS 3-hour tendency bands. A number alone doesn't say whether 0.03 inHg matters; the word does.
+function pressWord(delta) {
+  if (delta == null) return '';
+  const metric = settings().units === 'metric';
+  const a = Math.abs(delta);
+  if (a < (metric ? 0.7 : 0.02)) return 'steady';
+  const rate = a >= (metric ? 2.0 : 0.06) ? 'rapidly' : 'slowly';
+  return `${delta > 0 ? 'rising' : 'falling'} ${rate}`;
+}
+
 function renderTrends(fc) {
   const c = fc.current_conditions;
   if (consensus != null) {
@@ -144,7 +154,7 @@ function renderTrends(fc) {
   $('t-temp').textContent = tph == null ? '--' : `${tph >= 0 ? 'Warming' : 'Cooling'} ${num(Math.abs(tph), 1)}°/hr`;
   $('t-temp').className = tph >= 0 ? 'warm' : 'cool';
   const p = trend(I.press, 3);
-  $('t-press').textContent = p == null ? '--' : `${p >= 0 ? 'Rising' : 'Falling'} ${num(Math.abs(p), 2)} ${U.press()} / 3h`;
+  $('t-press').textContent = p == null ? '--' : `${pressWord(p).replace(/^./, (m) => m.toUpperCase())} · ${num(Math.abs(p), 2)} ${U.press()} / 3h`;
   $('t-press').className = p >= 0 ? 'warm' : 'cool';
 }
 
@@ -257,7 +267,7 @@ function renderGauges(fc) {
   const pLo = metric ? 970 : 28.5, pHi = metric ? 1040 : 31;
   const pT = trend(I.press, 3);
   $('g-press').innerHTML = gauge(icon.dial((c.sea_level_pressure - pLo) / (pHi - pLo)),
-    `<b>${num(c.sea_level_pressure, 2)}</b><small>${U.press()}</small><span>${pT == null ? '' : `${pT >= 0 ? '↑' : '↓'} ${num(Math.abs(pT), 2)} / 3h`}</span>`);
+    `<b>${num(c.sea_level_pressure, 2)}</b><small>${U.press()}</small><span>${pT == null ? '' : `${pT >= 0 ? '↑' : '↓'} ${num(Math.abs(pT), 2)} / 3h · ${pressWord(pT)}`}</span>`);
 
   const dT = trend(I.temp, 3, true);
   $('g-dew').innerHTML = gauge(icon.droplet(c.dew_point / (metric ? 30 : 85)),

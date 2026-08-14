@@ -15,7 +15,9 @@ function qs(obj) {
 }
 
 async function getJSON(url, opts) {
-  const r = await fetch(url, opts);
+  // A wall tablet on a dropped Wi-Fi link otherwise leaves a fetch hanging for minutes and the
+  // panel's next refresh never fires.
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000), ...opts });
   if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${url.split('?')[0]}`);
   return r.json();
 }

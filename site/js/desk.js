@@ -1,6 +1,20 @@
 // 01 Desk — current conditions, near-term forecast, alerts, AQI.
 import * as api from './api.js';
-import { settings, coords, configured, U, num, timeStr, dayStr, notify, every } from './app.js';
+import { settings, coords, configured, U, num, timeStr, dayStr, notify, every, stamp, store, load } from './app.js';
+
+// Last-good copies of the two payloads the Desk can't render without. An outage that spans a
+// reload would otherwise leave the whole page at `--`; in-session failures already keep the DOM.
+async function cached(key, fetcher) {
+  try {
+    const j = await fetcher();
+    store(key, j);
+    return { j, fresh: true };
+  } catch (e) {
+    const j = load(key, null);
+    if (!j) throw e;
+    return { j, fresh: false };
+  }
+}
 
 let latestForecast = null;
 export const forecast = () => latestForecast;
@@ -19,10 +33,11 @@ export const icon = (k) => ICON[k] || '·';
 
 export async function refreshDesk() {
   if (!configured()) return;
-  const fc = await api.betterForecast();
+  const { j: fc, fresh } = await cached('wd.cache.fc', api.betterForecast);
   latestForecast = fc;
   renderCurrent(fc.current_conditions);
   renderTenDay(fc.forecast.daily);
+  if (fresh) stamp('tenday', 300);
   window.dispatchEvent(new CustomEvent('wd:forecast', { detail: fc }));
 }
 
@@ -62,6 +77,7 @@ export async function refreshAlerts() {
         </div>`;
       }).join('')
     : '<div class="muted">No active alerts</div>';
+  stamp('alerts', 300);
   feats.forEach((f) => notify({
     id: f.properties.id, category: 'severe',
     title: f.properties.event, body: f.properties.headline || '',
@@ -77,6 +93,7 @@ export async function refreshAqi() {
   $('aqi-label').textContent = aqiLabel(v);
   $('aqi-val').className = `aqi-${aqiBand(v)}`;
   $('aqi-detail').textContent = `PM2.5 ${num(j.hourly.pm2_5[Math.max(i, 0)], 1)} µg/m³`;
+  stamp('aqi-val', 1800);
 }
 
 const aqiBand = (v) => (v <= 50 ? 'good' : v <= 100 ? 'mod' : v <= 150 ? 'usg' : v <= 200 ? 'bad' : 'vbad');
@@ -84,9 +101,10 @@ const aqiLabel = (v) => ({ good: 'Good', mod: 'Moderate', usg: 'Unhealthy (sensi
 
 export async function refreshObs() {
   if (!configured()) return;
-  const j = await api.stationObs();
+  const { j, fresh } = await cached('wd.cache.obs', api.stationObs);
   const o = j.obs?.[0];
   if (!o) return;
+  if (fresh) stamp('hero', settings().refreshSec);
   // stn obs has no conditions/icon — keep the ones from the last better_forecast
   const cc = latestForecast?.current_conditions;
   renderCurrent({ ...o, conditions: cc?.conditions, icon: cc?.icon, time: o.timestamp });

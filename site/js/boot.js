@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, initNav, fullscreen, refreshAll, notify } from './app.js';
+import { settings, saveSettings, configured, initNav, fullscreen, refreshAll, notify, load, store } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -7,7 +7,8 @@ import { initSignals, refreshSignals } from './signals.js';
 import { initBoards } from './boards.js';
 import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
-import { initLayout } from './layout.js';
+import { initLayout, snapshot, restore } from './layout.js';
+import { initUdp } from './udp.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,7 +41,7 @@ $('btn-save').onclick = async () => {
   await hydrateStation();
   openDrawer(false);
   initDesk(); // idempotent: every() replaces existing jobs
-  initIntel(); initSignals(); initBoards(); initPro(); initLayout();
+  initIntel(); initSignals(); initBoards(); initPro(); initLayout(); initUdp();
 };
 
 // station meta fills name/lat/lon and the Tempest device id when blank
@@ -65,6 +66,46 @@ async function hydrateStation() {
     notify({ title: 'Station lookup failed', body: e.message });
   }
 }
+
+// --- layout lock + presets ---
+//
+// Lock is CSS only: hiding the grips and resize handles takes the whole interaction out of reach,
+// so layout.js needs no notion of it. A tablet mounted on a wall gets brushed past all day.
+function applyLock() {
+  const on = !!settings().layoutLocked;
+  document.body.classList.toggle('layout-locked', on);
+  $('btn-lock').textContent = on ? '🔒' : '🔓';
+  $('btn-lock').title = on ? 'Panels locked — click to unlock' : 'Panels unlocked — click to lock';
+}
+
+$('btn-lock').onclick = () => { saveSettings({ layoutLocked: !settings().layoutLocked }); applyLock(); };
+
+const layouts = () => load('wd.layouts', {});
+
+function renderLayouts() {
+  const map = layouts();
+  const names = Object.keys(map);
+  $('layout-list').innerHTML = names.length
+    // index, not the name itself: a name is user text and has no business inside an attribute
+    ? names.map((n, i) => `<div class="row" style="margin:0"><button class="place-hit" data-i="${i}"></button>`
+      + `<button class="sig-x" data-del="${i}">×</button></div>`).join('')
+    : '<div class="muted" style="font-size:12px">No saved layouts</div>';
+  $('layout-list').querySelectorAll('[data-i]').forEach((b) => {
+    b.textContent = names[+b.dataset.i];
+    b.onclick = () => restore(layouts()[names[+b.dataset.i]]);
+  });
+  $('layout-list').querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = () => { const m = layouts(); delete m[names[+b.dataset.del]]; store('wd.layouts', m); renderLayouts(); };
+  });
+}
+
+$('btn-layout-save').onclick = () => {
+  const name = $('layout-name').value.trim();
+  if (!name) return;
+  store('wd.layouts', { ...layouts(), [name]: snapshot() });
+  $('layout-name').value = '';
+  renderLayouts();
+};
 
 $('btn-diag').onclick = async () => {
   $('diag').innerHTML = '<div class="muted">running…</div>';
@@ -112,11 +153,13 @@ initPlaces();
 // panel chrome doesn't depend on a token — wire it before the data path so an unconfigured
 // dashboard is still arrangeable
 initLayout();
+applyLock();
+renderLayouts();
 
 if (!configured()) {
   fillDrawer();
   openDrawer(true);
 } else {
   // lat/lon must land before the open-meteo/NWS jobs start
-  hydrateStation().then(() => { initDesk(); initIntel(); initSignals(); initBoards(); initPro(); loadDeskRadar(); });
+  hydrateStation().then(() => { initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initUdp(); });
 }

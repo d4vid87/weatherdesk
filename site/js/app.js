@@ -4,7 +4,7 @@ const DEFAULTS = {
   token: '', stationId: '', deviceId: '', lat: null, lon: null, stationName: '',
   units: 'imperial', refreshSec: 60, places: [], activePlace: null,
   nearbyStations: [], notif: { severe: true, precip: true, lightning: true, wind: true, winter: true, changes: true },
-  windGustAlert: 30,
+  windGustAlert: 30, layoutLocked: false,
 };
 
 let _settings = load('wd.settings', DEFAULTS);
@@ -66,7 +66,12 @@ export const deg2compass = (d) =>
 
 // --- notifications (in-page; no service worker on insecure LAN origin) ---
 
-const seen = new Set();
+// The log doubles as the dedupe memory: without it every reload re-notified (and re-chimed) each
+// still-active NWS alert.
+const notifLog = load('wd.notifLog', []);
+const seen = new Set(notifLog.map((n) => n.id).filter(Boolean));
+
+export const notifHistory = () => notifLog;
 
 export function notify({ id, category = 'info', title, body }) {
   if (id) {
@@ -74,6 +79,10 @@ export function notify({ id, category = 'info', title, body }) {
     seen.add(id);
   }
   if (category !== 'info' && _settings.notif[category] === false) return;
+  notifLog.unshift({ t: Date.now(), id, category, title, body });
+  notifLog.splice(100);
+  store('wd.notifLog', notifLog);
+  window.dispatchEvent(new CustomEvent('wd:notif'));
   const wrap = document.getElementById('notif-stack');
   const el = document.createElement('div');
   el.className = `notif notif-${category}`;
@@ -123,6 +132,27 @@ document.addEventListener('visibilitychange', () => {
     job.due = false;
     job.run();
   }
+});
+
+// --- freshness stamps ---
+//
+// Panels keep their last good contents when a source fails; without a mark, "yesterday's forecast"
+// and "this minute's forecast" look identical. `maxAgeSec` is the panel's own refresh period —
+// three missed cycles is late enough to say so.
+export function stamp(id, maxAgeSec) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.dataset.ts = Date.now();
+  el.dataset.maxAge = maxAgeSec;
+  el.classList.remove('stale');
+}
+
+every('stale-sweep', 60, () => {
+  document.querySelectorAll('[data-ts]').forEach((el) => {
+    const age = (Date.now() - +el.dataset.ts) / 1000;
+    el.dataset.age = age > 5400 ? `${Math.round(age / 3600)}h` : `${Math.round(age / 60)}m`;
+    el.classList.toggle('stale', age > 3 * (+el.dataset.maxAge || 300));
+  });
 });
 
 export function refreshAll() {

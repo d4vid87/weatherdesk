@@ -32,6 +32,7 @@ export async function refreshBoards() {
   drawTemp();
   drawRain();
   drawWind();
+  drawRose();
   drawPressure();
   drawExtremes();
   drawModels();
@@ -72,6 +73,51 @@ function drawWind() {
     { data: pts(I.windAvg, from), color: '#4fb8ff' },
   ], { yMin: 0, digits: 0 });
   $('board-wind').textContent = `24h wind (${U.wind()}) — gust amber, average blue`;
+}
+
+// Where the wind actually comes from over the week: 16 sectors, petal length = share of samples,
+// fill brightness = that sector's mean speed. charts.js is Cartesian-only, so this draws itself.
+function drawRose() {
+  const canvas = $('c-rose');
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 300, h = canvas.clientHeight || 150;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const c = canvas.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+
+  const n = new Array(16).fill(0), sum = new Array(16).fill(0);
+  let total = 0;
+  for (const o of history) {
+    const d = o[I.windDir], v = o[I.windAvg];
+    if (d == null || !v) continue; // calm samples have no meaningful direction
+    const s = Math.round(d / 22.5) % 16;
+    n[s]++; sum[s] += v; total++;
+  }
+  const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 14;
+  if (!total) { c.fillStyle = '#8ea0b5'; c.font = '12px system-ui'; c.fillText('no data', 8, cy); return; }
+
+  const maxShare = Math.max(...n) / total;
+  const maxMean = Math.max(...n.map((k, i) => (k ? sum[i] / k : 0)));
+  for (let i = 0; i < 16; i++) {
+    if (!n[i]) continue;
+    const r = R * (n[i] / total / maxShare);
+    const a = i * 22.5 * Math.PI / 180 - Math.PI / 2; // 0° = north = straight up
+    const half = 11 * Math.PI / 180;
+    c.beginPath();
+    c.moveTo(cx, cy);
+    c.arc(cx, cy, r, a - half, a + half);
+    c.closePath();
+    c.fillStyle = `rgba(79, 184, 255, ${0.25 + 0.75 * (sum[i] / n[i]) / (maxMean || 1)})`;
+    c.fill();
+  }
+  c.strokeStyle = '#253141';
+  c.beginPath(); c.arc(cx, cy, R, 0, 2 * Math.PI); c.stroke();
+  c.fillStyle = '#8ea0b5'; c.font = '10px system-ui'; c.textAlign = 'center';
+  [['N', 0, -R - 4], ['E', R + 6, 3], ['S', 0, R + 11], ['W', -R - 6, 3]]
+    .forEach(([lab, dx, dy]) => c.fillText(lab, cx + dx, cy + dy));
+  c.textAlign = 'left';
+  $('board-rose').textContent = `7-day wind rose (${U.wind()}) — petal length is how often, brightness is how fast`;
 }
 
 function drawPressure() {
@@ -125,7 +171,7 @@ async function drawOfficial() {
   const fc = deskForecast();
   try {
     const p = await api.nwsPoint();
-    const nws = await (await fetch(p.properties.forecast)).json();
+    const nws = await (await fetch(p.properties.forecast, { signal: AbortSignal.timeout(15000) })).json();
     const periods = nws.properties.periods.slice(0, 6);
     const tempestDaily = fc?.forecast?.daily || [];
     $('official').innerHTML = periods.map((pd, i) => {
@@ -146,7 +192,7 @@ async function drawOutlook() {
   try {
     const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${s.lat}&longitude=${s.lon}`
       + `&daily=precipitation_sum,precipitation_probability_max&forecast_days=7&timezone=auto`
-      + (imperial ? '&precipitation_unit=inch' : ''))).json();
+      + (imperial ? '&precipitation_unit=inch' : ''), { signal: AbortSignal.timeout(15000) })).json();
     const data = j.daily.time.map((t, i) => ({ x: new Date(t).getTime(), y: j.daily.precipitation_sum[i] }));
     chart($('c-qpf'), [{ data, type: 'bar', color: '#4fb8ff' }], { yMin: 0, digits: 2 });
     const total = data.reduce((a, b) => a + (b.y || 0), 0);

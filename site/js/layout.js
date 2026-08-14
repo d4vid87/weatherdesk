@@ -249,14 +249,26 @@ function wire(container) {
   });
 }
 
-export function resetLayout() {
-  state = {};
-  localStorage.removeItem(KEY);
+export const snapshot = () => structuredClone(state);
+
+// Swap the whole arrangement at once. Inline styles have to be stripped first: a panel the new
+// state says nothing about would otherwise keep the old one's pixel height.
+export function restore(next) {
+  state = structuredClone(next) || {};
+  save();
   document.querySelectorAll('[data-panel]').forEach((el) => {
     setWidth(el, null); el.style.height = '';
     el.classList.remove('panel-hidden');
   });
-  CONTAINERS.map($).filter(Boolean).forEach(applyOrder);
+  CONTAINERS.map($).filter(Boolean).forEach((c) => {
+    applyOrder(c);
+    [...c.children].filter((k) => k.dataset.panel).forEach(applySaved);
+  });
+}
+
+export function resetLayout() {
+  restore({});
+  localStorage.removeItem(KEY);
 }
 
 export function initLayout() {

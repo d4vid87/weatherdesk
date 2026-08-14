@@ -1,6 +1,6 @@
 [package]
 name = "weatherdesk"
-version = "1.0.4"
+version = "1.0.5"
 description = "Self-hosted WeatherFlow Tempest dashboard"
 authors = ["David May"]
 license = "MIT"
@@ -12,6 +12,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tiny_http = "0.12"
+# already in tauri's tree; named here only to parse the hub's UDP broadcasts
+serde_json = "1"
 
 [profile.release]
 opt-level = "s"
