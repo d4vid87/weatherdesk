@@ -115,8 +115,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npm install -g @tauri-apps/cli@^2
-          tauri android build ${{ matrix.args }}
+          # As a cargo subcommand, not the npm package: Gradle's rust plugin shells out to
+          # `cargo tauri` while assembling the APK, and an npm-installed `tauri` on PATH does not
+          # satisfy that. Prebuilt binary — `cargo install tauri-cli` compiles for ~10 minutes.
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall -y --force 'tauri-cli@^2'
+          cargo tauri android build ${{ matrix.args }}
           apk=$(find src-tauri/gen/android -name 'app-universal-release.apk' | head -1)
           test -n "$apk"
           gh api --method POST \
