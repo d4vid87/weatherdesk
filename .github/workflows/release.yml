@@ -40,6 +40,11 @@ jobs:
           - platform: ubuntu-22.04
             args: ""
             targets: ""
+          # Raspberry Pi 4/5 on 64-bit Pi OS. Native arm64 runner, not a cross-compile:
+          # WebKitGTK doesn't cross-link cleanly and the runner is free for public repos.
+          - platform: ubuntu-22.04-arm
+            args: ""
+            targets: ""
           - platform: windows-latest
             args: ""
             targets: ""
@@ -60,7 +65,7 @@ jobs:
           workspaces: ./src-tauri -> target
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \

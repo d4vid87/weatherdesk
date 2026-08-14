@@ -82,9 +82,22 @@ port 50222 first, WeatherDesk skips it and falls back to the websocket by itself
 - **Linux** — `sudo apt install ./WeatherDesk_*_amd64.deb` (Debian, Ubuntu, Mint, Pop!_OS). On other
   distributions install `webkit2gtk-4.1` and build from source, below — there is no AppImage: it has
   to carry its own WebKitGTK, and that copy crashes on hosts newer than the machine that built it.
+- **Raspberry Pi** — `sudo apt install ./WeatherDesk_*_arm64.deb` on 64-bit Raspberry Pi OS
+  (Bookworm or newer, Pi 4 / Pi 5). `uname -m` must say `aarch64`; the 32-bit image is not built.
 
 To start it automatically: macOS System Settings → General → Login Items; Windows put a shortcut in
-`shell:startup`; Linux add a `.desktop` file to `~/.config/autostart`.
+`shell:startup`; Linux and Raspberry Pi OS add a `.desktop` file to `~/.config/autostart`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=WeatherDesk
+Exec=weatherdesk
+```
+
+A Pi with a screen attached is the whole appliance: it shows the dashboard itself *and* serves it to
+any other tablet in the house. A Pi with no screen has no desktop for the window to open on — use
+the server-only option below, which gives up the hub's UDP feed but nothing else.
 
 ## No-install / development option
 
