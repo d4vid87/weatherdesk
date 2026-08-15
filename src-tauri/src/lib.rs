@@ -140,7 +140,29 @@ pub fn run() {
                     .initialization_script(&format!("window.__WD_UDP='http://localhost:{port}/udp'"));
             }
 
-            win.build()?;
+            let window = win.build()?;
+
+            // webkit2gtk on Wayland can miss the resize that lands while the page is still
+            // loading: the window ends up full-screen sized with the page still laid out at
+            // `inner_size`, drawn in a small block with the rest blank. Any resize after that
+            // makes it catch up — so hand it one, once, a beat after startup.
+            #[cfg(desktop)]
+            {
+                let w = window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(900));
+                    if let Ok(s) = w.inner_size() {
+                        let maximized = w.is_maximized().unwrap_or(false);
+                        let _ = w.set_size(tauri::PhysicalSize::new(s.width, s.height - 1));
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        if maximized {
+                            let _ = w.maximize();
+                        } else {
+                            let _ = w.set_size(s);
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
