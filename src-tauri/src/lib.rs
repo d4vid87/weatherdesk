@@ -136,33 +136,17 @@ pub fn run() {
                 win = win
                     .title(format!("WeatherDesk — tablet: http://{}:{}", lan_ip(), port))
                     .inner_size(1280.0, 800.0)
+                    // Start maximized on Linux: KWin maximizes a restored window after mapping
+                    // it, and GTK can miss that configure entirely — the webview then paints at
+                    // the startup size in the corner of a full-screen window, with no way for
+                    // the process to notice. Owning the state from the first frame sidesteps it.
+                    .maximized(cfg!(target_os = "linux"))
                     // the window isn't same-origin with the LAN server, so it needs the port told to it
                     .initialization_script(&format!("window.__WD_UDP='http://localhost:{port}/udp'"));
             }
 
-            let window = win.build()?;
+            win.build()?;
 
-            // webkit2gtk on Wayland can miss the resize that lands while the page is still
-            // loading: the window ends up full-screen sized with the page still laid out at
-            // `inner_size`, drawn in a small block with the rest blank. Any resize after that
-            // makes it catch up — so hand it one, once, a beat after startup.
-            #[cfg(desktop)]
-            {
-                let w = window.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(900));
-                    if let Ok(s) = w.inner_size() {
-                        let maximized = w.is_maximized().unwrap_or(false);
-                        let _ = w.set_size(tauri::PhysicalSize::new(s.width, s.height - 1));
-                        std::thread::sleep(std::time::Duration::from_millis(80));
-                        if maximized {
-                            let _ = w.maximize();
-                        } else {
-                            let _ = w.set_size(s);
-                        }
-                    }
-                });
-            }
             Ok(())
         })
         .run(tauri::generate_context!())
