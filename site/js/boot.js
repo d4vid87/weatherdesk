@@ -145,8 +145,13 @@ $('btn-layout-save').onclick = () => {
 
 $('btn-diag').onclick = async () => {
   $('diag').innerHTML = '<div class="muted">running…</div>';
+  // Viewport first, because it is the one number that explains a dashboard drawn at the wrong
+  // size: WebKitGTK on Wayland sometimes hands the page a viewport that doesn't match the window
+  // it lives in, and there is otherwise no way to tell that from the inside.
+  const view = `${window.innerWidth}×${window.innerHeight} @ ${window.devicePixelRatio}× DPR`;
   const rows = await api.diagnostics();
-  $('diag').innerHTML = rows.map((r) =>
+  $('diag').innerHTML = `<div><span>Viewport</span><span class="ok">${view}</span></div>`
+    + rows.map((r) =>
     `<div><span>${r.name}</span><span class="${r.ok ? 'ok' : 'fail'}">${r.ok ? '✓ ' : '✗ '}${r.detail}</span></div>`
   ).join('');
 };
