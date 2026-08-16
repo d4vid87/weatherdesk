@@ -12,9 +12,14 @@ async function cached(key, fetcher) {
   } catch (e) {
     const j = load(key, null);
     if (!j) throw e;
-    return { j, fresh: false };
+    return { j, fresh: false, err: e };
   }
 }
+
+// One toast per outage, not one per refresh cycle: `every()` retries the forecast every 5
+// minutes and a banner each time would bury the dashboard. Deliberately no `id` — notify()
+// dedupes ids forever, so the first failure would silence every later one.
+let toldFcFail = false;
 
 let latestForecast = null;
 export const forecast = () => latestForecast;
@@ -33,7 +38,19 @@ export const icon = (k) => ICON[k] || '·';
 
 export async function refreshDesk() {
   if (!configured()) return;
-  const { j: fc, fresh } = await cached('wd.cache.fc', api.betterForecast);
+  let res;
+  try {
+    res = await cached('wd.cache.fc', api.betterForecast);
+  } catch (e) {
+    if (!toldFcFail) { toldFcFail = true; notify({ title: 'Forecast failed', body: e.message }); }
+    throw e;
+  }
+  const { j: fc, fresh } = res;
+  if (fresh) toldFcFail = false;
+  else if (!toldFcFail) {
+    toldFcFail = true;
+    notify({ title: 'Forecast stale — showing cached copy', body: res.err.message });
+  }
   latestForecast = fc;
   renderCurrent(fc.current_conditions);
   renderTenDay(fc.forecast.daily);

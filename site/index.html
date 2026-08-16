@@ -122,6 +122,8 @@
     background: #0b111ad9; border: 1px solid var(--line); opacity: 0; transition: opacity .15s;
     font-size: 15px; line-height: 1; z-index: 6; user-select: none; touch-action: none; }
   .grip:active { cursor: grabbing; }
+  /* Hide sits beside the grip and inherits its show/hide rules, including the locked-layout one. */
+  .grip-hide { right: 40px; cursor: pointer; font-size: 18px; padding: 0; }
   .panel-hidden { display: none; }
 
   /* Fat, visible, touch-sized targets. `touch-action: none` is what lets a finger drag them
@@ -272,8 +274,9 @@
   .place-hit:hover { color: var(--accent); }
   #place-q { flex: 1; padding: 8px; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 8px; font: inherit; }
-  #notif-toggles label { display: flex; align-items: center; gap: 8px; color: var(--text); margin: 6px 0; }
-  #notif-toggles input { width: auto; }
+  #notif-toggles label, #tab-toggles label { display: flex; align-items: center; gap: 8px; color: var(--text); margin: 6px 0; }
+  #notif-toggles input, #tab-toggles input { width: auto; }
+  #hidden-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 
   /* tablet landscape: tighter chrome, two columns of cards */
   @media (max-height: 820px) and (orientation: landscape) {
@@ -505,9 +508,18 @@
       <button id="btn-layout-save" style="flex:0 0 auto">Save layout</button>
     </div>
     <div id="layout-list"></div>
+    <div id="hidden-list"></div>
     <div class="muted" style="font-size:12px;margin-top:6px">
       Hover a panel for its grip: drag the grip to move it, drag the bottom-right corner to resize,
-      double-click the grip to restore that panel's size.
+      double-click the grip to restore that panel's size. The × beside the grip hides a panel;
+      hidden panels come back from the list above.
+    </div>
+
+    <h2 style="font-size:13px;margin-top:18px">Tabs</h2>
+    <div id="tab-toggles">
+      <label><input type="checkbox" data-tab="lab"> Forecast Lab</label>
+      <label><input type="checkbox" data-tab="signals"> Local Signals</label>
+      <label><input type="checkbox" data-tab="data"> Data</label>
     </div>
     <h2 style="font-size:13px;margin-top:18px">Places</h2>
     <div class="row" style="margin-top:6px">
@@ -537,7 +549,9 @@
     <label>Entities to show</label><input id="set-ha-entities" placeholder="light.porch, sensor.attic_temp">
 
     <div id="diag" style="margin-top:12px"></div>
-    <p class="muted" style="font-size:12px">Token: tempestwx.com → Settings → Data Authorizations → create personal use token.</p>
+    <p class="muted" style="font-size:12px">Token: tempestwx.com → Settings → Data Authorizations → create personal use token.
+      Station ID is the number in your tempestwx.com station URL; leave Device ID blank and it fills itself in.
+      On the desktop app with a Tempest hub on the same network, live local readings work with no token at all.</p>
   </aside>
 </main>
 

@@ -9,8 +9,13 @@ import { renderRapid, onStrike } from './signals.js';
 // webview; the LAN tablet is same-origin with the server and uses the relative path.
 const URL = window.__WD_UDP || '/udp';
 const FRESH_SEC = 10;
+// obs_st is a once-a-minute report, so the 10s window that suits 3s rapid_wind would reject
+// every one of them.
+const OBS_FRESH_SEC = 120;
 
-let misses = 0, off = false;
+let misses = 0, off = false, slow = false, lastObs = 0;
+
+const schedule = (sec) => every('udp', sec, poll);
 
 async function poll() {
   if (off) return;
@@ -20,10 +25,18 @@ async function poll() {
     if (!r.ok) throw new Error(r.status);
     j = await r.json();
     misses = 0;
+    if (slow) { slow = false; schedule(3); }
   } catch {
     // Three strikes rather than one: a single hiccup on the loopback shouldn't cost the
     // rest of the session's local feed.
-    if (++misses >= 3) off = true;
+    if (++misses < 3) return;
+    misses = 0;
+    // A plain browser or the Android build has no /udp route at all and never will — switch off.
+    // On the desktop the route exists, so a miss means the hub is unplugged or the app just
+    // started: back off to a minute and keep looking, because the local feed is the only feed
+    // in UDP-only mode.
+    if (!window.__WD_UDP) off = true;
+    else if (!slow) { slow = true; schedule(60); }
     return;
   }
 
@@ -39,10 +52,19 @@ async function poll() {
 
   const s = j.evt_strike;
   if (fresh(s) && s.evt) onStrike(s.evt);
+
+  // Same SI tuple the cloud websocket sends, so it rides the same event — the hero, the gauges
+  // and the MQTT publisher all get a local feed without a token. Dedupe by the report's own
+  // timestamp: a 3s poll sees each minute-old report about twenty times.
+  const o = j.obs_st;
+  if (o?.obs?.[0] && now - o._at < OBS_FRESH_SEC && o.obs[0][0] !== lastObs) {
+    lastObs = o.obs[0][0];
+    window.dispatchEvent(new CustomEvent('wd:ws-obs', { detail: o.obs[0] }));
+  }
 }
 
 export function initUdp() {
-  every('udp', 3, poll);
+  schedule(slow ? 60 : 3);
 }
 
 // ponytail-lite self-check alongside layout.js's: the freshness window is the only arithmetic here.
@@ -51,4 +73,6 @@ if (location.search.includes('selftest')) {
   console.assert(now - (now - 3) < FRESH_SEC, 'udp: recent packet counts as fresh');
   console.assert(!(now - (now - 60) < FRESH_SEC), 'udp: minute-old packet is stale');
   console.assert(num(1.5, 1) === '1.5', 'udp: app.js helpers imported');
+  console.assert(now - (now - 60) < OBS_FRESH_SEC, 'udp: minute-old obs_st still counts');
+  console.assert(!(now - (now - 600) < OBS_FRESH_SEC), 'udp: ten-minute-old obs_st is stale');
 }

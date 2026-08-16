@@ -4,7 +4,7 @@ const DEFAULTS = {
   token: '', stationId: '', deviceId: '', lat: null, lon: null, stationName: '',
   units: 'imperial', refreshSec: 60, places: [], activePlace: null,
   nearbyStations: [], notif: { severe: true, precip: true, lightning: true, wind: true, winter: true, changes: true },
-  windGustAlert: 30, layoutLocked: false,
+  windGustAlert: 30, layoutLocked: false, hiddenTabs: [],
   // '' = whichever radar site is nearest the station. The camera itself lives in `wd.radar`,
   // written once a second by the embedded viewer — not here, where it would re-init the app.
   radarSite: '',
@@ -180,6 +180,20 @@ export function initNav() {
   };
   tabs.forEach((t) => (t.onclick = () => show(t.dataset.section)));
   show(location.hash.slice(1) || 'desk');
+  applyTabs();
+}
+
+// Desk has no checkbox in the drawer, so it can never be hidden — that is the guard against
+// hiding every tab and stranding the user on a blank shell.
+export function applyTabs() {
+  const hidden = _settings.hiddenTabs || [];
+  let bounce = false;
+  document.querySelectorAll('.tab').forEach((t) => {
+    const off = hidden.includes(t.dataset.section);
+    t.style.display = off ? 'none' : '';
+    if (off && t.classList.contains('active')) bounce = true;
+  });
+  if (bounce) document.querySelector('.tab[data-section="desk"]').click();
 }
 
 export function fullscreen() {
