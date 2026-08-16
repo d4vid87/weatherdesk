@@ -13,6 +13,43 @@ import { initHome } from './home.js';
 
 const $ = (id) => document.getElementById(id);
 
+// ---------- config sync ----------
+// The desktop app's LAN server keeps one settings+layout blob, so every browser in the house
+// loads the host's configuration instead of being set up by hand. Static self-hosts have no
+// /config route: the fetches fail and each browser keeps its own localStorage, as before.
+const SRV = window.__WD_SRV || '';
+let syncing = false;
+
+async function pullConfig() {
+  syncing = true;
+  try {
+    const r = await fetch(`${SRV}/config`, { signal: AbortSignal.timeout(2000) });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j.settings) saveSettings(j.settings);
+    if (j.layout) restore(j.layout);
+  } catch {
+    // no config server (static host, or app not running) — nothing to sync
+  } finally {
+    syncing = false;
+  }
+}
+
+// ponytail: server wins on load, last writer wins on save. No merge — every save pushes the
+// whole blob, so there is nothing to reconcile.
+function pushConfig() {
+  if (syncing) return;
+  fetch(`${SRV}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ at: Date.now(), settings: settings(), layout: load('wd.layout', {}) }),
+  }).catch(() => {});
+}
+
+let pushTimer;
+window.addEventListener('wd:layout', () => { clearTimeout(pushTimer); pushTimer = setTimeout(pushConfig, 2000); });
+
+
 function fillDrawer() {
   const s = settings();
   $('set-token').value = s.token;
@@ -95,6 +132,7 @@ $('btn-save').onclick = async () => {
     });
   }
   await hydrateStation();
+  pushConfig();
   openDrawer(false);
   // Point the radars at whatever the settings now say (a changed site, or a first station fix).
   for (const id of ['desk-radar-frame', 'lab-frame']) {
@@ -272,7 +310,7 @@ window.addEventListener('message', (e) => {
 window.addEventListener('wd:section', (e) => {
   const f = $('lab-frame');
   if (e.detail !== 'lab' || f.src) return;
-  f.src = radarUrl(8, false);
+  f.src = radarUrl(8);
 });
 
 // Inline radar strip on the Desk: embedded, so it holds one frame a minute until touched. A live
@@ -282,6 +320,8 @@ function loadDeskRadar() {
   if (!f.src) f.src = radarUrl(6.5);
   $('desk-radar').classList.add('loaded');
 }
+
+await pullConfig();
 
 initNav();
 initPlaces();
