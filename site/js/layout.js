@@ -24,7 +24,11 @@ const $ = (id) => document.getElementById(id);
 
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
 let state = load();
-const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+const save = () => {
+  localStorage.setItem(KEY, JSON.stringify(state));
+  // boot.js debounces this into a config-server push; a drag fires save() per frame batch.
+  window.dispatchEvent(new CustomEvent('wd:layout'));
+};
 
 const entry = (id) => (state[id] ||= {});
 

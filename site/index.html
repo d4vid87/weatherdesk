@@ -155,6 +155,10 @@
   /* hero */
   #hero { padding: 16px 20px 20px; color: #fff; overflow: hidden; border-radius: 12px;
     background: linear-gradient(160deg, #1f6fb8, #7fb6e6); }
+  #hero-clock { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px;
+    font-variant-numeric: tabular-nums; }
+  #clock-time { font-size: 56px; font-weight: 700; line-height: 1; }
+  #clock-date { font-size: 18px; }
   .hero-top { display: flex; justify-content: space-between; font-size: 14px; }
   .hero-right { text-align: right; }
   .hero-dim { opacity: .78; }
@@ -341,10 +345,10 @@
   <section class="page" id="desk">
     <div id="desk-stack">
     <div id="hero" data-panel="hero">
+      <div id="hero-clock"><span id="clock-time">--:--:--</span> <span id="clock-date" class="hero-dim"></span></div>
       <div class="hero-top">
         <div>
           <div id="hero-place"></div>
-          <div id="hero-time" class="hero-dim"></div>
         </div>
         <div class="hero-right">
           <div id="hero-sun"></div>

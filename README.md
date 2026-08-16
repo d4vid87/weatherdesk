@@ -137,6 +137,13 @@ double-click it. The app opens in its own window *and* serves the same dashboard
 network on port 8088 — the wall tablet just opens the URL shown in the window title. Nothing else to
 install; leave the app running.
 
+**One config for the whole house.** The desktop app also keeps your settings and dashboard layout
+on the host computer. Any browser that opens the LAN URL loads that configuration — no re-typing the
+token, no re-arranging panels per device — and a save from any of those browsers writes back, so the
+next device to load picks it up. Open sessions don't update live; reload to fetch. Note that this
+means anyone on your network can read the Tempest token from the host. Self-hosting the `site/`
+folder statically has no config server, so those browsers keep their own settings as before.
+
 The app also listens for your hub's UDP broadcasts on port 50222 and re-serves them to the tablet,
 so live wind and lightning keep flowing with the internet unplugged. A browser can't hold a UDP
 socket, so the no-install option below uses the cloud websocket only. If another Tempest app owns

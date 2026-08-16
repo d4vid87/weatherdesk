@@ -8,12 +8,14 @@
 #[cfg(desktop)]
 use std::collections::HashMap;
 #[cfg(desktop)]
+use std::io::Read;
+#[cfg(desktop)]
 use std::net::UdpSocket;
 #[cfg(desktop)]
 use std::sync::{Arc, Mutex};
 #[cfg(desktop)]
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 #[cfg(desktop)]
 use tiny_http::{Header, Response, Server};
 
@@ -81,6 +83,13 @@ fn lan_ip() -> String {
         .unwrap_or_else(|_| "localhost".into())
 }
 
+/// One settings+layout blob for the whole house. Anything on the LAN can read it — same trust
+/// model as the CORS-`*` `/udp` route — and that includes the Tempest token.
+#[cfg(desktop)]
+fn cors(res: Response<std::io::Empty>) -> Response<std::io::Empty> {
+    res.with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -103,9 +112,11 @@ pub fn run() {
                 let listener = packets.clone();
                 std::thread::spawn(move || listen_udp(listener));
 
+                let cfg_path = app.path().app_config_dir().map(|d| d.join("config.json")).ok();
+
                 let resolver = app.asset_resolver();
                 std::thread::spawn(move || {
-                    for req in server.incoming_requests() {
+                    for mut req in server.incoming_requests() {
                         let path = req.url().split('?').next().unwrap_or("/").to_string();
                         // ponytail: a plain polled route, not SSE — this request loop is
                         // single-threaded, and a hanging stream would stall every other asset.
@@ -117,6 +128,39 @@ pub fn run() {
                                     .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
                                     .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap()),
                             );
+                            continue;
+                        }
+                        if path == "/config" {
+                            let Some(file) = cfg_path.clone() else {
+                                let _ = req.respond(Response::empty(503));
+                                continue;
+                            };
+                            match *req.method() {
+                                tiny_http::Method::Get => {
+                                    let body = std::fs::read_to_string(&file).unwrap_or_else(|_| "{}".into());
+                                    let _ = req.respond(
+                                        Response::from_string(body)
+                                            .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
+                                            .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap()),
+                                    );
+                                }
+                                tiny_http::Method::Put => {
+                                    let mut body = String::new();
+                                    // capped: this loop is single-threaded, and the blob is a few KB
+                                    let ok = req.as_reader().take(256 * 1024).read_to_string(&mut body).is_ok()
+                                        && file.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false)
+                                        && std::fs::write(&file, body).is_ok();
+                                    let _ = req.respond(cors(Response::empty(if ok { 204 } else { 500 })));
+                                }
+                                tiny_http::Method::Options => {
+                                    let _ = req.respond(
+                                        cors(Response::empty(204))
+                                            .with_header(Header::from_bytes("Access-Control-Allow-Methods", "GET, PUT, OPTIONS").unwrap())
+                                            .with_header(Header::from_bytes("Access-Control-Allow-Headers", "Content-Type").unwrap()),
+                                    );
+                                }
+                                _ => { let _ = req.respond(Response::empty(405)); }
+                            }
                             continue;
                         }
                         let _ = match resolver.get(path) {
@@ -142,7 +186,9 @@ pub fn run() {
                     // the process to notice. Owning the state from the first frame sidesteps it.
                     .maximized(cfg!(target_os = "linux"))
                     // the window isn't same-origin with the LAN server, so it needs the port told to it
-                    .initialization_script(&format!("window.__WD_UDP='http://localhost:{port}/udp'"));
+                    .initialization_script(&format!(
+                        "window.__WD_UDP='http://localhost:{port}/udp';window.__WD_SRV='http://localhost:{port}'"
+                    ));
             }
 
             win.build()?;

@@ -64,7 +64,6 @@ function renderHero(fc) {
   const [a, b] = skyFor(Date.now() / 1000, d.sunrise, d.sunset);
   $('hero').style.background = `linear-gradient(160deg, ${a}, ${b})`;
   $('hero-place').textContent = settings().stationName || 'Station';
-  $('hero-time').textContent = new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   $('hero-temp').textContent = `${num(c.air_temperature)}°`;
   $('hero-cond').textContent = c.conditions || '';
   $('hero-hilo').textContent = `High ${num(d.air_temp_high)}° / Low ${num(d.air_temp_low)}°`;
@@ -234,7 +233,7 @@ function renderDays(fc) {
           <div class="dc-icon">${icon.wx(d.icon, 30)}</div>
           <div class="dc-temp"><b>${num(d.air_temp_high)}°</b><span>/${num(d.air_temp_low)}°</span></div>
           <div class="dc-cond">${d.conditions || ''}</div>
-          <div class="dc-pop">${num(d.precip_probability)}%${amount != null ? ` · ${num(amount, 2)}"` : ''}</div>
+          <div class="dc-pop">${num(d.precip_probability)}%${amount != null ? ` · ${num(amount, 2)} ${U.precip()}` : ''}</div>
         </div>
       </div>
     </div>`;
@@ -376,7 +375,6 @@ function renderLocal(o) {
 
   const temp = t(o[I.temp]), rh = o[I.rh];
   $('hero-place').textContent = settings().stationName || 'Local station · UDP';
-  $('hero-time').textContent = new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   $('hero-temp').textContent = `${num(temp)}°`;
   $('hero-cond').textContent = 'Live · hub broadcast';
   $('hero-live').className = 'live on';
@@ -418,6 +416,11 @@ export function initPro() {
   every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
   every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
   every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
+  every('clock', 1, () => {
+    const d = new Date();
+    $('clock-time').textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    $('clock-date').textContent = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  });
   every('pro-clock', 60, () => { if (deskForecast()) renderHero(deskForecast()); });
 
   // A class, not an inline style: inline would outrank the rule that stops the animation whenever
