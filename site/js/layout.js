@@ -246,10 +246,31 @@ function wire(container) {
     });
     el.appendChild(grip);
     ['e', 's', 'se'].forEach((dir) => el.appendChild(resizeHandle(el, dir)));
+
+    // Hide sits on the grip rather than in a drawer checklist: 29 panels make an unreadable list,
+    // and `.layout-locked .grip` already puts it out of reach when the layout is locked.
+    const hide = document.createElement('button');
+    hide.className = 'grip grip-hide';
+    hide.textContent = '×';
+    hide.title = 'Hide this panel — restore it under Settings';
+    hide.onclick = () => {
+      entry(el.dataset.panel).hidden = true;
+      el.classList.add('panel-hidden');
+      save();
+    };
+    el.appendChild(hide);
   });
 }
 
 export const snapshot = () => structuredClone(state);
+
+export const hiddenPanels = () => Object.keys(state).filter((id) => state[id].hidden);
+
+export function unhide(id) {
+  delete entry(id).hidden;
+  document.querySelector(`[data-panel="${id}"]`)?.classList.remove('panel-hidden');
+  save();
+}
 
 // Swap the whole arrangement at once. Inline styles have to be stripped first: a panel the new
 // state says nothing about would otherwise keep the old one's pixel height.
@@ -306,5 +327,19 @@ if (location.search.includes('selftest')) {
   console.assert(insertPoint(row, 220, 40) === row.lastElementChild, 'drop before it');
   dragged = null;
   row.remove();
+
+  // hide → applySaved paints it out; unhide takes the class and the flag back off
+  const p = document.createElement('div');
+  p.dataset.panel = 'sel-hide';
+  document.body.appendChild(p);
+  state = { 'sel-hide': { hidden: true } };
+  applySaved(p);
+  console.assert(p.classList.contains('panel-hidden'), 'layout: hidden panel painted out');
+  console.assert(hiddenPanels().join() === 'sel-hide', 'layout: hiddenPanels lists it');
+  unhide('sel-hide');
+  console.assert(!p.classList.contains('panel-hidden') && !hiddenPanels().length, 'layout: unhide restores');
+  p.remove();
+
   state = JSON.parse(before);
+  save(); // the hide/unhide asserts wrote through to storage — put the real layout back
 }

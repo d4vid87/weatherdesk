@@ -1,7 +1,7 @@
 // Desk layout matching myWeatherDesk: sky hero, signal ticker, trend strip,
 // 48h combined chart, day cards, dial gauges. Driven by the wd:forecast event.
 import * as api from './api.js';
-import { settings, U, num, timeStr, deg2compass, every } from './app.js';
+import { settings, coords, U, num, timeStr, deg2compass, every } from './app.js';
 import { forecast as deskForecast } from './desk.js';
 import * as icon from './icons.js';
 import { initLayout } from './layout.js';
@@ -247,6 +247,26 @@ function renderDays(fc) {
 // like (compass needle, barometer dial, filling droplet) rather than every quantity being a ring.
 const gauge = (face, inner) => `<div class="gwrap">${face}<div class="ginner">${inner}</div></div>`;
 
+// Sea-level pressure from the station's own obs (every `refreshSec`, 60s by default) rather than
+// the forecast payload, which is rounded to two decimals and only refreshes every five minutes —
+// on a quiet day the gauge looked frozen.
+let slp = null;
+
+function renderPress(v, label = 'sea level') {
+  const metric = settings().units === 'metric';
+  const pLo = metric ? 970 : 28.5, pHi = metric ? 1040 : 31;
+  const pT = trend(I.press, 3);
+  $('g-press').innerHTML = gauge(icon.dial((v - pLo) / (pHi - pLo)),
+    `<b>${num(v, 2)}</b><small>${U.press()}</small><span>${pT == null ? label : `${pT >= 0 ? '↑' : '↓'} ${num(Math.abs(pT), 2)} / 3h · ${pressWord(pT)}`}</span>`);
+}
+
+window.addEventListener('wd:obs', (e) => {
+  const v = e.detail?.sea_level_pressure;
+  if (v == null) return;
+  slp = v;
+  if (deskForecast()) renderPress(v);
+});
+
 function renderGauges(fc) {
   const c = fc.current_conditions;
   const last = history[history.length - 1] || [];
@@ -264,10 +284,7 @@ function renderGauges(fc) {
   $('g-hum').innerHTML = gauge(icon.ring(c.relative_humidity / 100, '#4fb8ff'),
     `<b>${num(c.relative_humidity)}%</b><span>${rhT == null ? '' : `${rhT >= 0 ? '↑' : '↓'} ${num(Math.abs(rhT))} pts / 3h`}</span>`);
 
-  const pLo = metric ? 970 : 28.5, pHi = metric ? 1040 : 31;
-  const pT = trend(I.press, 3);
-  $('g-press').innerHTML = gauge(icon.dial((c.sea_level_pressure - pLo) / (pHi - pLo)),
-    `<b>${num(c.sea_level_pressure, 2)}</b><small>${U.press()}</small><span>${pT == null ? '' : `${pT >= 0 ? '↑' : '↓'} ${num(Math.abs(pT), 2)} / 3h · ${pressWord(pT)}`}</span>`);
+  renderPress(slp ?? c.sea_level_pressure);
 
   const dT = trend(I.temp, 3, true);
   $('g-dew').innerHTML = gauge(icon.droplet(c.dew_point / (metric ? 30 : 85)),
@@ -302,6 +319,7 @@ async function loadHistory() {
 }
 
 async function loadConsensus() {
+  if (coords().lat == null) return;
   try {
     const m = await api.multiModel();
     const now = Date.now();
@@ -314,6 +332,7 @@ async function loadConsensus() {
 }
 
 async function loadQpf() {
+  if (coords().lat == null) return;
   try {
     const j = await api.dailyPrecip();
     qpf = j.daily?.precipitation_sum || null;
@@ -333,8 +352,69 @@ export function renderPro(fc = deskForecast()) {
   initLayout();
 }
 
+// ---------- UDP-only mode ----------
+//
+// With a hub on the LAN and no token there is no forecast at all, but the hub still broadcasts
+// everything the sensors measure. Fill the parts of the hero and the gauges that come straight
+// off the sensor and leave the rest alone — hi/lo, sun, moon and feels-like are forecast data
+// and there is nothing honest to put there.
+//
+// obs_st is SI on the wire by design (MQTT depends on it), so convert here.
+// Magnus formula — the hub sends temperature and humidity, not dew point. °C in, °C out.
+function dewPointC(c, rh) {
+  if (c == null || !(rh > 0)) return null;
+  const g = (17.625 * c) / (243.04 + c) + Math.log(rh / 100);
+  return (243.04 * g) / (17.625 - g);
+}
+
+function renderLocal(o) {
+  const metric = settings().units === 'metric';
+  const t = (c) => (c == null ? null : metric ? c : c * 9 / 5 + 32);
+  const w = (mps) => (mps == null ? null : mps * (metric ? 3.6 : 2.23694));
+  const p = (mb) => (mb == null ? null : metric ? mb : mb * 0.02953);
+  const r = (mm) => (mm == null ? null : metric ? mm : mm / 25.4);
+
+  const temp = t(o[I.temp]), rh = o[I.rh];
+  $('hero-place').textContent = settings().stationName || 'Local station · UDP';
+  $('hero-time').textContent = new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  $('hero-temp').textContent = `${num(temp)}°`;
+  $('hero-cond').textContent = 'Live · hub broadcast';
+  $('hero-live').className = 'live on';
+  $('hero-live').textContent = '● Live · UDP';
+  $('hero-batt').textContent = o[I.battery] ? `${num(o[I.battery], 2)} V` : '';
+
+  const windMax = metric ? 60 : 40;
+  const avg = w(o[I.windAvg]), gust = w(o[I.windGust]), dir = o[I.windDir];
+  $('g-wind').innerHTML = gauge(icon.compass(dir, avg / windMax),
+    `<b>${num(avg)}</b><small>${U.wind()}</small><span>gust ${num(gust)} · ${deg2compass(dir)}</span>`);
+
+  const rain = r(o[I.dayRain]) || 0;
+  $('g-rain').innerHTML = gauge(icon.rainRing(rain / (metric ? 25 : 1), rain > 0),
+    `<b>${rain > 0 ? num(rain, 2) : 'Dry'}</b><span>${num(rain, 2)} ${U.precip()} today</span>`);
+
+  $('g-hum').innerHTML = gauge(icon.ring(rh / 100, '#4fb8ff'), `<b>${num(rh)}%</b><span>relative humidity</span>`);
+
+  // index 6 is the pressure at the sensor, not reduced to sea level — say so rather than let it
+  // read as a barometer reading that disagrees with everyone else's.
+  renderPress(p(o[I.press]), 'station pressure');
+
+  const dpC = dewPointC(o[I.temp], o[I.rh]);
+  if (dpC != null) {
+    const dp = t(dpC);
+    $('g-dew').innerHTML = gauge(icon.droplet(dp / (metric ? 30 : 85)), `<b>${num(dp)}°</b><span>dew point</span>`);
+  }
+
+  $('g-uv').innerHTML = gauge(icon.uvRing(o[I.uv]),
+    `<b>UV ${num(o[I.uv])}</b><span>${uvWord(o[I.uv])}${o[I.solar] ? ` · ${num(o[I.solar])} W/m²` : ''}</span>`);
+}
+
+// Module level, not inside initPro: initPro re-runs on every settings save and a listener per
+// save stacks up. Both the websocket and the UDP poller dispatch wd:ws-obs; with a forecast in
+// hand the normal render owns the screen and this does nothing.
+window.addEventListener('wd:ws-obs', (e) => { if (!deskForecast()) renderLocal(e.detail); });
+window.addEventListener('wd:forecast', (e) => renderPro(e.detail));
+
 export function initPro() {
-  window.addEventListener('wd:forecast', (e) => renderPro(e.detail));
   every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
   every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
   every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
@@ -346,4 +426,11 @@ export function initPro() {
     const paused = $('ticker-track').classList.toggle('paused');
     $('ticker-pause').textContent = paused ? '▶' : '❚❚';
   };
+}
+
+// ponytail-lite self-check: the only arithmetic here that isn't a straight unit multiply.
+if (location.search.includes('selftest')) {
+  console.assert(Math.abs(dewPointC(20, 100) - 20) < 0.1, 'pro: saturated air dews at the air temperature');
+  console.assert(Math.abs(dewPointC(20, 50) - 9.3) < 0.3, 'pro: 20°C at 50% dews near 9.3°C');
+  console.assert(dewPointC(20, 0) === null, 'pro: no humidity, no dew point');
 }

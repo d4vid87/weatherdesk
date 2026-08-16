@@ -14,11 +14,29 @@ function qs(obj) {
   return new URLSearchParams(obj).toString();
 }
 
+// What to do about it, in the message itself. "401 Unauthorized" told nobody where the token
+// comes from. Tempest-only: a 404 from open-meteo is not a station-ID problem.
+export function errHint(status, url) {
+  if (!url.startsWith(SWD)) return '';
+  if (status === 401 || status === 403) {
+    return ' — token rejected: create or check a personal use token at tempestwx.com → Settings → Data Authorizations';
+  }
+  if (status === 404) return ' — not found: check the station/device ID';
+  return '';
+}
+
 async function getJSON(url, opts) {
   // A wall tablet on a dropped Wi-Fi link otherwise leaves a fetch hanging for minutes and the
   // panel's next refresh never fires.
-  const r = await fetch(url, { signal: AbortSignal.timeout(15000), ...opts });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${url.split('?')[0]}`);
+  let r;
+  try {
+    r = await fetch(url, { signal: AbortSignal.timeout(15000), ...opts });
+  } catch (e) {
+    // the token rides in the query string — never let it into a notification body
+    const where = url.split('?')[0];
+    throw new Error(e.name === 'TimeoutError' ? `timed out (15s) — ${where}` : `network unreachable — ${where}`);
+  }
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${url.split('?')[0]}${errHint(r.status, url)}`);
   return r.json();
 }
 
@@ -34,8 +52,6 @@ export function stationObs(id = settings().stationId) {
 
 // obs_st tuple layout, per the Tempest UDP/REST reference. One copy: two drifting
 // copies of a positional index map is a silently-wrong chart.
-// ponytail: device history may come back in SI regardless of the unit params below —
-// unverified without a live token. If your imperial charts read metric, that's why.
 export const OBS = {
   time: 0, windLull: 1, windAvg: 2, windGust: 3, windDir: 4, windInterval: 5,
   press: 6, temp: 7, rh: 8, lux: 9, uv: 10, solar: 11, rain: 12, precipType: 13,
@@ -43,10 +59,28 @@ export const OBS = {
 };
 
 // history: epoch seconds range, device-level (1min buckets)
-export function deviceObs(deviceId, timeStart, timeEnd) {
-  return getJSON(`${SWD}/observations/device/${deviceId}?${qs({
-    token: settings().token, time_start: timeStart, time_end: timeEnd, ...unitParams(),
+//
+// This endpoint ignores the unit params and always answers in SI (m/s, °C, mb, mm, km) — charts
+// and trends were reading metric numbers under imperial labels, and a 0.30 *mb* 3h pressure delta
+// tripped the inHg "rising rapidly" band forever. Convert here, once, and every consumer
+// (boards.js, pro.js trends) is right without knowing about it.
+export async function deviceObs(deviceId, timeStart, timeEnd) {
+  const j = await getJSON(`${SWD}/observations/device/${deviceId}?${qs({
+    token: settings().token, time_start: timeStart, time_end: timeEnd,
   })}`);
+  const metric = settings().units === 'metric';
+  const conv = (o, i, f) => { if (o[i] != null) o[i] = o[i] * f; };
+  for (const o of j.obs || []) {
+    // wind is m/s in both systems — even metric needs km/h
+    for (const i of [OBS.windLull, OBS.windAvg, OBS.windGust]) conv(o, i, metric ? 3.6 : 2.23694);
+    if (metric) continue;
+    if (o[OBS.temp] != null) o[OBS.temp] = o[OBS.temp] * 9 / 5 + 32;
+    conv(o, OBS.press, 0.02953);
+    conv(o, OBS.rain, 1 / 25.4);
+    conv(o, OBS.dayRain, 1 / 25.4);
+    conv(o, OBS.strikeDist, 0.621371);
+  }
+  return j;
 }
 
 export function betterForecast(stationId = settings().stationId) {
@@ -112,6 +146,14 @@ export function geocode(q) {
 
 export function stormReports(hours = 24) {
   return getJSON(`https://mesonet.agron.iastate.edu/geojson/lsr.geojson?${qs({ hours })}`);
+}
+
+// ponytail-lite self-check: the error hints and the SI conversion, the two places a silent
+// wrong answer would look plausible.
+if (location.search.includes('selftest')) {
+  console.assert(errHint(401, `${SWD}/stations/1`).includes('token'), 'api: 401 names the token');
+  console.assert(errHint(404, `${SWD}/stations/1`).includes('station'), 'api: 404 names the ID');
+  console.assert(errHint(404, 'https://api.open-meteo.com/v1/forecast') === '', 'api: no station hint off Tempest');
 }
 
 // --- Diagnostics: ping each source, return [{name, ok, detail}] ---

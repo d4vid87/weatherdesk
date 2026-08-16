@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, initNav, fullscreen, refreshAll, notify, load, store } from './app.js';
+import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -7,7 +7,7 @@ import { initSignals, refreshSignals } from './signals.js';
 import { initBoards } from './boards.js';
 import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
-import { initLayout, snapshot, restore } from './layout.js';
+import { initLayout, snapshot, restore, hiddenPanels, unhide } from './layout.js';
 import { initUdp } from './udp.js';
 import { initHome } from './home.js';
 
@@ -27,7 +27,24 @@ function fillDrawer() {
   $('set-ha-url').value = s.haUrl;
   $('set-ha-token').value = s.haToken;
   $('set-ha-entities').value = s.haEntities;
+  document.querySelectorAll('#tab-toggles input').forEach((c) => {
+    c.checked = !(s.hiddenTabs || []).includes(c.dataset.tab);
+  });
+  renderHiddenPanels();
   fillSites();
+}
+
+// Panels are hidden from their own grip; this is the only way back, so it lists them by id —
+// short enough to recognise, and no second name to keep in sync with the markup.
+function renderHiddenPanels() {
+  const ids = hiddenPanels();
+  $('hidden-list').innerHTML = ids.length
+    ? ids.map((id, i) => `<button class="place-hit" data-hidden="${i}" style="flex:0 0 auto"></button>`).join('')
+    : '<div class="muted" style="font-size:12px">No hidden panels</div>';
+  $('hidden-list').querySelectorAll('[data-hidden]').forEach((b) => {
+    b.textContent = `${ids[+b.dataset.hidden]} ×`;
+    b.onclick = () => { unhide(ids[+b.dataset.hidden]); renderHiddenPanels(); };
+  });
 }
 
 // Radar site picker: every site, nearest first, so the one the user wants is at the top of the
@@ -68,7 +85,15 @@ $('btn-save').onclick = async () => {
     haUrl: $('set-ha-url').value.trim(),
     haToken: $('set-ha-token').value.trim(),
     haEntities: $('set-ha-entities').value.trim(),
+    hiddenTabs: [...document.querySelectorAll('#tab-toggles input')].filter((c) => !c.checked).map((c) => c.dataset.tab),
   });
+  applyTabs();
+  if (!configured()) {
+    notify({
+      title: 'Setup incomplete',
+      body: 'Token + station ID are needed for forecasts. Desktop with a Tempest hub on the LAN still shows live local data.',
+    });
+  }
   await hydrateStation();
   openDrawer(false);
   // Point the radars at whatever the settings now say (a changed site, or a first station fix).
@@ -86,11 +111,27 @@ async function hydrateStation() {
   try {
     const j = await api.station();
     const st = j.stations?.[0];
-    if (!st) return;
+    // A valid token for the wrong account answers 200 with an empty list, and the old silent
+    // return left the whole dashboard blank with nothing to go on.
+    if (!st) {
+      notify({
+        title: 'Station lookup failed',
+        body: `Token works but has no access to station ${settings().stationId}. `
+          + 'The station ID is the number in your tempestwx.com station URL.',
+      });
+      return;
+    }
     const tempest = st.devices?.find((d) => d.device_type === 'ST') || st.devices?.find((d) => d.device_type === 'AR');
-    // history API wants the numeric device_id; a pasted serial (ST-00176465) won't work
-    const numeric = /^\d+$/.test(settings().deviceId) ? settings().deviceId
-      : (tempest ? String(tempest.device_id) : '');
+    // history API wants the numeric device_id; a pasted serial (ST-00176465) won't work — and
+    // neither does a station ID pasted in the device box, which is numeric and used to sail
+    // through this guard and 404 every history call in silence.
+    const entered = settings().deviceId;
+    const known = (st.devices || []).map((d) => String(d.device_id));
+    let numeric = tempest ? String(tempest.device_id) : '';
+    if (/^\d+$/.test(entered) && known.includes(entered)) numeric = entered;
+    else if (/^\d+$/.test(entered) && entered !== numeric) {
+      notify({ title: 'Device ID corrected', body: `${entered} isn't a device on this station — using ${numeric || 'none'}.` });
+    }
     saveSettings({
       stationName: st.name,
       lat: st.latitude, lon: st.longitude,
@@ -157,7 +198,7 @@ $('btn-diag').onclick = async () => {
 };
 
 window.addEventListener('wd:refresh', () => {
-  refreshDesk().catch((e) => notify({ title: 'Forecast failed', body: e.message }));
+  refreshDesk().catch(() => {}); // refreshDesk owns the failure toast
   refreshObs().catch(() => {});
   refreshAlerts().catch(() => {});
   refreshAqi().catch(() => {});
@@ -253,13 +294,19 @@ renderLayouts();
 if (!configured()) {
   fillDrawer();
   openDrawer(true);
-} else {
-  // lat/lon must land before the open-meteo/NWS jobs start
-  hydrateStation().then(() => {
-    loadDeskRadar();
-    initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initUdp(); initHome();
-  });
+  // UDP-only mode: a desktop install with a hub on the LAN has real local data with no token at
+  // all, so the modules start either way. Every refresh job early-returns without a token, so an
+  // unconfigured init is a handful of no-ops.
+  for (const id of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
+    const el = $(id);
+    if (el) el.innerHTML = '<div class="muted">Needs a Tempest token — open ⚙ Settings</div>';
+  }
 }
+// lat/lon must land before the open-meteo/NWS jobs start (resolves immediately when unconfigured)
+hydrateStation().then(() => {
+  loadDeskRadar();
+  initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initUdp(); initHome();
+});
 
 // ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.
 if (location.search.includes('selftest')) {

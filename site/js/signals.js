@@ -27,7 +27,9 @@ export async function refreshSignals() {
   $('signals-table').innerHTML = `<div class="sig-row sig-head">
       <span>Station</span><span>Temp</span><span>Δ</span><span>Wind</span><span>Δ</span><span>Rain today</span><span>Age</span>
     </div>` + rows.map((r) => {
-    if (!r.o) return `<div class="sig-row"><span>${r.name}</span><span class="fail" style="grid-column:span 6">${r.err || 'no data'}</span>
+    // A private station answers the same way a wrong number does, and the bare status code sent
+    // people looking for a bug that isn't there.
+    if (!r.o) return `<div class="sig-row"><span>${r.name}</span><span class="fail" style="grid-column:span 6">${r.err ? `${r.err} · private stations can't be read — use a public station's ID from tempestwx.com/map` : 'no data'}</span>
       <button class="sig-x" data-id="${r.id}">×</button></div>`;
     const ageMin = Math.round((Date.now() / 1000 - r.o.timestamp) / 60);
     return `<div class="sig-row${ageMin > 20 ? ' stale' : ''}">

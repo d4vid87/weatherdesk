@@ -34,6 +34,10 @@ leave it on *Nearest to my station* and it follows the station. Wherever you lea
 product, tilt, basemap, zoom — is remembered here and handed back to the viewer on the next launch.
 It has to work that way round: browsers partition an iframe's storage, so the embedded viewer
 cannot remember anything on its own. The Desk and the Lab share one remembered view.
+
+**Is the radar live?** It is as live as NEXRAD gets: a WSR-88D takes 4–10 minutes to finish a
+volume scan, and delivery adds a little more, so the newest frame is always a few minutes behind
+the sky. Nothing on the internet is fresher — that delay is the radar itself, not the viewer.
 - **Local Signals** — nearby-station comparison table, the Tempest live wind feed, a 24-hour
   lightning-strike log and the notification history.
 - **Data** — ten boards off 7-day device history, including a wind rose, plus multi-model output
@@ -113,6 +117,19 @@ Two limits worth knowing: publishing only happens while the dashboard is open so
 desktop app running — that is the always-on copy), and a browser tab served over `https` cannot
 reach a `ws://` broker at all. The desktop app and the LAN URL are both plain origins, so they can.
 
+## Quick start
+
+1. **Token** — tempestwx.com → Settings → **Data Authorizations** → *Create Token*. Any personal
+   use token works; paste it into Settings → *Tempest API token*.
+2. **Station ID** — the number in your station's URL, `tempestwx.com/station/NNNNN`. That number,
+   not the station name and not the serial on the sensor.
+3. **Device ID** — leave it blank. The station lookup fills it in. (A station ID pasted here is
+   numeric too, and used to break every history chart in silence; the app now corrects it and says
+   so.)
+
+Everything is saved in the browser's `localStorage`, per install — the desktop app and a browser
+tab don't share settings.
+
 ## Download & run
 
 Grab the installer for your OS from [Releases](https://github.com/d4vid87/weatherdesk/releases) and
@@ -124,6 +141,13 @@ The app also listens for your hub's UDP broadcasts on port 50222 and re-serves t
 so live wind and lightning keep flowing with the internet unplugged. A browser can't hold a UDP
 socket, so the no-install option below uses the cloud websocket only. If another Tempest app owns
 port 50222 first, WeatherDesk skips it and falls back to the websocket by itself.
+
+**UDP-only mode — no token at all.** On the desktop app, with your hub on the same network, leave
+the token and station ID empty and the hub's own broadcasts still drive the hero, the wind, rain,
+humidity, pressure, dew point and UV gauges, the live wind feed and the lightning log — and MQTT
+publishing, if you use it. What needs the (free) token is everything that isn't your sensor:
+forecasts, the 10-day list, history charts, model agreement, alerts. The pressure gauge reads
+*station pressure* in this mode rather than sea-level pressure, because that is what the hub sends.
 
 - **Windows** — run the `.msi`. The app is unsigned, so SmartScreen shows a warning: **More info →
   Run anyway**. Allow the Windows Firewall prompt on first launch, or the tablet can't connect.
@@ -164,7 +188,33 @@ station lookup fills in the name, coordinates and numeric device ID. Everything 
 refresh interval, saved places, notification categories, forecast snapshots and the verification
 log — lives in `localStorage`; there is nothing to configure on the server.
 
-For a permanent install, a systemd user unit running that same command is enough.
+### Headless / home lab
+
+No screen, no desktop session — just serve `site/` and open it from anywhere. Drop this in
+`~/.config/systemd/user/weatherdesk.service`:
+
+```ini
+[Unit]
+Description=WeatherDesk (static site)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m http.server 8088 --bind 0.0.0.0 --directory %h/weatherdesk/site
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```sh
+loginctl enable-linger "$USER"          # keeps it running with nobody logged in
+systemctl --user daemon-reload
+systemctl --user enable --now weatherdesk
+```
+
+There is no hub UDP feed in this mode — a browser can't hold a UDP socket, so every client rides
+WeatherFlow's websocket, which means it needs a token and the internet. The desktop app is the only
+build that listens on 50222.
 
 The desktop app serves from its own origin, so settings saved in a browser install (token included)
 don't carry over — paste the token once more in the app.
@@ -179,6 +229,37 @@ desktop jobs. Paste the token once per device.
 Building the desktop app yourself: `cargo tauri build` in `src-tauri/` (Rust + the Tauri
 [prerequisites](https://tauri.app/start/prerequisites/) for your OS). Iterate on the HTML/JS with
 the python command above; the app embeds `site/` at compile time.
+
+## Other devices
+
+- **Windows 10 / 11** — the `.msi` on the Releases page is the whole answer; it's a normal desktop
+  app on both.
+- **iPad, iPhone, Echo Show, any other browser-only screen** — there is no native app, and there
+  won't be. Run the desktop app or the headless server on a machine that stays on, then point
+  Safari (or the Show's Silk browser) at that LAN URL. The Echo Show's browser is untested.
+- **Android TV boxes (onn, Shield, Fire TV)** — the APK installs, but the dashboard is built for
+  touch and mouse: a D-pad remote can't reach the settings drawer or drag a panel. Plug in a USB or
+  Bluetooth mouse, or use an air-mouse remote.
+- **Every public Tempest on a map** — that's WeatherFlow's own [tempestwx.com/map](https://tempestwx.com/map),
+  which is also where you find the IDs for the Local Signals comparison table.
+
+## Troubleshooting
+
+Settings → **Diagnostics** pings every source and prints ✓/✗ plus latency for each, along with the
+viewport size. Start there — it separates "my token is wrong" from "NWS is down".
+
+| What you see | What it means |
+|---|---|
+| *token rejected: create or check a personal use token…* | The token is wrong, expired, or was never created. tempestwx.com → Settings → Data Authorizations. |
+| *Token works but has no access to station N* | The token is valid but belongs to a different account, or the station ID isn't yours. The ID is the number in your `tempestwx.com/station/NNNNN` URL. |
+| *not found: check the station/device ID* | A real 404 — usually a station ID typo, or a serial number (`ST-00176465`) where a numeric ID belongs. |
+| *Device ID corrected* | Something that wasn't one of this station's devices was in the Device ID box. Fixed automatically; leave that box blank. |
+| *Forecast stale — showing cached copy* | The last good forecast is on screen with its age marked; the source is unreachable right now. |
+| *network unreachable* / *timed out (15s)* | Wi-Fi, DNS or the API itself. Diagnostics will show whether it's one source or all of them. |
+| A nearby station row shows an error | Only **public** stations can be read. Pick one from tempestwx.com/map. |
+
+On Windows, if the tablet can't load the LAN URL, it's the firewall prompt that was dismissed on
+first launch — allow WeatherDesk on private networks.
 
 ## License
 
