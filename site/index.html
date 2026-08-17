@@ -3,13 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b0f14">
+<!-- Installable from a phone's browser. No service worker on purpose: the LAN server is plain
+     http, which cannot register one, and an offline cache of a live dashboard would be a lie. -->
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <title>WeatherDesk</title>
 <style>
   :root {
     --bg: #0b0f14; --panel: #131a22; --panel2: #1a232d; --line: #253141;
     --text: #e6edf5; --muted: #8ea0b5; --accent: #4fb8ff; --warn: #ffb84f; --bad: #ff5f56; --good: #4fdc8b;
     --gap: 12px;
+  }
+  /* Light theme is the same palette inverted, not a second stylesheet — every rule below reads
+     these six variables and nothing else knows a theme exists. */
+  html[data-theme="light"] {
+    --bg: #f2f5f8; --panel: #ffffff; --panel2: #e8edf3; --line: #ccd6e0;
+    --text: #16202b; --muted: #5c6b7d; --accent: #0b74d1; --warn: #a35a00; --bad: #c02a22; --good: #187a45;
+  }
+  html[data-density="compact"] { --gap: 7px; }
+  html[data-density="compact"] .card { padding: 8px 10px; }
+  body.big-numbers .now-temp { font-size: 88px; }
+  body.big-numbers .kv-rows { font-size: 16px; }
+  /* Night dim: one overlay, no repaint of anything underneath. */
+  #wizard { position: fixed; inset: 0; z-index: 1001; background: #000a;
+    display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #wizard[hidden] { display: none; }
+  .wizard-box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 20px; width: min(520px, 100%); max-height: 90vh; overflow: auto; }
+  .wizard-box input { width: 100%; padding: 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  #shortcuts {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px;
+    min-width: 260px;
+  }
+  #shortcuts[hidden] { display: none; }
+  body.dimmed::after {
+    content: ''; position: fixed; inset: 0; background: #000; opacity: .45;
+    pointer-events: none; z-index: 999;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -81,6 +114,9 @@
   .aqi-good { color: var(--good); } .aqi-mod { color: var(--warn); }
   .aqi-usg, .aqi-bad, .aqi-vbad { color: var(--bad); }
 
+  /* the public dashboard hides the drawer rather than removing it — see boot.js */
+  #drawer[hidden], #btn-settings[hidden] { display: none; }
+
   /* settings drawer */
   #drawer {
     position: absolute; inset: 0 0 0 auto; width: min(420px, 100%); background: var(--panel);
@@ -98,7 +134,7 @@
     background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; }
   .row button.primary { background: var(--accent); color: #04121d; border-color: var(--accent); }
   #diag div { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
-  .ok { color: var(--good); } .fail { color: var(--bad); }
+  .ok { color: var(--good); } .fail { color: var(--bad); } .warn { color: var(--warn); }
 
   /* ---- pro desk ---- */
   #desk { padding: 0; }
@@ -186,6 +222,15 @@
      never scrolls away for good. */
   @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   #ticker-track.still { animation: none; }
+  /* Eco: the ticker is a composited transform running forever, and every transition here is a
+     repaint on a machine that has none to spare. Reduced-motion gets the same treatment for the
+     reason it asks for it. */
+  body.eco #ticker-track, body.eco #ticker-track.paused { animation: none; }
+  body.eco * { transition: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    #ticker-track, body.ticker-live #ticker-track { animation: none; }
+    * { transition: none !important; }
+  }
   .tick { font-size: 15px; }
   .tick b { background: #1a2432; border: 1px solid var(--line); color: var(--warn); font-size: 11px;
     letter-spacing: .1em; padding: 3px 8px; border-radius: 5px; margin-right: 9px; }
@@ -289,6 +334,20 @@
     .chart { height: 120px; }
     header { padding: 5px 10px; }
   }
+  /* phone: one column, and saved column spans stop applying — a panel resized to a third of a
+     desktop screen is unreadable on a handset, and the layout is per-install, not per-device. */
+  @media (max-width: 720px) {
+    #desk-stack, #desk-stack > *, #desk-radar, #trends, #c48 { grid-column: span 12 !important; }
+    #desk-radar { grid-row: span 1; }
+    .grid { grid-template-columns: 1fr; }
+    .grid > .card { grid-column: span 1 !important; }
+    .now-temp { font-size: 56px; }
+    nav { overflow-x: auto; flex-wrap: nowrap; }
+    .tab { padding: 8px 12px; white-space: nowrap; }
+    /* thumbs, not mouse pointers */
+    .iconbtn, button { min-height: 40px; }
+    #drawer { width: 100%; }
+  }
   .live-wind-wrap { display: flex; align-items: center; gap: 16px; }
   .compass { width: 74px; height: 74px; border: 2px solid var(--line); border-radius: 50%;
     position: relative; flex: none; }
@@ -333,6 +392,7 @@
     <button class="tab" data-section="data">Data</button>
   </nav>
   <span id="station-name" class="muted"></span>
+  <select id="station-switch" class="iconbtn" hidden title="Switch station"></select>
   <button class="iconbtn" id="btn-refresh">↻</button>
   <button class="iconbtn" id="btn-full">⛶</button>
   <button class="iconbtn" id="btn-lock" title="Lock panel layout">🔓</button>
@@ -341,6 +401,36 @@
 
 <main>
   <div id="notif-stack"></div>
+<div id="wizard" hidden>
+  <div class="wizard-box">
+    <h2 style="margin-top:0">Welcome to WeatherDesk</h2>
+    <p class="muted" style="font-size:13px">Paste a Tempest personal use token and pick your station.
+      Get one at tempestwx.com → Settings → Data Authorizations.</p>
+    <div class="row">
+      <input id="wiz-token" type="password" placeholder="personal use token">
+      <button class="primary" id="btn-wiz-find" style="flex:0 0 auto">Find stations</button>
+    </div>
+    <div id="wiz-list" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="btn-wiz-demo">Skip — just show me the weather somewhere</button>
+      <button id="btn-wiz-close" style="flex:0 0 auto">Close</button>
+    </div>
+    <p class="muted" style="font-size:12px">No station? The desktop app also reads a Tempest hub
+      directly off the network with no token at all.</p>
+  </div>
+</div>
+
+<div id="shortcuts" hidden>
+  <h2 style="margin-top:0">Keyboard</h2>
+  <div class="kv-rows">
+    <div><span>1 – 9</span><span>switch tab</span></div>
+    <div><span>r</span><span>refresh everything</span></div>
+    <div><span>f</span><span>fullscreen</span></div>
+    <div><span>s</span><span>settings</span></div>
+    <div><span>?</span><span>this list</span></div>
+    <div><span>Esc</span><span>close</span></div>
+  </div>
+</div>
 
   <section class="page" id="desk">
     <div id="desk-stack">
@@ -428,6 +518,10 @@
       <div class="card" data-panel="changes"><h2>Forecast changes</h2><div id="changes" class="muted">--</div></div>
       <div class="card" data-panel="verify"><h2>Forecast accuracy</h2><div id="verify" class="muted">--</div></div>
 
+      <div class="card" data-panel="sky"><h2>Sun &amp; moon</h2><div id="sky" class="kv-rows"></div></div>
+      <div class="card" data-panel="fire"><h2>Fire &amp; dryness</h2><div id="fire" class="kv-rows"></div></div>
+      <div class="card" data-panel="health"><h2>Station health</h2><div id="health" class="kv-rows"></div></div>
+
       <div class="card" data-panel="aqi">
         <h2>Air quality</h2>
         <div id="aqi-val">--</div>
@@ -491,6 +585,9 @@
       <div class="card"><h2 id="board-accuracy">Forecast accuracy</h2><canvas id="c-accuracy" class="chart"></canvas></div>
       <div class="card"><h2>NWS vs Tempest</h2><div id="official" class="kv-rows"></div></div>
       <div class="card"><h2 id="board-qpf">Precip outlook</h2><canvas id="c-qpf" class="chart"></canvas></div>
+      <div class="card"><h2>Garden</h2><div id="garden" class="kv-rows"></div></div>
+      <div class="card"><h2>Almanac · all time</h2><div id="almanac" class="kv-rows"></div></div>
+      <div class="card"><h2 id="board-monthly">Month by month</h2><canvas id="c-monthly" class="chart"></canvas></div>
     </div>
   </section>
 
@@ -504,9 +601,47 @@
     <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">
     <label>Wind gust alert threshold</label><input id="set-gust" type="number" min="0">
     <label>Nearby sensor radius (mi, 0 = manual only)</label><input id="set-nearby-radius" type="number" min="0">
+    <div class="row"><button id="btn-station-save">Remember this station</button></div>
+    <div id="station-list"></div>
     <label>Radar site</label>
     <select id="set-radar-site"><option value="">Nearest to my station</option></select>
     <label><input id="set-desk-radar" type="checkbox"> Radar panel on the Desk</label>
+    <label><input id="set-storm-auto" type="checkbox"> Show the radar automatically during warnings</label>
+    <h2 style="font-size:13px;margin-top:18px">Appearance</h2>
+    <label>Theme</label>
+    <select id="set-theme">
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+      <option value="auto">Auto — light by day</option>
+    </select>
+    <label>Accent colour</label><input id="set-accent" type="color" value="#4fb8ff">
+    <label>Text size</label>
+    <select id="set-font">
+      <option value="0.85">Small</option>
+      <option value="1">Normal</option>
+      <option value="1.15">Large</option>
+      <option value="1.35">Extra large</option>
+    </select>
+    <label>Density</label>
+    <select id="set-density"><option value="normal">Normal</option><option value="compact">Compact</option></select>
+    <label><input id="set-big-numbers" type="checkbox"> Oversized readings</label>
+
+    <h2 style="font-size:13px;margin-top:18px">Kiosk</h2>
+    <label>Cycle tabs every (seconds, 0 = off)</label><input id="set-kiosk" type="number" min="0" step="5">
+    <label><input id="set-night-dim" type="checkbox"> Dim the screen overnight</label>
+
+    <label style="margin-top:14px">Eco mode (slower polling, no animation)</label>
+    <select id="set-eco">
+      <option value="auto">Auto — on for slow hardware</option>
+      <option value="on">Always on</option>
+      <option value="off">Off</option>
+    </select>
+    <div class="row">
+      <button id="btn-export">Export settings</button>
+      <button id="btn-import">Import settings</button>
+      <button id="btn-csv">History CSV</button>
+    </div>
+    <input id="import-file" type="file" accept="application/json,.json" hidden>
     <div class="row">
       <button class="primary" id="btn-save">Save</button>
       <button id="btn-diag">Diagnostics</button>
@@ -549,8 +684,29 @@
       <label><input type="checkbox" data-cat="wind"> High wind</label>
       <label><input type="checkbox" data-cat="winter"> Snow / ice</label>
       <label><input type="checkbox" data-cat="changes"> Forecast changes</label>
+      <label><input type="checkbox" data-cat="rule"> My alert rules</label>
+      <label><input type="checkbox" data-cat="station"> Station health</label>
     </div>
     <div class="row"><button id="btn-notif-test">Test notifications</button></div>
+
+    <h2 style="font-size:13px;margin-top:18px">Alert rules</h2>
+    <div id="rule-list"></div>
+    <div class="row" style="margin-top:6px">
+      <select id="rule-metric"></select>
+      <select id="rule-op" style="flex:0 0 auto"><option value="&gt;">above</option><option value="&lt;">below</option></select>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <input id="rule-value" type="number" step="any" placeholder="value">
+      <input id="rule-dur" type="number" min="0" placeholder="minutes" style="flex:0 0 90px">
+      <button id="btn-rule-add" style="flex:0 0 auto">Add</button>
+    </div>
+
+    <h2 style="font-size:13px;margin-top:18px">Push notifications</h2>
+    <label>ntfy topic (phone push)</label><input id="set-ntfy-topic" placeholder="pick something unguessable">
+    <label>ntfy server</label><input id="set-ntfy-url" placeholder="https://ntfy.sh">
+    <label>Webhook URL</label><input id="set-webhook" placeholder="https://…">
+    <p class="muted" style="font-size:12px">Alerts are sent as title, body and category only — never your token.
+      An ntfy.sh topic is public to anyone who guesses it, so make it long.</p>
 
     <h2 style="font-size:13px;margin-top:18px">Smart home</h2>
     <label>MQTT WebSocket URL</label><input id="set-mqtt-url" placeholder="ws://homeassistant.local:9001">

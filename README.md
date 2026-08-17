@@ -21,7 +21,9 @@ chart](docs/screenshot.png)
   in `localStorage`; sky-gradient hero (astro + moon phase + battery + live-observation age), signal ticker,
   station-vs-model trend strip, 48h temp/rain/wind chart, inline radar, six day cards with
   temperature arcs, eight dial gauges, 10-day list, alert center, weather story, model agreement,
-  forecast changes, forecast accuracy, air quality.
+  forecast changes, forecast accuracy, air quality, sun & moon detail (golden hour, day-length
+  change, moonrise/set), fire weather & dryness, and station health (battery, signal, sensor
+  faults, time since the last report).
 - **Forecast Lab** — radar, embedded from [Hook Echo-WX](https://hookecho.netlify.app/).
 
 The Desk radar loads itself, in Hook Echo's embedded mode: no chrome, and one frame a minute until
@@ -50,7 +52,36 @@ the sky. Nothing on the internet is fresher — that delay is the radar itself, 
   as a *Nearby sensors* panel. Other people's Tempest stations can't be read unless they are
   shared publicly, so those are still added by ID (or by pasting their tempestwx.com link).
 - **Data** — ten boards off 7-day device history, including a wind rose, plus multi-model output
-  and the local verification log.
+  and the local verification log, a garden card (growing degree days, evaporation, watering
+  shortfall), and the almanac: all-time records, this day last year and rain month by month, from
+  the app's own observation log.
+
+## Alert rules and push
+
+Settings → **Alert rules** builds thresholds on live readings: a metric (temperature, dew point,
+gust, wind, humidity, rain rate, UV, 3h lightning count, 3h pressure change), above or below, a
+value, and how long it has to hold. A rule fires once and re-arms when the reading falls back
+through 90% of its threshold, so a gust hovering on the line does not notify all afternoon.
+
+Any alert can leave the machine:
+
+- **ntfy** — put a topic in Settings and install the ntfy app on your phone. The topic is the
+  whole of the security on ntfy.sh, so make it long and unguessable, or run your own server and
+  point the ntfy server field at it.
+- **Webhook** — a POST of `{title, body, category, t}` to any URL.
+- **MQTT** — every alert is also published to `weatherdesk/<station>/alert` when a broker is
+  configured.
+
+None of these ever carry your Tempest token, station ID or broker password — title, body and
+category only.
+
+## Eco mode and pacing
+
+Settings → **Eco mode** halves how often everything polls, stops the ticker and drops the seconds
+from the clock. On *Auto* it turns itself on when the browser reports four cores or fewer, which
+covers the tablets and old laptops this is often left running on. Overnight (sunset+1h to
+sunrise−1h) everything slows further on its own, and an active Severe or Extreme NWS alert puts
+the whole dashboard back to full speed — and brings the radar panel up if it was hidden.
 
 A panel that has stopped updating keeps its last good numbers and marks itself with its age in the
 corner, rather than blanking or lying. The forecast and current observations are cached, so a
@@ -242,9 +273,34 @@ devices, Fire OS 6 and newer. The phone build talks to WeatherFlow's websocket o
 listens for the hub's LAN broadcasts nor serves the dashboard to other devices, both of which stay
 desktop jobs. Paste the token once per device.
 
+**The observation log.** The desktop app writes every observation the hub broadcasts to
+`<app data>/log/obs-YYYY-MM.jsonl` — raw SI, about 15 MB a year, never rotated. That log is what
+the almanac and the garden card read, and `Settings → History CSV` hands the whole thing over as a
+spreadsheet. It starts the day you first run the app; nothing backfills it, so the almanac says
+how far back it actually goes rather than pretending.
+
 Building the desktop app yourself: `cargo tauri build` in `src-tauri/` (Rust + the Tauri
 [prerequisites](https://tauri.app/start/prerequisites/) for your OS). Iterate on the HTML/JS with
 the python command above; the app embeds `site/` at compile time.
+
+## Sharing a read-only dashboard
+
+The desktop app serves `http://<host>:8088/public` — the same dashboard with the settings drawer
+gone and a config the server strips every credential out of before sending. It is the URL to give
+a family tablet, a guest, or a reverse proxy pointed at the outside world.
+
+Note the trust model of the ordinary `/` dashboard: `GET /config` deliberately serves the whole
+settings blob, token included, to anything on the LAN, because that is how a second browser in the
+house sets itself up without being configured by hand. Anyone on your network can read your Tempest
+token. `/public` is the address to hand out if that is not what you want, and the only one to put
+behind a proxy.
+
+## Installing on a phone
+
+The dashboard ships a web manifest, so any phone browser pointed at the LAN URL can add it to the
+home screen and run it full-screen. There is no service worker and there won't be: the LAN server
+is plain http, which cannot register one, and a cached copy of a live dashboard would be showing
+yesterday's weather with today's confidence.
 
 ## Other devices
 

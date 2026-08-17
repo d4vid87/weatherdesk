@@ -1,10 +1,13 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store } from './app.js';
+import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, initKiosk } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
 import { initSignals, refreshSignals } from './signals.js';
 import { initBoards } from './boards.js';
+import { initAlmanac } from './almanac.js';
+import { initRules, renderRules } from './rules.js';
+import { initEnv } from './env.js';
 import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
 import { initLayout, snapshot, restore, hiddenPanels, unhide } from './layout.js';
@@ -20,10 +23,14 @@ const $ = (id) => document.getElementById(id);
 const SRV = window.__WD_SRV || '';
 let syncing = false;
 
+// The /public dashboard: same page, injected flag, credential-free config. Everything that
+// could change the host's settings — or read its token — is off from here on.
+const PUBLIC = !!window.__WD_PUBLIC;
+
 async function pullConfig() {
   syncing = true;
   try {
-    const r = await fetch(`${SRV}/config`, { signal: AbortSignal.timeout(2000) });
+    const r = await fetch(`${SRV}/${PUBLIC ? 'config-public' : 'config'}`, { signal: AbortSignal.timeout(2000) });
     if (!r.ok) return;
     const j = await r.json();
     if (j.settings) saveSettings(j.settings);
@@ -38,7 +45,7 @@ async function pullConfig() {
 // ponytail: server wins on load, last writer wins on save. No merge — every save pushes the
 // whole blob, so there is nothing to reconcile.
 function pushConfig() {
-  if (syncing) return;
+  if (syncing || PUBLIC) return;
   fetch(`${SRV}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -60,6 +67,19 @@ function fillDrawer() {
   $('set-gust').value = s.windGustAlert;
   $('set-nearby-radius').value = s.nearbyRadius ?? 0;
   $('set-desk-radar').checked = !!s.deskRadar;
+  $('set-eco').value = s.eco || 'auto';
+  $('set-storm-auto').checked = !!s.stormAuto;
+  $('set-theme').value = s.theme || 'dark';
+  $('set-accent').value = s.accent || '#4fb8ff';
+  $('set-font').value = String(s.fontScale || 1);
+  $('set-density').value = s.density || 'normal';
+  $('set-big-numbers').checked = !!s.bigNumbers;
+  $('set-kiosk').value = s.kioskCycleSec || 0;
+  $('set-night-dim').checked = !!s.nightDim;
+  $('set-ntfy-topic').value = s.ntfyTopic || '';
+  $('set-ntfy-url').value = s.ntfyUrl || '';
+  $('set-webhook').value = s.webhookUrl || '';
+  renderRules();
   $('set-mqtt-url').value = s.mqttUrl;
   $('set-mqtt-user').value = s.mqttUser;
   $('set-mqtt-pass').value = s.mqttPass;
@@ -70,6 +90,7 @@ function fillDrawer() {
     c.checked = !(s.hiddenTabs || []).includes(c.dataset.tab);
   });
   renderHiddenPanels();
+  renderStations();
   fillSites();
 }
 
@@ -120,6 +141,19 @@ $('btn-save').onclick = async () => {
     windGustAlert: +$('set-gust').value || 30,
     nearbyRadius: +$('set-nearby-radius').value || 0,
     deskRadar: $('set-desk-radar').checked,
+    eco: $('set-eco').value,
+    stormAuto: $('set-storm-auto').checked,
+    theme: $('set-theme').value,
+    // The picker cannot express "no accent", so the default colour means the default.
+    accent: $('set-accent').value === '#4fb8ff' ? '' : $('set-accent').value,
+    fontScale: +$('set-font').value || 1,
+    density: $('set-density').value,
+    bigNumbers: $('set-big-numbers').checked,
+    kioskCycleSec: +$('set-kiosk').value || 0,
+    nightDim: $('set-night-dim').checked,
+    ntfyTopic: $('set-ntfy-topic').value.trim(),
+    ntfyUrl: $('set-ntfy-url').value.trim() || 'https://ntfy.sh',
+    webhookUrl: $('set-webhook').value.trim(),
     mqttUrl: $('set-mqtt-url').value.trim(),
     mqttUser: $('set-mqtt-user').value.trim(),
     mqttPass: $('set-mqtt-pass').value,
@@ -129,6 +163,7 @@ $('btn-save').onclick = async () => {
     hiddenTabs: [...document.querySelectorAll('#tab-toggles input')].filter((c) => !c.checked).map((c) => c.dataset.tab),
   });
   applyTabs();
+  initKiosk();
   if (!configured()) {
     notify({
       title: 'Setup incomplete',
@@ -144,7 +179,7 @@ $('btn-save').onclick = async () => {
   }
   loadDeskRadar();
   initDesk(); // idempotent: every() replaces existing jobs
-  initIntel(); initSignals(); initBoards(); initPro(); initLayout(); initUdp(); initHome();
+  initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initLayout(); initUdp(); initHome();
 };
 
 // station meta fills name/lat/lon and the Tempest device id when blank
@@ -181,10 +216,128 @@ async function hydrateStation() {
     });
     fillDrawer();
     renderPlaces();
+    renderStations();
   } catch (e) {
     notify({ title: 'Station lookup failed', body: e.message });
   }
 }
+
+// --- first run ---
+//
+// The old first run opened the whole settings drawer at someone who had not yet decided to care.
+// This asks for one thing, then lists the stations the token can actually see — which is also
+// the fastest way to find out the token is wrong.
+async function wizardFind() {
+  const token = $('wiz-token').value.trim();
+  if (!token) return;
+  $('wiz-list').innerHTML = '<div class="muted">looking…</div>';
+  // Saved first: api.station() reads the token out of settings, and a token that turns out to
+  // be wrong is corrected in the same field a moment later.
+  saveSettings({ token });
+  try {
+    const list = (await api.stations()).stations || [];
+    if (!list.length) throw new Error('That token works but reaches no stations.');
+    $('wiz-list').innerHTML = list
+      .map((st, i) => `<button class="place-hit" data-wiz="${i}">${st.name} · ${st.location_item?.[0]?.name || st.station_id}</button>`)
+      .join('');
+    $('wiz-list').querySelectorAll('[data-wiz]').forEach((b) => {
+      b.onclick = async () => {
+        const st = list[+b.dataset.wiz];
+        saveSettings({ stationId: String(st.station_id) });
+        $('wizard').hidden = true;
+        await hydrateStation();
+        refreshAll();
+        for (const el of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
+          const node = $(el);
+          if (node && node.textContent.includes('Needs a Tempest token')) node.innerHTML = '<div class="muted">loading…</div>';
+        }
+      };
+    });
+  } catch (e) {
+    $('wiz-list').innerHTML = `<div class="fail">${e.message}</div>`;
+  }
+}
+
+$('btn-wiz-find').onclick = () => wizardFind();
+$('wiz-token').onkeydown = (e) => { if (e.key === 'Enter') wizardFind(); };
+$('btn-wiz-close').onclick = () => { $('wizard').hidden = true; };
+$('btn-wiz-demo').onclick = () => {
+  // Demo mode is not a fixture: it is the real dashboard on the keyless sources, pointed at
+  // whatever place the user searches for. Everything Tempest stays empty and says so.
+  $('wizard').hidden = true;
+  document.querySelector('.tab[data-section="signals"]')?.click();
+  fillDrawer();
+  openDrawer(true);
+  $('place-q').focus();
+  notify({ title: 'Demo mode', body: 'Search a city in Settings — forecasts, models and alerts work without a station.' });
+};
+
+// --- what's new ---
+//
+// A dashboard that gains a feature nobody notices has not gained a feature.
+const APP_VERSION = '2.0.0';
+function changelog() {
+  // Raw string, not store(): this is compared to a literal, and a JSON-quoted one never matches.
+  const seen = localStorage.getItem('wd.lastVersion');
+  if (seen === APP_VERSION) return;
+  try { localStorage.setItem('wd.lastVersion', APP_VERSION); } catch { /* full; nothing to do */ }
+  if (!seen) return; // a fresh install has nothing to be new since
+  notify({
+    title: `WeatherDesk ${APP_VERSION}`,
+    body: 'New: eco mode, observation log + almanac, custom alert rules with phone push, themes, '
+      + 'kiosk cycling, sun/moon and garden cards, station health, and a read-only /public page.',
+  });
+}
+
+// --- saved stations ---
+//
+// One token usually reaches several stations (a second house, a parent's Tempest, the club's).
+// Switching swaps the four identity fields and refetches; everything else — units, layout,
+// rules, broker — is the user's and stays put.
+function renderStations() {
+  const list = settings().savedStations || [];
+  const sel = $('station-switch');
+  sel.hidden = list.length < 2;
+  sel.innerHTML = list.map((s, i) => `<option value="${i}">${s.name || s.id}</option>`).join('');
+  const at = list.findIndex((s) => String(s.id) === String(settings().stationId));
+  if (at >= 0) sel.value = String(at);
+
+  $('station-list').innerHTML = list.length
+    ? list.map((s, i) => `<div class="row" style="margin:0">
+        <span class="place-hit" style="flex:1">${s.name || s.id}</span>
+        <button class="sig-x" data-station="${i}">×</button></div>`).join('')
+    : '<div class="muted" style="font-size:12px">No saved stations</div>';
+  $('station-list').querySelectorAll('[data-station]').forEach((b) => {
+    b.onclick = () => {
+      const next = [...(settings().savedStations || [])];
+      next.splice(+b.dataset.station, 1);
+      saveSettings({ savedStations: next });
+      renderStations();
+    };
+  });
+}
+
+async function switchStation(s) {
+  saveSettings({ stationId: String(s.id), deviceId: s.deviceId || '', lat: s.lat, lon: s.lon, stationName: s.name });
+  // The radar camera belongs to the station we just left.
+  store('wd.radar', null);
+  await hydrateStation();
+  refreshAll();
+}
+
+$('station-switch').onchange = (e) => {
+  const s = (settings().savedStations || [])[+e.target.value];
+  if (s) switchStation(s);
+};
+
+$('btn-station-save').onclick = () => {
+  const s = settings();
+  if (!s.stationId) return;
+  const list = (s.savedStations || []).filter((x) => String(x.id) !== String(s.stationId));
+  list.push({ id: String(s.stationId), name: s.stationName || s.stationId, deviceId: s.deviceId, lat: s.lat, lon: s.lon });
+  saveSettings({ savedStations: list });
+  renderStations();
+};
 
 // --- layout lock + presets ---
 //
@@ -224,6 +377,59 @@ $('btn-layout-save').onclick = () => {
   store('wd.layouts', { ...layouts(), [name]: snapshot() });
   $('layout-name').value = '';
   renderLayouts();
+};
+
+// --- backup / restore / raw history ---
+
+function download(name, blob) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+$('btn-export').onclick = () => {
+  // The export is the whole settings blob, and that includes the Tempest API token and any
+  // broker password. Anyone the file is sent to can read the station. Say so before writing it.
+  if (!confirm('This file contains your Tempest API token and any MQTT/Home Assistant passwords in plain text. Keep it private?')) return;
+  download('weatherdesk-settings.json',
+    new Blob([JSON.stringify({ at: Date.now(), settings: settings(), layout: load('wd.layout', {}) }, null, 2)],
+      { type: 'application/json' }));
+};
+
+$('btn-import').onclick = () => $('import-file').click();
+
+$('import-file').onchange = async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = ''; // same file twice should still fire
+  if (!file) return;
+  try {
+    const j = JSON.parse(await file.text());
+    // Merged, not replaced: a backup from an older version is missing every key added since,
+    // and saveSettings over DEFAULTS is what fills those in.
+    if (j.settings) saveSettings(j.settings);
+    if (j.layout) restore(j.layout);
+    fillDrawer();
+    notify({ title: 'Settings imported', body: 'Reloading to apply.' });
+    pushConfig();
+    setTimeout(() => location.reload(), 800);
+  } catch (err) {
+    notify({ title: 'Import failed', body: err.message });
+  }
+};
+
+$('btn-csv').onclick = async () => {
+  try {
+    const r = await fetch(`${SRV}/history.csv`, { signal: AbortSignal.timeout(60000) });
+    if (!r.ok) throw new Error(`${r.status}`);
+    download('weatherdesk-history.csv', await r.blob());
+  } catch {
+    notify({
+      title: 'No observation log',
+      body: 'The raw history is kept by the desktop app on the machine that hears the hub.',
+    });
+  }
 };
 
 $('btn-diag').onclick = async () => {
@@ -310,6 +516,27 @@ window.addEventListener('message', (e) => {
   if (v && v.hookecho === 1) store('wd.radar', v);
 });
 
+// Storm mode: the one time the radar is worth its cost on a weak box is when a warning is out,
+// and that is exactly when nobody is going to be at the machine to switch it on. Restores the
+// user's own setting when the warning expires — a Desk that stayed changed after the storm
+// would be the app deciding what the dashboard looks like.
+let stormShowedRadar = false;
+window.addEventListener('wd:storm', (e) => {
+  if (!settings().stormAuto) return;
+  const panel = $('desk-radar');
+  if (!panel) return;
+  if (e.detail && panel.hidden) {
+    stormShowedRadar = true;
+    saveSettings({ deskRadar: true });
+    loadDeskRadar();
+    panel.scrollIntoView({ block: 'nearest' });
+  } else if (!e.detail && stormShowedRadar) {
+    stormShowedRadar = false;
+    saveSettings({ deskRadar: false });
+    loadDeskRadar();
+  }
+});
+
 // lazy-load the Lab iframe on first visit — full chrome there, it is the roomier view
 window.addEventListener('wd:section', (e) => {
   const f = $('lab-frame');
@@ -338,7 +565,7 @@ function loadDeskRadar() {
   if (f.src || loadDeskRadar.armed) return;
   // First run: the drawer is open and typing the token matters more than the map. Closing the
   // drawer (by saving, or by hand — a hub-only install has no token to type) calls back here.
-  if ($('drawer').classList.contains('open')) return;
+  if ($('drawer').classList.contains('open') || !$('wizard').hidden) return;
   loadDeskRadar.armed = true;
 
   const start = () => {
@@ -360,7 +587,45 @@ function loadDeskRadar() {
 
 await pullConfig();
 
+// A viewer cannot open the drawer, so a viewer cannot see or change anything the owner set. The
+// token is not in this page to begin with — the server never sent it.
+if (PUBLIC) {
+  document.body.classList.add('public');
+  $('btn-settings').hidden = true;
+  // Hidden, not removed: loadDeskRadar and the drawer helpers all reach for these nodes, and a
+  // public page is not the place to find out which ones. The fields are empty anyway — the
+  // server redacted every credential before it sent the config.
+  $('drawer').hidden = true;
+  $('btn-save').disabled = true;
+}
+
+applyEco();
+initKiosk();
+initRules();
 initNav();
+
+// --- keyboard ---
+//
+// A dashboard on a desk gets a keyboard, and the tabs are the only thing anyone reaches for.
+// Never while typing: the token field is one keystroke from being a tab switch otherwise.
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+    if (e.key === 'Escape') el.blur();
+    return;
+  }
+  if (e.key >= '1' && e.key <= '9') {
+    const tabs = [...document.querySelectorAll('.tab')].filter((t) => t.style.display !== 'none');
+    tabs[+e.key - 1]?.click();
+    return;
+  }
+  if (e.key === 'Escape') { openDrawer(false); $('shortcuts').hidden = true; loadDeskRadar(); return; }
+  if (e.key === '?') { $('shortcuts').hidden = !$('shortcuts').hidden; return; }
+  if (e.key === 'f') fullscreen();
+  else if (e.key === 'r') refreshAll();
+  else if (e.key === 's' && !PUBLIC) { fillDrawer(); openDrawer(true); }
+});
 initPlaces();
 // panel chrome doesn't depend on a token — wire it before the data path so an unconfigured
 // dashboard is still arrangeable
@@ -368,9 +633,11 @@ initLayout();
 applyLock();
 renderLayouts();
 
-if (!configured()) {
-  fillDrawer();
-  openDrawer(true);
+changelog();
+
+if (!configured() && !PUBLIC) {
+  $('wizard').hidden = false;
+  $('wiz-token').focus();
   // UDP-only mode: a desktop install with a hub on the LAN has real local data with no token at
   // all, so the modules start either way. Every refresh job early-returns without a token, so an
   // unconfigured init is a handful of no-ops.
@@ -382,7 +649,7 @@ if (!configured()) {
 // lat/lon must land before the open-meteo/NWS jobs start (resolves immediately when unconfigured)
 hydrateStation().then(() => {
   loadDeskRadar();
-  initDesk(); initIntel(); initSignals(); initBoards(); initPro(); initUdp(); initHome();
+  initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initUdp(); initHome();
 });
 
 // ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.
