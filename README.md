@@ -7,9 +7,9 @@ every call goes browser-direct to a free public API.
 Radar comes from [Hook Echo-WX](https://github.com/d4vid87/hookecho) — my own NEXRAD viewer,
 embedded here and centered on the station.
 
-![A walkthrough of the Desk: sky hero with live station temperature and NWS alerts, the inline Hook
-Echo-WX radar, the 48h temp/rain/wind chart, day cards and dial gauges, then the Forecast Lab tab
-with the full-chrome radar](docs/hero.gif)
+![A walkthrough: the Desk with live station temperature, NWS alert toasts, dial gauges and seven day
+cards, then the Forecast Lab's full-screen Hook Echo-WX radar on a live storm, then back down the
+Desk past the 48h chart, alert center and model agreement panels](docs/hero.gif)
 
 ![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
 gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
