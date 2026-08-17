@@ -7,8 +7,9 @@ every call goes browser-direct to a free public API.
 Radar comes from [Hook Echo-WX](https://github.com/d4vid87/hookecho) — my own NEXRAD viewer,
 embedded here and centered on the station.
 
-![The Desk in motion: live radar on the Desk, then the radar panel dragged to the top of the stack
-by its grip and resized to full width from its corner handle](docs/hero.gif)
+![A walkthrough of the Desk: sky hero with live station temperature and NWS alerts, the inline Hook
+Echo-WX radar, the 48h temp/rain/wind chart, day cards and dial gauges, then the Forecast Lab tab
+with the full-chrome radar](docs/hero.gif)
 
 ![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
 gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
@@ -28,6 +29,11 @@ you touch it. That matters because a live radar loop repaints ten times a second
 webview the desktop app uses on Linux and macOS redraws the whole Desk on every one of those
 frames — enough to saturate a CPU core. Touch the map and it animates normally; the Forecast Lab
 tab is the full-chrome view.
+
+It is also the heaviest thing on the page — megabytes of wasm, sharing one WebKit process with the
+whole Desk on Linux — so it never loads during startup or while Settings is open, and only once the
+panel is actually on screen. On a fresh install it starts switched off; Settings → **Radar panel on
+the Desk** turns it on. On a slow machine, leave it off and use the Forecast Lab tab instead.
 
 Settings → **Radar site** picks which radar, out of all 201 WSR-88D and TDWR sites, nearest first;
 leave it on *Nearest to my station* and it follows the station. Wherever you leave the map — site,
