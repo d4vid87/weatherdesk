@@ -44,8 +44,11 @@ cannot remember anything on its own. The Desk and the Lab share one remembered v
 **Is the radar live?** It is as live as NEXRAD gets: a WSR-88D takes 4–10 minutes to finish a
 volume scan, and delivery adds a little more, so the newest frame is always a few minutes behind
 the sky. Nothing on the internet is fresher — that delay is the radar itself, not the viewer.
-- **Local Signals** — nearby-station comparison table, the Tempest live wind feed, a 24-hour
-  lightning-strike log and the notification history.
+- **Local Signals** — nearby-sensor comparison table, the Tempest live wind feed, a 24-hour
+  lightning-strike log and the notification history. Set a **nearby sensor radius** in Settings
+  and the airports (NWS/METAR) inside it are added on their own, with the same table on the Desk
+  as a *Nearby sensors* panel. Other people's Tempest stations can't be read unless they are
+  shared publicly, so those are still added by ID (or by pasting their tempestwx.com link).
 - **Data** — ten boards off 7-day device history, including a wind rose, plus multi-model output
   and the local verification log.
 

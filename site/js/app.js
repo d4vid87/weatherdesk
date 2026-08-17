@@ -3,7 +3,13 @@
 const DEFAULTS = {
   token: '', stationId: '', deviceId: '', lat: null, lon: null, stationName: '',
   units: 'imperial', refreshSec: 60, places: [], activePlace: null,
-  nearbyStations: [], notif: { severe: true, precip: true, lightning: true, wind: true, winter: true, changes: true },
+  // nearbyStations stays bare id strings: an older client on the same /config reads it directly,
+  // and anything object-shaped would land in its URLs as [object Object]. New keys are additive.
+  nearbyStations: [],
+  nearbyRadius: 0,   // miles; 0 = manual adds only, no airport scanning
+  nearbyMetar: [],   // discovered airports, [{ id: 'KGVT', name }]
+  nearbyExclude: [], // airports the user dismissed; the daily scan won't bring them back
+  notif: { severe: true, precip: true, lightning: true, wind: true, winter: true, changes: true },
   windGustAlert: 30, layoutLocked: false, hiddenTabs: [],
   // '' = whichever radar site is nearest the station. The camera itself lives in `wd.radar`,
   // written once a second by the embedded viewer — not here, where it would re-init the app.
