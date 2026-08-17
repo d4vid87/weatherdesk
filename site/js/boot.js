@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, initKiosk } from './app.js';
+import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -275,7 +275,7 @@ $('btn-wiz-demo').onclick = () => {
 // --- what's new ---
 //
 // A dashboard that gains a feature nobody notices has not gained a feature.
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.0.1';
 function changelog() {
   // Raw string, not store(): this is compared to a literal, and a JSON-quoted one never matches.
   const seen = localStorage.getItem('wd.lastVersion');
@@ -502,7 +502,11 @@ export function radarUrl(zoom, embed = true) {
   if (lat == null && !site) return RADAR;
   const extras = v
     ? [v.moment, v.tilt, `bm:${v.basemap}`, v.srv ? 'srv' : ''].filter(Boolean).join(',')
-    : '';
+    // First load, before the viewer has posted a camera back: Hook Echo's localStorage is
+    // partitioned in our iframe (see above), so without this it opens on whatever its compiled-in
+    // default is. Streets orients a first-time viewer fastest; any pick they make sticks via
+    // wd.radar and wins from then on.
+    : 'bm:esri-streets';
   const q = embed ? '?embed' : '';
   return `${RADAR}${q}#goto=${site},${lon ?? ''},${lat ?? ''},${v ? v.zoom : zoom}${extras ? ',' + extras : ''}`;
 }
@@ -516,25 +520,22 @@ window.addEventListener('message', (e) => {
   if (v && v.hookecho === 1) store('wd.radar', v);
 });
 
-// Storm mode: the one time the radar is worth its cost on a weak box is when a warning is out,
-// and that is exactly when nobody is going to be at the machine to switch it on. Restores the
-// user's own setting when the warning expires — a Desk that stayed changed after the storm
-// would be the app deciding what the dashboard looks like.
-let stormShowedRadar = false;
+// Storm mode: a warning out is the one time the radar earns its cost, and exactly when nobody is
+// at the machine to switch it on. In-memory override only — never written to settings. It used to
+// saveSettings({deskRadar:true}) with the restore flag in memory: a hang or force-quit mid-storm
+// lost the flag, the restore never ran, and a temporary override became the permanent setting
+// (radar at every launch on the one machine it hangs). Now the user's saved choice is never
+// touched, and a crash costs nothing.
+let stormOverride = false;
 window.addEventListener('wd:storm', (e) => {
   if (!settings().stormAuto) return;
   const panel = $('desk-radar');
   if (!panel) return;
-  if (e.detail && panel.hidden) {
-    stormShowedRadar = true;
-    saveSettings({ deskRadar: true });
-    loadDeskRadar();
-    panel.scrollIntoView({ block: 'nearest' });
-  } else if (!e.detail && stormShowedRadar) {
-    stormShowedRadar = false;
-    saveSettings({ deskRadar: false });
-    loadDeskRadar();
-  }
+  // An eco box (weak hardware) is the machine the radar wasm hangs — never force it there.
+  stormOverride = !!e.detail && !ecoOn();
+  const reveal = stormOverride && panel.hidden;
+  loadDeskRadar();
+  if (reveal) panel.scrollIntoView({ block: 'nearest' });
 });
 
 // lazy-load the Lab iframe on first visit — full chrome there, it is the roomier view
@@ -556,7 +557,9 @@ function loadDeskRadar() {
   const panel = $('desk-radar'), f = $('desk-radar-frame');
   if (!panel) return;
   // Off is off: hide the panel, and drop the document — a hidden iframe still runs its wasm.
-  panel.hidden = !settings().deskRadar;
+  // stormAuto re-checked here so switching it off mid-storm hides the radar on drawer close —
+  // the wd:storm event that set the override will not fire again until the alert state changes.
+  panel.hidden = !(settings().deskRadar || (stormOverride && settings().stormAuto));
   if (panel.hidden) {
     if (f.src) { f.src = 'about:blank'; f.removeAttribute('src'); }
     loadDeskRadar.armed = false;
@@ -662,4 +665,7 @@ if (location.search.includes('selftest')) {
   const u = radarUrl(6.5);
   console.assert(u === `${RADAR}?embed#goto=KFWS,-97.3,32.6,7,VEL,2,bm:dark,srv`, 'radar url', u);
   store('wd.radar', null);
+  // (unconfigured profile returns the bare viewer URL with no #goto — nothing to assert on)
+  const u2 = radarUrl(6.5);
+  console.assert(!u2.includes('#goto=') || u2.endsWith(',bm:esri-streets'), 'first-load default basemap', u2);
 }
