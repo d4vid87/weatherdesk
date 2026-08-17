@@ -9,7 +9,12 @@ const DEFAULTS = {
   nearbyRadius: 0,   // miles; 0 = manual adds only, no airport scanning
   nearbyMetar: [],   // discovered airports, [{ id: 'KGVT', name }]
   nearbyExclude: [], // airports the user dismissed; the daily scan won't bring them back
-  notif: { severe: true, precip: true, lightning: true, wind: true, winter: true, changes: true },
+  notif: { severe: true, precip: true, lightning: true, wind: true, winter: true, changes: true, rule: true, station: true },
+  // User-built thresholds — see rules.js. [{ metric, op, value, durMin }]
+  rules: [],
+  // Push channels. All three dark until filled in, all three fire-and-forget: a dashboard must
+  // not stall on a phone notification.
+  ntfyUrl: 'https://ntfy.sh', ntfyTopic: '', webhookUrl: '',
   windGustAlert: 30, layoutLocked: false, hiddenTabs: [],
   // '' = whichever radar site is nearest the station. The camera itself lives in `wd.radar`,
   // written once a second by the embedded viewer — not here, where it would re-init the app.
@@ -17,9 +22,22 @@ const DEFAULTS = {
   // The inline viewer on the Desk. Heaviest thing the page loads, and on Linux it shares one
   // WebKit process with the whole Desk — see FIRST_RUN below.
   deskRadar: true,
+  // Bring the radar back on screen by itself when NWS has something serious out.
+  stormAuto: true,
+  // Stations the user can flip between from the header. One token, one set of preferences —
+  // only the identity fields change. [{ id, name, deviceId, lat, lon }]
+  savedStations: [],
   // Smart home: an MQTT broker to publish to, and a Home Assistant to read back from. Both dark
   // until filled in.
   mqttUrl: '', mqttUser: '', mqttPass: '', haUrl: '', haToken: '', haEntities: '',
+  // Look and feel. 'auto' theme follows the station's own sunrise/sunset, not the OS — a wall
+  // panel in a dark hallway wants the room's light, not the laptop's setting.
+  theme: 'dark', accent: '', fontScale: 1, density: 'normal', bigNumbers: false,
+  // Kiosk: seconds per tab when cycling (0 = off), and dimming through the night window.
+  kioskCycleSec: 0, nightDim: false,
+  // 'auto' | 'on' | 'off' — see ecoOn(). Auto is the point of the setting: the tablet on the wall
+  // should not need anyone to know it is the slow machine.
+  eco: 'auto',
 };
 
 // A fresh install starts with the Desk radar off: it is megabytes of wasm in the same WebKit
@@ -98,10 +116,13 @@ export function notify({ id, category = 'info', title, body }) {
     seen.add(id);
   }
   if (category !== 'info' && _settings.notif[category] === false) return;
-  notifLog.unshift({ t: Date.now(), id, category, title, body });
+  const entry = { t: Date.now(), id, category, title, body };
+  notifLog.unshift(entry);
   notifLog.splice(100);
   store('wd.notifLog', notifLog);
-  window.dispatchEvent(new CustomEvent('wd:notif'));
+  // detail is what home.js republishes to the broker — it needs no second copy of this logic
+  window.dispatchEvent(new CustomEvent('wd:notif', { detail: entry }));
+  if (category !== 'info') push(entry);
   const wrap = document.getElementById('notif-stack');
   const el = document.createElement('div');
   el.className = `notif notif-${category}`;
@@ -111,6 +132,32 @@ export function notify({ id, category = 'info', title, body }) {
   el.querySelector('.notif-x').onclick = () => el.remove();
   wrap.prepend(el);
   chime();
+}
+
+// Off the machine: a banner is no use to anyone who isn't looking at the dashboard.
+//
+// Security: the payloads carry the title, the body and the category and nothing else. The
+// Tempest token, the broker password and the station ID are deliberately absent — ntfy.sh is a
+// public relay by default and a webhook goes wherever the user pointed it.
+function push({ category, title, body }) {
+  const s = _settings;
+  if (s.ntfyTopic) {
+    fetch(`${s.ntfyUrl || 'https://ntfy.sh'}/${encodeURIComponent(s.ntfyTopic)}`, {
+      method: 'POST',
+      // ntfy takes the title as a header, and a header value cannot contain a line break —
+      // NWS headlines do.
+      headers: { Title: String(title).replace(/[\r\n]+/g, ' ').slice(0, 200), Tags: category },
+      body: body || title,
+    }).catch((e) => console.warn('ntfy:', e.message));
+  }
+  if (s.webhookUrl) {
+    fetch(s.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body, category, t: Date.now() }),
+    }).catch((e) => console.warn('webhook:', e.message));
+  }
+  // MQTT rides the wd:notif event — home.js already owns the one connection.
 }
 
 let audioCtx;
@@ -128,20 +175,152 @@ function chime() {
 
 const jobs = new Map();
 
+// Jobs that pace themselves for a reason and must not be stretched: the clock is the display,
+// the UDP poll is the only live data a hub-only install has, and alerts are the one thing worth
+// a battery percent.
+// 'pace' itself is exempt for an obvious reason: stretched to 45 minutes it would be the thing
+// that never notices the night window closing.
+const PACE_EXEMPT = ['clock', 'udp', 'desk-alerts', 'pace', 'stale-sweep', 'kiosk', 'appearance'];
+
+// Set by desk.js when NWS has a Severe/Extreme alert out. Beats eco and night both.
+let storm = false;
+export function setStorm(on) {
+  if (storm === !!on) return;
+  storm = !!on;
+  repace();
+  window.dispatchEvent(new CustomEvent('wd:storm', { detail: storm }));
+}
+export const stormMode = () => storm;
+
+// Sunrise/sunset for the night window, filled from whatever forecast the Desk last got. No
+// import from desk.js — that would be a cycle, and the event is already on the wire.
+let sunTimes = null;
+window.addEventListener('wd:forecast', (e) => {
+  const d = e.detail?.forecast?.daily?.[0];
+  if (d?.sunrise && d?.sunset) sunTimes = { sunrise: d.sunrise, sunset: d.sunset };
+  repace();
+});
+
+export function ecoOn() {
+  if (_settings.eco === 'on') return true;
+  if (_settings.eco === 'off') return false;
+  // Two cores is a G Pad; four is an old Chromebook. Anything bigger can afford the full rate.
+  return (navigator.hardwareConcurrency || 8) <= 4;
+}
+
+// Quiet hours: sunset+1h to sunrise−1h, so the dashboard is back at full rate before anyone
+// looks at it. No forecast yet (or a station without sun times) falls back to the clock.
+export function isNight(now = new Date()) {
+  if (sunTimes) {
+    const t = now.getTime() / 1000;
+    return t > sunTimes.sunset + 3600 || t < sunTimes.sunrise - 3600;
+  }
+  const h = now.getHours();
+  return h >= 21 || h < 6;
+}
+
+// Seconds this job should actually run at.
+export function paceFor(name, base) {
+  if (storm) return name === 'desk-obs' || name === 'desk-alerts' ? Math.max(30, base / 2) : base;
+  if (PACE_EXEMPT.includes(name)) return base;
+  if (isNight()) return base * 3;
+  return ecoOn() ? base * 2 : base;
+}
+
+// Re-arm every job at its current pace. Deliberately does not run any of them: pacing is not a
+// refresh, and a settings save that re-paced ten jobs would fire ten fetches.
+function repace() {
+  for (const [name, job] of jobs) {
+    const secs = paceFor(name, job.base);
+    if (secs === job.paced) continue;
+    job.paced = secs;
+    clearInterval(job.id);
+    job.id = setInterval(job.run, secs * 1000);
+  }
+}
+
 // Nothing here is worth a request or a repaint while the window is hidden — a wall tablet with
 // its screen off would otherwise poll every source all night. Whatever came due in the meantime
 // runs once on the way back.
 export function every(name, seconds, fn) {
   const prev = jobs.get(name);
   if (prev) clearInterval(prev.id);
-  const job = { due: false };
+  const job = { due: false, base: seconds };
   job.run = async () => {
     if (document.hidden) { job.due = true; return; }
     try { await fn(); } catch (e) { console.warn(`job ${name}:`, e.message); }
   };
-  job.id = setInterval(job.run, seconds * 1000);
+  job.paced = paceFor(name, seconds);
+  job.id = setInterval(job.run, job.paced * 1000);
   jobs.set(name, job);
   job.run();
+}
+
+// The night window opens on its own; nothing else would notice.
+every('pace', 900, repace);
+window.addEventListener('wd:settings', () => { applyEco(); repace(); });
+
+// Eco is a class, and everything it costs is in CSS (the ticker is a 60s composited transform,
+// the transitions repaint on every hover).
+export function applyEco() {
+  document.body.classList.toggle('eco', ecoOn());
+}
+
+// --- appearance ---
+
+export function applyTheme() {
+  const s = _settings;
+  const light = s.theme === 'light' || (s.theme === 'auto' && !isNight());
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+  document.documentElement.dataset.density = s.density || 'normal';
+  // A scale, not a size: everything on the page is already relative to the root font.
+  // `zoom`, not a root font-size: the stylesheet is in px throughout (deliberately — panel sizes
+  // are stored in px too), so a root font-size would scale almost nothing on screen. Zoom is
+  // supported by every engine this runs on, WebKitGTK and the G Pad's WebView included.
+  document.documentElement.style.zoom = Math.min(2, Math.max(0.7, +s.fontScale || 1));
+  document.body.classList.toggle('big-numbers', !!s.bigNumbers);
+  if (s.accent) document.documentElement.style.setProperty('--accent', s.accent);
+  else document.documentElement.style.removeProperty('--accent');
+  document.body.classList.toggle('dimmed', !!s.nightDim && isNight());
+}
+
+// --- kiosk ---
+//
+// Nobody is going to touch a panel on a wall, so the panel has to move on its own: cycle the
+// visible tabs, and nudge the whole page a couple of pixels each hour so a static header does
+// not etch itself into an OLED.
+let kioskAt = 0;
+function kioskStep() {
+  const secs = +_settings.kioskCycleSec || 0;
+  if (!secs) return;
+  const tabs = [...document.querySelectorAll('.tab')].filter((t) => t.style.display !== 'none');
+  if (tabs.length < 2) return;
+  kioskAt = (kioskAt + 1) % tabs.length;
+  tabs[kioskAt].click();
+}
+
+let burn = 0;
+function burnInStep() {
+  if (!+_settings.kioskCycleSec) { document.body.style.transform = ''; return; }
+  burn = (burn + 1) % 4;
+  document.body.style.transform = `translate(${[0, 2, 0, -2][burn]}px, ${[0, -2, 2, 0][burn]}px)`;
+}
+
+export function initKiosk() {
+  applyTheme();
+  // Re-registering replaces the old job, so a changed cycle time takes effect on save.
+  const secs = +_settings.kioskCycleSec || 0;
+  clearJob('kiosk');
+  if (secs) every('kiosk', secs, kioskStep);
+  every('appearance', 900, () => { applyTheme(); burnInStep(); });
+}
+
+// A job turned off in settings has to actually stop — every() only ever replaces.
+export function clearJob(name) {
+  const job = jobs.get(name);
+  if (!job) return;
+  clearInterval(job.id);
+  jobs.delete(name);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -207,6 +386,24 @@ export function applyTabs() {
     if (off && t.classList.contains('active')) bounce = true;
   });
   if (bounce) document.querySelector('.tab[data-section="desk"]').click();
+}
+
+// ponytail-lite self-check: the pace table, where a wrong branch means a dashboard that quietly
+// stops updating.
+if (location.search.includes('selftest')) {
+  const save = { ..._settings };
+  _settings.eco = 'on';
+  const night = isNight();
+  console.assert(paceFor('clock', 1) === 1, 'pace: exempt jobs untouched');
+  console.assert(paceFor('desk-forecast', 300) === (night ? 900 : 600), 'pace: eco/night factor');
+  setStorm(true);
+  console.assert(paceFor('desk-forecast', 300) === 300, 'pace: storm restores full rate');
+  console.assert(paceFor('desk-obs', 60) === 30, 'pace: storm halves obs');
+  console.assert(paceFor('desk-obs', 30) === 30, 'pace: storm never goes below 30s');
+  setStorm(false);
+  _settings.eco = 'off';
+  console.assert(paceFor('desk-forecast', 300) === (night ? 900 : 300), 'pace: eco off');
+  _settings = save;
 }
 
 export function fullscreen() {

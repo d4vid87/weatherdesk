@@ -122,6 +122,14 @@ export function initHome() {
 }
 
 window.addEventListener('wd:ws-obs', (e) => publishObs(e.detail));
+
+// Every banner the dashboard raises, on one topic, for automations to hang off. Not retained:
+// an alert replayed on every broker reconnect would fire the same automation forever.
+window.addEventListener('wd:notif', (e) => {
+  const n = e.detail;
+  if (!n || n.category === 'info') return;
+  client?.publish(`${base()}/alert`, JSON.stringify({ title: n.title, body: n.body, category: n.category, t: n.t }));
+});
 window.addEventListener('wd:ws-strike', (e) => {
   // [epoch, distance km, energy]
   event('lightning', { event_type: 'strike', distance_km: e.detail[1] });

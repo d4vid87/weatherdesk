@@ -1,5 +1,12 @@
 // Minimal canvas chart helper. series: [{data:[{x,y}], color, type:'line'|'bar'}]
+// Canvas can't read CSS variables, so the theme has to be handed to it. Read per draw: a chart
+// is redrawn whenever anything changes, and a cached palette would be the one thing still dark
+// after a switch to the light theme.
+const css = (name, fallback) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+
 export function chart(canvas, series, opts = {}) {
+  const MUTED = css('--muted', '#8ea0b5'), LINE = css('--line', '#253141');
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth || 300, h = canvas.clientHeight || 140;
   canvas.width = w * dpr; canvas.height = h * dpr;
@@ -9,7 +16,7 @@ export function chart(canvas, series, opts = {}) {
 
   const pts = series.flatMap((s) => s.data).filter((p) => p.y != null && !Number.isNaN(p.y));
   if (!pts.length) {
-    c.fillStyle = '#8ea0b5'; c.font = '12px system-ui';
+    c.fillStyle = MUTED; c.font = '12px system-ui';
     c.fillText('no data', 8, h / 2);
     return;
   }
@@ -23,7 +30,7 @@ export function chart(canvas, series, opts = {}) {
   const py = (y) => padT + (1 - (y - y0) / (y1 - y0)) * (h - padT - padB);
 
   // gridlines + y labels
-  c.strokeStyle = '#253141'; c.fillStyle = '#8ea0b5'; c.font = '10px system-ui'; c.lineWidth = 1;
+  c.strokeStyle = LINE; c.fillStyle = MUTED; c.font = '10px system-ui'; c.lineWidth = 1;
   for (let i = 0; i <= 3; i++) {
     const y = y0 + ((y1 - y0) * i) / 3, yy = Math.round(py(y)) + 0.5;
     c.beginPath(); c.moveTo(padL, yy); c.lineTo(w - padR, yy); c.stroke();
@@ -46,7 +53,7 @@ export function chart(canvas, series, opts = {}) {
   }
 
   // x labels: first + last
-  c.fillStyle = '#8ea0b5';
+  c.fillStyle = MUTED;
   const fmt = opts.xFormat || ((x) => new Date(x).toLocaleDateString([], { month: 'numeric', day: 'numeric' }));
   c.fillText(fmt(x0), padL, h - 4);
   const last = fmt(x1);

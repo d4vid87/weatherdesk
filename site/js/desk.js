@@ -1,6 +1,6 @@
 // 01 Desk — current conditions, near-term forecast, alerts, AQI.
 import * as api from './api.js';
-import { settings, coords, configured, U, num, timeStr, dayStr, notify, every, stamp, store, load } from './app.js';
+import { settings, coords, configured, U, num, timeStr, dayStr, notify, every, stamp, store, load, setStorm } from './app.js';
 
 // Last-good copies of the two payloads the Desk can't render without. An outage that spans a
 // reload would otherwise leave the whole page at `--`; in-session failures already keep the DOM.
@@ -95,6 +95,9 @@ export async function refreshAlerts() {
       }).join('')
     : '<div class="muted">No active alerts</div>';
   stamp('alerts', 300);
+  // Storm mode: while something serious is out, every panel goes back to full rate whatever eco
+  // and the hour say. This is the one time the dashboard is being watched.
+  setStorm(feats.some((f) => ['Severe', 'Extreme'].includes(f.properties?.severity)));
   feats.forEach((f) => notify({
     id: f.properties.id, category: 'severe',
     title: f.properties.event, body: f.properties.headline || '',

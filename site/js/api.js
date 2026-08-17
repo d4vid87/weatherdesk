@@ -25,25 +25,48 @@ export function errHint(status, url) {
   return '';
 }
 
+// NWS answers every request with an ETag and honours If-None-Match, and the alert feed is polled
+// every 5 minutes to say "no active alerts" over and over. A 304 is a few hundred bytes and no
+// JSON parse. Bounded on purpose: only api.weather.gov URLs land here, and there are a handful.
+const etags = new Map();
+const cacheable = (url) => url.startsWith('https://api.weather.gov/');
+
 async function getJSON(url, opts) {
   // A wall tablet on a dropped Wi-Fi link otherwise leaves a fetch hanging for minutes and the
   // panel's next refresh never fires.
   let r;
+  const hit = cacheable(url) ? etags.get(url) : null;
   try {
-    r = await fetch(url, { signal: AbortSignal.timeout(15000), ...opts });
+    r = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
+      ...opts,
+      ...(hit ? { headers: { 'If-None-Match': hit.etag, ...(opts?.headers || {}) } } : {}),
+    });
   } catch (e) {
     // the token rides in the query string — never let it into a notification body
     const where = url.split('?')[0];
     throw new Error(e.name === 'TimeoutError' ? `timed out (15s) — ${where}` : `network unreachable — ${where}`);
   }
+  if (r.status === 304 && hit) return structuredClone(hit.body);
   if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${url.split('?')[0]}${errHint(r.status, url)}`);
-  return r.json();
+  const body = await r.json();
+  const tag = cacheable(url) && r.headers.get('ETag');
+  // Callers mutate what they get back (deviceObs converts in place), so the cache keeps its own
+  // copy and hands out clones.
+  if (tag) etags.set(url, { etag: tag, body: structuredClone(body) });
+  return body;
 }
 
 // --- WeatherFlow Tempest ---
 
 export function station(id = settings().stationId) {
   return getJSON(`${SWD}/stations/${id}?${qs({ token: settings().token })}`);
+}
+
+// Every station the token can see. The setup wizard's whole job: a station ID is a number
+// nobody has memorised, and it is right there in the account.
+export function stations() {
+  return getJSON(`${SWD}/stations?${qs({ token: settings().token })}`);
 }
 
 export function stationObs(id = settings().stationId) {

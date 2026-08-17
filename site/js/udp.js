@@ -56,6 +56,12 @@ async function poll() {
   // Same SI tuple the cloud websocket sends, so it rides the same event — the hero, the gauges
   // and the MQTT publisher all get a local feed without a token. Dedupe by the report's own
   // timestamp: a 3s poll sees each minute-old report about twenty times.
+  // The hub reports its own health every minute. No freshness gate: a status packet that has
+  // stopped arriving is exactly what the health card needs to show, stamp and all.
+  if (j.device_status) {
+    window.dispatchEvent(new CustomEvent('wd:device-status', { detail: j.device_status }));
+  }
+
   const o = j.obs_st;
   if (o?.obs?.[0] && now - o._at < OBS_FRESH_SEC && o.obs[0][0] !== lastObs) {
     lastObs = o.obs[0][0];

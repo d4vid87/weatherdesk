@@ -1,7 +1,7 @@
 // Desk layout matching myWeatherDesk: sky hero, signal ticker, trend strip,
 // 48h combined chart, day cards, dial gauges. Driven by the wd:forecast event.
 import * as api from './api.js';
-import { settings, coords, U, num, timeStr, deg2compass, every } from './app.js';
+import { settings, coords, U, num, timeStr, deg2compass, every, ecoOn } from './app.js';
 import { forecast as deskForecast } from './desk.js';
 import * as icon from './icons.js';
 import { initLayout } from './layout.js';
@@ -416,9 +416,14 @@ export function initPro() {
   every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
   every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
   every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
-  every('clock', 1, () => {
+  // A second hand is a repaint a second, forever — the single most expensive idle thing on the
+  // page. In eco the seconds go and so does 29 of every 30 repaints.
+  const eco = ecoOn();
+  every('clock', eco ? 30 : 1, () => {
     const d = new Date();
-    $('clock-time').textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    $('clock-time').textContent = d.toLocaleTimeString([], eco
+      ? { hour: 'numeric', minute: '2-digit' }
+      : { hour: 'numeric', minute: '2-digit', second: '2-digit' });
     $('clock-date').textContent = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   });
   every('pro-clock', 60, () => { if (deskForecast()) renderHero(deskForecast()); });
