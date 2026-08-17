@@ -8,12 +8,19 @@ const DEFAULTS = {
   // '' = whichever radar site is nearest the station. The camera itself lives in `wd.radar`,
   // written once a second by the embedded viewer — not here, where it would re-init the app.
   radarSite: '',
+  // The inline viewer on the Desk. Heaviest thing the page loads, and on Linux it shares one
+  // WebKit process with the whole Desk — see FIRST_RUN below.
+  deskRadar: true,
   // Smart home: an MQTT broker to publish to, and a Home Assistant to read back from. Both dark
   // until filled in.
   mqttUrl: '', mqttUser: '', mqttPass: '', haUrl: '', haToken: '', haEntities: '',
 };
 
-let _settings = load('wd.settings', DEFAULTS);
+// A fresh install starts with the Desk radar off: it is megabytes of wasm in the same WebKit
+// process as everything else, and on a weak Linux box loading it is what made the app look hung.
+// Turn it on in Settings. An install that already has settings keeps the radar it has been showing.
+const FIRST_RUN = localStorage.getItem('wd.settings') == null;
+let _settings = load('wd.settings', { ...DEFAULTS, deskRadar: !FIRST_RUN });
 
 export function settings() { return _settings; }
 

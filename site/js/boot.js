@@ -58,6 +58,7 @@ function fillDrawer() {
   $('set-units').value = s.units;
   $('set-refresh').value = s.refreshSec;
   $('set-gust').value = s.windGustAlert;
+  $('set-desk-radar').checked = !!s.deskRadar;
   $('set-mqtt-url').value = s.mqttUrl;
   $('set-mqtt-user').value = s.mqttUser;
   $('set-mqtt-pass').value = s.mqttPass;
@@ -116,6 +117,7 @@ $('btn-save').onclick = async () => {
     units: $('set-units').value,
     refreshSec: +$('set-refresh').value || 60,
     windGustAlert: +$('set-gust').value || 30,
+    deskRadar: $('set-desk-radar').checked,
     mqttUrl: $('set-mqtt-url').value.trim(),
     mqttUser: $('set-mqtt-user').value.trim(),
     mqttPass: $('set-mqtt-pass').value,
@@ -323,7 +325,15 @@ window.addEventListener('wd:section', (e) => {
 // the panel to actually be on screen, and for the main thread to go idle.
 function loadDeskRadar() {
   const panel = $('desk-radar'), f = $('desk-radar-frame');
-  if (!panel || f.src || loadDeskRadar.armed) return;
+  if (!panel) return;
+  // Off is off: hide the panel, and drop the document — a hidden iframe still runs its wasm.
+  panel.hidden = !settings().deskRadar;
+  if (panel.hidden) {
+    if (f.src) { f.src = 'about:blank'; f.removeAttribute('src'); }
+    loadDeskRadar.armed = false;
+    return;
+  }
+  if (f.src || loadDeskRadar.armed) return;
   // First run: the drawer is open and typing the token matters more than the map. Closing the
   // drawer (by saving, or by hand — a hub-only install has no token to type) calls back here.
   if ($('drawer').classList.contains('open')) return;

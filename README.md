@@ -30,6 +30,11 @@ webview the desktop app uses on Linux and macOS redraws the whole Desk on every 
 frames — enough to saturate a CPU core. Touch the map and it animates normally; the Forecast Lab
 tab is the full-chrome view.
 
+It is also the heaviest thing on the page — megabytes of wasm, sharing one WebKit process with the
+whole Desk on Linux — so it never loads during startup or while Settings is open, and only once the
+panel is actually on screen. On a fresh install it starts switched off; Settings → **Radar panel on
+the Desk** turns it on. On a slow machine, leave it off and use the Forecast Lab tab instead.
+
 Settings → **Radar site** picks which radar, out of all 201 WSR-88D and TDWR sites, nearest first;
 leave it on *Nearest to my station* and it follows the station. Wherever you leave the map — site,
 product, tilt, basemap, zoom — is remembered here and handed back to the viewer on the next launch.
