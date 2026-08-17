@@ -100,7 +100,7 @@ function fillSites() {
 const openDrawer = (open) => $('drawer').classList.toggle('open', open);
 
 $('btn-settings').onclick = () => { fillDrawer(); openDrawer(true); };
-$('btn-close').onclick = () => openDrawer(false);
+$('btn-close').onclick = () => { openDrawer(false); loadDeskRadar(); };
 $('btn-full').onclick = fullscreen;
 $('btn-refresh').onclick = refreshAll;
 
@@ -315,10 +315,35 @@ window.addEventListener('wd:section', (e) => {
 
 // Inline radar strip on the Desk: embedded, so it holds one frame a minute until touched. A live
 // radar loop otherwise costs the desktop app's WebKit webview a whole core.
+//
+// Loaded late, and never at boot. On Linux the iframe shares one WebKitWebProcess with the whole
+// Desk, and the viewer is megabytes of wasm: on a weak iGPU (a Chromebook, Intel UHD 600) starting
+// it with the page ate the same process the Settings drawer lives in — the window painted and then
+// accepted no input at all, so the token could never be typed in. Wait for setup to be done, for
+// the panel to actually be on screen, and for the main thread to go idle.
 function loadDeskRadar() {
-  const f = $('desk-radar-frame');
-  if (!f.src) f.src = radarUrl(6.5);
-  $('desk-radar').classList.add('loaded');
+  const panel = $('desk-radar'), f = $('desk-radar-frame');
+  if (!panel || f.src || loadDeskRadar.armed) return;
+  // First run: the drawer is open and typing the token matters more than the map. Closing the
+  // drawer (by saving, or by hand — a hub-only install has no token to type) calls back here.
+  if ($('drawer').classList.contains('open')) return;
+  loadDeskRadar.armed = true;
+
+  const start = () => {
+    if (!f.src) f.src = radarUrl(6.5);
+    panel.classList.add('loaded');
+  };
+  const whenIdle = () => (window.requestIdleCallback
+    ? requestIdleCallback(start, { timeout: 3000 })
+    : setTimeout(start, 1200));
+  // ponytail: visibility is the only gate. A panel dragged off screen and back re-arms nothing —
+  // it has loaded by then — and a Desk that never scrolls past the radar never pays for it.
+  const io = new IntersectionObserver((entries) => {
+    if (!entries.some((e) => e.isIntersecting)) return;
+    io.disconnect();
+    whenIdle();
+  }, { rootMargin: '200px' });
+  io.observe(panel);
 }
 
 await pullConfig();
