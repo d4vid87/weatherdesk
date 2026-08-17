@@ -434,6 +434,12 @@
         <div id="aqi-label" class="muted"></div>
         <div id="aqi-detail" class="muted" style="font-size:12px"></div>
       </div>
+
+      <div class="card" data-panel="nearby">
+        <h2>Nearby sensors</h2>
+        <div id="nearby-ltg" class="muted" style="font-size:13px"></div>
+        <div id="nearby-table"></div>
+      </div>
     </div>
     </div>
   </section>
@@ -497,6 +503,7 @@
     <select id="set-units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
     <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">
     <label>Wind gust alert threshold</label><input id="set-gust" type="number" min="0">
+    <label>Nearby sensor radius (mi, 0 = manual only)</label><input id="set-nearby-radius" type="number" min="0">
     <label>Radar site</label>
     <select id="set-radar-site"><option value="">Nearest to my station</option></select>
     <label><input id="set-desk-radar" type="checkbox"> Radar panel on the Desk</label>

@@ -58,6 +58,7 @@ function fillDrawer() {
   $('set-units').value = s.units;
   $('set-refresh').value = s.refreshSec;
   $('set-gust').value = s.windGustAlert;
+  $('set-nearby-radius').value = s.nearbyRadius ?? 0;
   $('set-desk-radar').checked = !!s.deskRadar;
   $('set-mqtt-url').value = s.mqttUrl;
   $('set-mqtt-user').value = s.mqttUser;
@@ -117,6 +118,7 @@ $('btn-save').onclick = async () => {
     units: $('set-units').value,
     refreshSec: +$('set-refresh').value || 60,
     windGustAlert: +$('set-gust').value || 30,
+    nearbyRadius: +$('set-nearby-radius').value || 0,
     deskRadar: $('set-desk-radar').checked,
     mqttUrl: $('set-mqtt-url').value.trim(),
     mqttUser: $('set-mqtt-user').value.trim(),

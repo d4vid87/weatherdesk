@@ -50,6 +50,27 @@ export function stationObs(id = settings().stationId) {
   return getJSON(`${SWD}/observations/stn/${id}?${qs({ token: settings().token, ...unitParams() })}`);
 }
 
+// --- METAR via NWS, shaped like a Tempest station obs so the comparison rows need no branches ---
+
+export async function metarObs(id) {
+  const j = await getJSON(`https://api.weather.gov/stations/${id}/observations/latest`);
+  const p = j.properties || {};
+  const metric = settings().units === 'metric';
+  const c = p.temperature?.value;       // degC
+  const w = p.windSpeed?.value;         // km_h-1
+  return {
+    latitude: j.geometry?.coordinates?.[1],
+    longitude: j.geometry?.coordinates?.[0],
+    obs: [{
+      timestamp: p.timestamp ? Date.parse(p.timestamp) / 1000 : null,
+      air_temperature: c == null ? null : (metric ? c : c * 9 / 5 + 32),
+      wind_avg: w == null ? null : (metric ? w : w * 0.621371),
+      wind_direction: p.windDirection?.value,
+      precip_accum_local_day: null, // airports report precip on their own schedule; not comparable
+    }],
+  };
+}
+
 // obs_st tuple layout, per the Tempest UDP/REST reference. One copy: two drifting
 // copies of a positional index map is a silently-wrong chart.
 export const OBS = {
