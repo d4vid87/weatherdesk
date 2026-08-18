@@ -1,5 +1,5 @@
 // All remote endpoints live here. Single choke point for token + units.
-import { settings, coords } from './app.js';
+import { settings, coords, expires } from './app.js';
 
 const SWD = 'https://swd.weatherflow.com/swd/rest';
 
@@ -38,7 +38,7 @@ async function getJSON(url, opts) {
   const hit = cacheable(url) ? etags.get(url) : null;
   try {
     r = await fetch(url, {
-      signal: AbortSignal.timeout(15000),
+      signal: expires(15000),
       ...opts,
       ...(hit ? { headers: { 'If-None-Match': hit.etag, ...(opts?.headers || {}) } } : {}),
     });

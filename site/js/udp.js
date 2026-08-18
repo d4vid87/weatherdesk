@@ -2,7 +2,7 @@
 // only without the round trip and without needing the internet at all. Browsers can't hold a UDP
 // socket, so the desktop app listens and re-serves the last packet per type at /udp; a plain
 // browser install has no such route and this module switches itself off on the first miss.
-import { every, num } from './app.js';
+import { every, num, expires } from './app.js';
 import { renderRapid, onStrike } from './signals.js';
 
 // The app window runs on tauri://localhost, so it gets an absolute URL injected at build of the
@@ -24,7 +24,7 @@ async function poll() {
   if (off || streaming) return;
   let j;
   try {
-    const r = await fetch(URL, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(URL, { signal: expires(3000) });
     if (!r.ok) throw new Error(r.status);
     j = await r.json();
     misses = 0;

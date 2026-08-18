@@ -303,6 +303,16 @@ function repace() {
   }
 }
 
+// A fetch deadline, the long way round. `AbortSignal.timeout` is Chrome 103 and Safari 16, and
+// the wall tablets this dashboard is aimed at are older than both — on one of them the missing
+// method threw before the request was made, so every timed fetch on the page died at once and
+// the screen came up as an unconfigured install. AbortController has been everywhere since 2018.
+export function expires(ms) {
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
 // Nothing here is worth a request or a repaint while the window is hidden — a wall tablet with
 // its screen off would otherwise poll every source all night. Whatever came due in the meantime
 // runs once on the way back.

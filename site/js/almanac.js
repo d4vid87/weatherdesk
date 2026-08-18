@@ -4,7 +4,7 @@
 // the REST history is capped and paged, and the point of the log is to keep going once it ends.
 // Nothing here backfills — the archive starts the day the app was first run, and the panel says
 // so rather than pretending the record is older than it is.
-import { settings, U, num, every } from './app.js';
+import { settings, U, num, every, expires } from './app.js';
 import { chart } from './charts.js';
 import { normals, normalFor } from './api.js';
 
@@ -32,7 +32,7 @@ async function load() {
   // The browser's own offset, because the process has no timezone and "a day" has to mean the
   // day the user lived through.
   const tz = -new Date().getTimezoneOffset();
-  const r = await fetch(`${SRV}/history/daily?tz=${tz}`, { signal: AbortSignal.timeout(10000) });
+  const r = await fetch(`${SRV}/history/daily?tz=${tz}`, { signal: expires(10000) });
   if (!r.ok) throw new Error(`${r.status}`);
   days = (await r.json()).map(toDisplay);
 }
@@ -105,7 +105,7 @@ export async function refreshAlmanac() {
 let coverage = null;
 async function loadCoverage() {
   try {
-    const r = await fetch(`${SRV}/history/coverage`, { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${SRV}/history/coverage`, { signal: expires(5000) });
     coverage = r.ok ? await r.json() : null;
   } catch { coverage = null; }
 }

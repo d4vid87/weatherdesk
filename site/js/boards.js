@@ -1,7 +1,7 @@
 // 04 Data — nine boards. Station history from observations/device, forecast
 // intelligence from open-meteo + wd.verify, official context from NWS.
 import * as api from './api.js';
-import { settings, coords, configured, U, num, every } from './app.js';
+import { settings, coords, configured, U, num, every, expires } from './app.js';
 import { chart } from './charts.js';
 import { accuracy } from './track.js';
 import { forecast as deskForecast } from './desk.js';
@@ -171,7 +171,7 @@ async function drawOfficial() {
   const fc = deskForecast();
   try {
     const p = await api.nwsPoint();
-    const nws = await (await fetch(p.properties.forecast, { signal: AbortSignal.timeout(15000) })).json();
+    const nws = await (await fetch(p.properties.forecast, { signal: expires(15000) })).json();
     const periods = nws.properties.periods.slice(0, 6);
     const tempestDaily = fc?.forecast?.daily || [];
     $('official').innerHTML = periods.map((pd, i) => {
@@ -192,7 +192,7 @@ async function drawOutlook() {
   try {
     const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${s.lat}&longitude=${s.lon}`
       + `&daily=precipitation_sum,precipitation_probability_max&forecast_days=7&timezone=auto`
-      + (imperial ? '&precipitation_unit=inch' : ''), { signal: AbortSignal.timeout(15000) })).json();
+      + (imperial ? '&precipitation_unit=inch' : ''), { signal: expires(15000) })).json();
     const data = j.daily.time.map((t, i) => ({ x: new Date(t).getTime(), y: j.daily.precipitation_sum[i] }));
     chart($('c-qpf'), [{ data, type: 'bar', color: '#4fb8ff' }], { yMin: 0, digits: 2 });
     const total = data.reduce((a, b) => a + (b.y || 0), 0);

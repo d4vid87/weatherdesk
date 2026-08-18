@@ -3,7 +3,7 @@
 // Everything here is either arithmetic on numbers the dashboard already has, or a keyless
 // endpoint. No new token, no new account: the point of these cards is that they cost nothing to
 // keep on screen all day.
-import { settings, coords, U, num, notify, every, stamp } from './app.js';
+import { settings, coords, U, num, notify, every, stamp, expires } from './app.js';
 import { forecast as deskForecast } from './desk.js';
 import { OBS } from './api.js';
 
@@ -94,7 +94,7 @@ async function loadMoon() {
   const sign = off < 0 ? '-' : '+';
   const offset = `${sign}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`;
   const url = `https://api.met.no/weatherapi/sunrise/3.0/moon?lat=${(+c.lat).toFixed(4)}&lon=${(+c.lon).toFixed(4)}&date=${day}&offset=${encodeURIComponent(offset)}`;
-  const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const r = await fetch(url, { signal: expires(15000) });
   if (!r.ok) throw new Error(`${r.status}`);
   const p = (await r.json()).properties || {};
   moonTimes = {
@@ -185,7 +185,7 @@ async function loadGarden() {
   // ground. Paired with the rain that went in, it is the whole of "does the lawn need watering".
   const r = await fetch('https://api.open-meteo.com/v1/forecast'
     + `?latitude=${c.lat}&longitude=${c.lon}&daily=et0_fao_evapotranspiration,precipitation_sum`
-    + '&past_days=7&forecast_days=1&timezone=auto', { signal: AbortSignal.timeout(15000) });
+    + '&past_days=7&forecast_days=1&timezone=auto', { signal: expires(15000) });
   if (!r.ok) throw new Error(`${r.status}`);
   const j = await r.json();
   const sum = (a) => (a || []).slice(0, 7).reduce((x, y) => x + (y || 0), 0);
@@ -198,7 +198,7 @@ async function loadGarden() {
 // goes back to spring. No log (browser or Android install) simply leaves the row off.
 async function loadSeason() {
   const tz = -new Date().getTimezoneOffset();
-  const r = await fetch(`${window.__WD_SRV || ''}/history/daily?tz=${tz}`, { signal: AbortSignal.timeout(10000) });
+  const r = await fetch(`${window.__WD_SRV || ''}/history/daily?tz=${tz}`, { signal: expires(10000) });
   if (!r.ok) throw new Error(`${r.status}`);
   const days = await r.json(); // SI
   const yearStart = `${new Date().getFullYear()}-01-01`;
