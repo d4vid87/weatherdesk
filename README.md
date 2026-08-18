@@ -26,7 +26,7 @@ chart](docs/screenshot.png)
   forecast changes, forecast accuracy, air quality, sun & moon detail (golden hour, day-length
   change, moonrise/set), fire weather & dryness, and station health (battery, signal, sensor
   faults, time since the last report).
-- **Forecast Lab** — radar, embedded from [Hook Echo-WX](https://hookecho.netlify.app/).
+- **Forecast Lab** — radar, embedded from [Hook Echo-WX](https://hookecho.pages.dev/).
 
 The Desk radar loads itself, in Hook Echo's embedded mode: no chrome, and one frame a minute until
 you touch it. That matters because a live radar loop repaints ten times a second, and the WebKit
@@ -139,7 +139,7 @@ tablet case is the one that matters, and HTML5 drag-and-drop never fires for tou
 | The same, straight off the hub's LAN broadcast (desktop app only) | UDP `50222` |
 | Watches and warnings, gridpoint forecast | `api.weather.gov` |
 | Multi-model agreement, 15-minute nowcast, AQI | `api.open-meteo.com` |
-| Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.netlify.app` |
+| Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.pages.dev` |
 | Place search | `photon.komoot.io` |
 
 ## Smart home
