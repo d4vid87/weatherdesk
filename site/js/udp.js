@@ -92,7 +92,13 @@ function stream() {
     streaming = true;
     apply({ [p.type]: p });
   });
-  es.addEventListener('config', () => window.dispatchEvent(new CustomEvent('wd:config-rev')));
+  // The revision rides along: a screen that already holds it is the one that just wrote it, and
+  // re-pulling its own write is how the config sync used to chase its own tail.
+  es.addEventListener('config', (e) => {
+    let d = null;
+    try { d = JSON.parse(e.data); } catch { /* older server sent no body */ }
+    window.dispatchEvent(new CustomEvent('wd:config-rev', { detail: d }));
+  });
   // EventSource reconnects by itself; the poll covers the gap until a packet proves it back.
   es.onerror = () => { streaming = false; };
 }
