@@ -559,7 +559,7 @@ window.addEventListener('wd:refresh', () => {
 // Hook Echo-WX (own NEXRAD viewer) instead of the weathermap build. Deep link is
 // `#goto=SITE,lon,lat,zoom[,extras]` — note lon before lat, and unknown extras are ignored by
 // older builds, so adding to this string can never break a deployed viewer.
-const RADAR = 'https://hookecho.netlify.app/';
+const RADAR = 'https://hookecho.pages.dev/';
 
 // The NEXRAD + TDWR registry, generated from Hook Echo's own site table
 // (`cargo run -p wxdata --example sites_json`). Frozen data — a live endpoint would be coupling
