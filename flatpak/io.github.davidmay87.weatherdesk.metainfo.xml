@@ -27,6 +27,11 @@
   <url type="bugtracker">https://github.com/d4vid87/weatherdesk/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.0.4" date="2026-08-18">
+      <description>
+        <p>The Android app holds the screen awake while it is open.</p>
+      </description>
+    </release>
     <release version="3.0.3" date="2026-08-18">
       <description>
         <p>Works again on older tablet browsers, and a screen that cannot reach the host no
