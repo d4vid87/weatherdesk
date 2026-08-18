@@ -1,6 +1,6 @@
 [package]
 name = "weatherdesk"
-version = "2.0.1"
+version = "3.0.0"
 description = "Self-hosted WeatherFlow Tempest dashboard"
 authors = ["David May"]
 license = "MIT"
@@ -12,11 +12,20 @@ edition = "2021"
 name = "weatherdesk_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# `--no-default-features` drops Tauri (and with it GTK/WebKit) entirely and leaves the LAN
+# server and the archive: that is the Docker image, and it builds on a machine with no desktop
+# libraries installed at all.
+[features]
+default = ["gui"]
+gui = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-notification", "dep:tauri-plugin-updater"]
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"], optional = true }
+# An OS notification when the window is hidden — the in-page banner is no use behind another window.
+tauri-plugin-notification = { version = "2", optional = true }
 # already in tauri's tree; named here only to parse the hub's UDP broadcasts
 serde_json = "1"
 
@@ -24,6 +33,15 @@ serde_json = "1"
 # receives the hub's broadcasts.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tiny_http = "0.12"
+# The observation archive. Bundled: a wall tablet's distro is not where you go looking for a
+# matching libsqlite3.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# Blocking HTTPS for the history backfill — works with no async runtime and no window.
+ureq = "2"
+# The dashboard itself, so the headless binary is one file with nothing beside it.
+include_dir = "0.7"
+# Desktop updates in place. Android is signed with its own key and stays a sideload.
+tauri-plugin-updater = { version = "2", optional = true }
 
 [profile.release]
 opt-level = "s"

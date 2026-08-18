@@ -6,6 +6,7 @@
 // so rather than pretending the record is older than it is.
 import { settings, U, num, every } from './app.js';
 import { chart } from './charts.js';
+import { normals, normalFor } from './api.js';
 
 const $ = (id) => document.getElementById(id);
 const SRV = window.__WD_SRV || '';
@@ -55,7 +56,7 @@ const pretty = (day) => new Date(`${day}T12:00:00`).toLocaleDateString([], { mon
 
 export async function refreshAlmanac() {
   try {
-    await load();
+    await Promise.all([load(), loadCoverage()]);
   } catch {
     // Browser and Android installs have no log server; say which app has the archive rather
     // than leaving an empty card.
@@ -89,11 +90,32 @@ export async function refreshAlmanac() {
     row('This day last year', then
       ? `${num(then.tempMax, 0)}° / ${num(then.tempMin, 0)}°, ${num(then.rain, 2)} ${U.precip()}`
       : 'no record yet'),
-    row('Collecting since', pretty(days[0].day)),
+    row('Records since', pretty(days[0].day)),
     row('Days on record', num(days.length)),
+    coverageNote(),
   ].filter(Boolean).join('');
 
   drawMonthly();
+  drawExplore();
+}
+
+// The archive can reach back further than the app has been running — see the backfill in the
+// desktop server. Saying which is the difference between "we have one week" and "we have eight
+// years and are still fetching".
+let coverage = null;
+async function loadCoverage() {
+  try {
+    const r = await fetch(`${SRV}/history/coverage`, { signal: AbortSignal.timeout(5000) });
+    coverage = r.ok ? await r.json() : null;
+  } catch { coverage = null; }
+}
+
+function coverageNote() {
+  if (!coverage) return '';
+  const state = coverage.backfill === 'running'
+    ? 'still fetching older observations from WeatherFlow'
+    : coverage.backfill === 'done' ? 'backfilled from WeatherFlow' : 'from this app only';
+  return `<div><span>Archive</span><span class="muted">${num(coverage.count)} observations · ${state}</span></div>`;
 }
 
 // Rain by month, because it is the number a year of logging actually answers.
@@ -108,11 +130,55 @@ function drawMonthly() {
     months.set(m, acc);
   }
   const data = [...months].map(([m, v]) => ({ x: new Date(`${m}-15T12:00:00`).getTime(), y: v.rain }));
-  chart($('c-monthly'), [{ data, type: 'bar', color: '#4fb8ff' }], { yMin: 0, digits: 2 });
+  // Last year's months on the same axis, shifted forward a year so they line up with this
+  // year's — the comparison everybody makes by eye anyway, drawn.
+  const prior = data.map((p) => {
+    const d = new Date(p.x);
+    const key = `${d.getFullYear() - 1}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const v = months.get(key);
+    return v ? { x: p.x, y: v.rain } : { x: p.x, y: null };
+  });
+  const series = [{ data, type: 'bar', color: '#4fb8ff', name: 'this year' }];
+  if (prior.some((p) => p.y != null)) series.push({ data: prior, color: 'var(--muted)', dash: [4, 3], name: 'last year' });
+  chart($('c-monthly'), series, { yMin: 0, digits: 2, label: 'rain by month', unit: U.precip() });
   $('board-monthly').textContent = `Rain by month (${U.precip()}) — ${months.size} month${months.size === 1 ? '' : 's'} on record`;
 }
 
+// --- explorer: any date range, any column ---
+
+function drawExplore() {
+  const from = $('ex-from').value || days[0]?.day;
+  const to = $('ex-to').value || days[days.length - 1]?.day;
+  const key = $('ex-metric').value;
+  const rows = days.filter((d) => d.day >= from && d.day <= to && d[key] != null);
+  const digits = key === 'rain' ? 2 : key === 'strikes' ? 0 : 1;
+  const unit = key === 'rain' ? U.precip() : key === 'gustMax' ? U.wind() : key === 'strikes' ? '' : U.temp();
+  chart($('c-explore'), [{
+    data: rows.map((d) => ({ x: new Date(`${d.day}T12:00:00`).getTime(), y: d[key] })),
+    color: '#4fb8ff',
+    type: key === 'rain' || key === 'strikes' ? 'bar' : 'line',
+  }], { digits, unit, label: $('ex-metric').selectedOptions[0].textContent, yMin: key === 'rain' ? 0 : undefined });
+  if (!rows.length) { $('ex-summary').textContent = 'No observations in that range.'; return; }
+  const vals = rows.map((d) => d[key]);
+  const total = vals.reduce((a, b) => a + b, 0);
+  $('ex-summary').textContent = `${rows.length} days · min ${num(Math.min(...vals), digits)}${unit}`
+    + ` · max ${num(Math.max(...vals), digits)}${unit}`
+    + ` · ${key === 'rain' || key === 'strikes' ? `total ${num(total, digits)}${unit}` : `mean ${num(total / vals.length, digits)}${unit}`}`;
+}
+
+// --- normals: what the date usually looks like, from 30 years of ERA5 ---
+
+let normalDays = null;
+
+export async function normalToday() {
+  const c = settings();
+  if (c.lat == null) return null;
+  normalDays ||= await normals().catch(() => null);
+  return normalFor(normalDays);
+}
+
 export function initAlmanac() {
+  $('btn-explore').onclick = drawExplore;
   window.addEventListener('wd:section', (e) => { if (e.detail === 'data') refreshAlmanac(); });
   every('almanac', 3600, () => {
     if ($('data').classList.contains('active')) refreshAlmanac();

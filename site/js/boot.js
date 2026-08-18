@@ -10,9 +10,10 @@ import { initRules, renderRules } from './rules.js';
 import { initEnv } from './env.js';
 import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
-import { initLayout, snapshot, restore, hiddenPanels, unhide } from './layout.js';
+import { initLayout, snapshot, restore, hiddenPanels, unhide, panelIds, tabOf, setTab, TABS } from './layout.js';
 import { initUdp } from './udp.js';
 import { initHome } from './home.js';
+import { initOutlook } from './outlook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,12 +28,15 @@ let syncing = false;
 // could change the host's settings — or read its token — is off from here on.
 const PUBLIC = !!window.__WD_PUBLIC;
 
+let rev = null;
+
 async function pullConfig() {
   syncing = true;
   try {
     const r = await fetch(`${SRV}/${PUBLIC ? 'config-public' : 'config'}`, { signal: AbortSignal.timeout(2000) });
     if (!r.ok) return;
     const j = await r.json();
+    if (typeof j._rev === 'number') rev = j._rev;
     if (j.settings) saveSettings(j.settings);
     if (j.layout) restore(j.layout);
   } catch {
@@ -42,19 +46,27 @@ async function pullConfig() {
   }
 }
 
-// ponytail: server wins on load, last writer wins on save. No merge — every save pushes the
-// whole blob, so there is nothing to reconcile.
+// Server wins on load; on save this screen sends what it holds tagged with the revision it last
+// saw, and the server merges it and hands the result back. Whole-blob writes still work (that is
+// what a v2 client does), but tagging keeps a key only another screen knows about from being
+// dropped by this one.
 function pushConfig() {
   if (syncing || PUBLIC) return;
   fetch(`${SRV}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ at: Date.now(), settings: settings(), layout: load('wd.layout', {}) }),
-  }).catch(() => {});
+    body: JSON.stringify({ _rev: rev ?? 0, at: Date.now(), settings: settings(), layout: load('wd.layout', {}) }),
+  }).then((r) => (r.ok && r.status === 200 ? r.json() : null))
+    .then((j) => { if (typeof j?._rev === 'number') rev = j._rev; })
+    .catch(() => {});
 }
 
 let pushTimer;
 window.addEventListener('wd:layout', () => { clearTimeout(pushTimer); pushTimer = setTimeout(pushConfig, 2000); });
+
+// Someone changed a setting on another screen. Before this, a tablet kept showing yesterday's
+// units until it was reloaded by hand.
+window.addEventListener('wd:config-rev', () => pullConfig());
 
 
 function fillDrawer() {
@@ -76,6 +88,12 @@ function fillDrawer() {
   $('set-big-numbers').checked = !!s.bigNumbers;
   $('set-kiosk').value = s.kioskCycleSec || 0;
   $('set-night-dim').checked = !!s.nightDim;
+  $('set-speak').checked = !!s.speakAlerts;
+  $('set-palette').value = s.palette || '';
+  $('set-quiet-start').value = s.quietStart || '';
+  $('set-quiet-end').value = s.quietEnd || '';
+  $('set-http-port').value = s.httpPort || '';
+  $('set-cwop').value = s.cwopId || '';
   $('set-ntfy-topic').value = s.ntfyTopic || '';
   $('set-ntfy-url').value = s.ntfyUrl || '';
   $('set-webhook').value = s.webhookUrl || '';
@@ -83,6 +101,7 @@ function fillDrawer() {
   $('set-mqtt-url').value = s.mqttUrl;
   $('set-mqtt-user').value = s.mqttUser;
   $('set-mqtt-pass').value = s.mqttPass;
+  $('set-mqtt-subs').value = (s.mqttSubs || []).map((x) => [x.topic, x.label, x.unit].filter(Boolean).join(' | ')).join('\n');
   $('set-ha-url').value = s.haUrl;
   $('set-ha-token').value = s.haToken;
   $('set-ha-entities').value = s.haEntities;
@@ -90,6 +109,7 @@ function fillDrawer() {
     c.checked = !(s.hiddenTabs || []).includes(c.dataset.tab);
   });
   renderHiddenPanels();
+  renderCatalog();
   renderStations();
   fillSites();
 }
@@ -107,6 +127,23 @@ function renderHiddenPanels() {
   });
 }
 
+// One row per panel: its id (short enough to recognise, and no second name to keep in step with
+// the markup) and the tab it lives on.
+function renderCatalog() {
+  const el = $('panel-catalog');
+  if (!el) return;
+  const opts = Object.keys(TABS).map((t) => `<option value="${t}">${t}</option>`).join('');
+  el.innerHTML = panelIds().map((id) => `<div class="row" style="margin:4px 0">
+      <span class="place-hit" style="flex:1" data-name="${id}"></span>
+      <select data-panel-tab="${id}" style="flex:0 0 110px">${opts}</select>
+    </div>`).join('');
+  el.querySelectorAll('[data-name]').forEach((s) => { s.textContent = s.dataset.name; });
+  el.querySelectorAll('[data-panel-tab]').forEach((sel) => {
+    sel.value = tabOf(sel.dataset.panelTab);
+    sel.onchange = () => setTab(sel.dataset.panelTab, sel.value);
+  });
+}
+
 // Radar site picker: every site, nearest first, so the one the user wants is at the top of the
 // list rather than 200 rows down an alphabetical one.
 function fillSites() {
@@ -120,7 +157,26 @@ function fillSites() {
   el.value = s.radarSite || '';
 }
 
-const openDrawer = (open) => $('drawer').classList.toggle('open', open);
+// The drawer is a dialog in everything but element name: it takes focus when it opens, gives it
+// back when it closes, and Escape shuts it. Without that, a keyboard user tabbed straight past
+// it into the page behind.
+let drawerReturn = null;
+const openDrawer = (open) => {
+  const el = $('drawer');
+  el.classList.toggle('open', open);
+  el.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (open) {
+    drawerReturn = document.activeElement;
+    el.querySelector('input, select, button')?.focus();
+  } else {
+    drawerReturn?.focus?.();
+    drawerReturn = null;
+  }
+};
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('drawer').classList.contains('open')) openDrawer(false);
+});
 
 $('btn-settings').onclick = () => { fillDrawer(); openDrawer(true); };
 $('btn-close').onclick = () => { openDrawer(false); loadDeskRadar(); };
@@ -151,12 +207,22 @@ $('btn-save').onclick = async () => {
     bigNumbers: $('set-big-numbers').checked,
     kioskCycleSec: +$('set-kiosk').value || 0,
     nightDim: $('set-night-dim').checked,
+    speakAlerts: $('set-speak').checked,
+    palette: $('set-palette').value,
+    quietStart: $('set-quiet-start').value,
+    quietEnd: $('set-quiet-end').value,
+    httpPort: $('set-http-port').value.trim(),
+    cwopId: $('set-cwop').value.trim().toUpperCase(),
     ntfyTopic: $('set-ntfy-topic').value.trim(),
     ntfyUrl: $('set-ntfy-url').value.trim() || 'https://ntfy.sh',
     webhookUrl: $('set-webhook').value.trim(),
     mqttUrl: $('set-mqtt-url').value.trim(),
     mqttUser: $('set-mqtt-user').value.trim(),
     mqttPass: $('set-mqtt-pass').value,
+    mqttSubs: $('set-mqtt-subs').value.split('\n').map((line) => {
+      const [topic, label, unit] = line.split('|').map((x) => x.trim());
+      return topic ? { topic, label: label || topic, unit: unit || '' } : null;
+    }).filter(Boolean),
     haUrl: $('set-ha-url').value.trim(),
     haToken: $('set-ha-token').value.trim(),
     haEntities: $('set-ha-entities').value.trim(),
@@ -179,7 +245,7 @@ $('btn-save').onclick = async () => {
   }
   loadDeskRadar();
   initDesk(); // idempotent: every() replaces existing jobs
-  initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initLayout(); initUdp(); initHome();
+  initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initLayout(); initUdp(); initHome(); initOutlook();
 };
 
 // station meta fills name/lat/lon and the Tempest device id when blank
@@ -416,6 +482,41 @@ $('import-file').onchange = async (e) => {
     setTimeout(() => location.reload(), 800);
   } catch (err) {
     notify({ title: 'Import failed', body: err.message });
+  }
+};
+
+// The whole archive as a database file, snapshotted server-side so a copy taken mid-write is
+// still a valid database. Restoring is a file copy and a restart — see the README; a restore
+// button would be a second code path for something done once in a lifetime.
+$('btn-backup').onclick = async () => {
+  try {
+    const r = await fetch(`${SRV}/backup.db`, { signal: AbortSignal.timeout(120000) });
+    if (!r.ok) throw new Error(`${r.status}`);
+    download('weatherdesk.db', await r.blob());
+  } catch {
+    notify({
+      title: 'No archive to back up',
+      body: 'The observation archive lives on the machine running the desktop app.',
+    });
+  }
+};
+
+// Desktop only: the browser and Android builds have no invoke bridge, so the button says so
+// rather than sitting there doing nothing.
+$('btn-update').onclick = async () => {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!invoke) {
+    notify({ title: 'Updates', body: 'This build updates through wherever you installed it.' });
+    return;
+  }
+  try {
+    const version = await invoke('updater_check');
+    if (!version) { notify({ title: 'Up to date', body: 'You are on the newest release.' }); return; }
+    if (!confirm(`WeatherDesk ${version} is available. Download and install now?`)) return;
+    notify({ title: `Installing ${version}`, body: 'The app will restart when it is done.' });
+    await invoke('updater_install');
+  } catch (e) {
+    notify({ title: 'Update check failed', body: String(e) });
   }
 };
 

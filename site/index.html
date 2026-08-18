@@ -8,7 +8,8 @@
 <!-- Installable from a phone's browser. No service worker on purpose: the LAN server is plain
      http, which cannot register one, and an offline cache of a live dashboard would be a lie. -->
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>WeatherDesk</title>
 <style>
   :root {
@@ -22,6 +23,23 @@
     --bg: #f2f5f8; --panel: #ffffff; --panel2: #e8edf3; --line: #ccd6e0;
     --text: #16202b; --muted: #5c6b7d; --accent: #0b74d1; --warn: #a35a00; --bad: #c02a22; --good: #187a45;
   }
+  /* Palette packs. Same six variables, four opinions about them — OLED for a screen that saves
+     power on true black, solarized for the people who ask for it everywhere, high contrast for
+     a bright room, e-ink for a panel that is being photographed by a slow display. */
+  html[data-palette="oled"] { --bg: #000; --panel: #0a0a0a; --panel2: #141414; --line: #262626; }
+  html[data-palette="solarized"] { --bg: #002b36; --panel: #073642; --panel2: #0b4653; --line: #17505c;
+    --text: #eee8d5; --muted: #93a1a1; --accent: #268bd2; --warn: #b58900; --bad: #dc322f; --good: #859900; }
+  html[data-palette="solarized"][data-theme="light"] { --bg: #fdf6e3; --panel: #fff; --panel2: #eee8d5;
+    --line: #d8d0bd; --text: #073642; --muted: #657b83; }
+  html[data-palette="contrast"] { --bg: #000; --panel: #000; --panel2: #111; --line: #fff;
+    --text: #fff; --muted: #d8d8d8; --accent: #4fd8ff; --warn: #ffd24f; --bad: #ff8a80; --good: #7cff9e; }
+  html[data-palette="contrast"][data-theme="light"] { --bg: #fff; --panel: #fff; --panel2: #f0f0f0;
+    --line: #000; --text: #000; --muted: #303030; --accent: #005bbb; }
+  html[data-palette="eink"] { --bg: #fff; --panel: #fff; --panel2: #f4f4f4; --line: #333;
+    --text: #000; --muted: #444; --accent: #000; --warn: #000; --bad: #000; --good: #000; }
+  /* An e-ink panel refreshes in whole frames: shadows, gradients and transitions are smear. */
+  html[data-palette="eink"] * { box-shadow: none !important; text-shadow: none !important;
+    background-image: none !important; transition: none !important; animation: none !important; }
   html[data-density="compact"] { --gap: 7px; }
   html[data-density="compact"] .card { padding: 8px 10px; }
   body.big-numbers .now-temp { font-size: 88px; }
@@ -44,6 +62,9 @@
     content: ''; position: fixed; inset: 0; background: #000; opacity: .45;
     pointer-events: none; z-index: 999;
   }
+  /* Keyboard focus has to be visible on every theme and palette — the default ring disappears
+     entirely on the dark panels. :focus-visible, so a mouse click doesn't leave one behind. */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
@@ -55,6 +76,9 @@
     background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
   }
   header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: .04em; }
+  /* The cloud-and-bolt mark out of the logo, at header height. The full illustration is mush
+     below about 100px, and the wordmark next to it is live text for the same reason. */
+  #brand { height: 26px; width: 26px; flex: none; border-radius: 6px; }
   nav { display: flex; gap: 4px; flex: 1; }
   .tab {
     background: none; border: 1px solid transparent; color: var(--muted); padding: 6px 14px;
@@ -384,6 +408,7 @@
 </head>
 <body>
 <header>
+  <img id="brand" src="mark-256.png" alt="WeatherDesk">
   <h1>WEATHERDESK</h1>
   <nav>
     <button class="tab" data-section="desk">Desk</button>
@@ -403,7 +428,8 @@
   <div id="notif-stack"></div>
 <div id="wizard" hidden>
   <div class="wizard-box">
-    <h2 style="margin-top:0">Welcome to WeatherDesk</h2>
+    <img src="icon-512.png" alt="" style="display:block;width:180px;max-width:60%;margin:0 auto 10px">
+    <h2 style="margin-top:0;text-align:center">Welcome to WeatherDesk</h2>
     <p class="muted" style="font-size:13px">Paste a Tempest personal use token and pick your station.
       Get one at tempestwx.com → Settings → Data Authorizations.</p>
     <div class="row">
@@ -454,6 +480,7 @@
         <div>
           <div id="hero-cond"></div>
           <div id="hero-hilo" class="hero-dim"></div>
+          <div id="hero-normal" class="hero-dim"></div>
         </div>
       </div>
     </div>
@@ -462,6 +489,7 @@
 
     <div id="ha-panel" data-panel="ha" style="display:none">
       <h2 id="ha-stamp">Home Assistant<span id="mqtt-state" class="muted" style="float:right;font-size:12px"></span></h2>
+      <div id="mqtt-subs" class="kv-rows"></div>
       <div id="ha-rows"></div>
     </div>
 
@@ -515,6 +543,23 @@
         <div id="edge" class="muted" style="margin-top:4px;font-size:13px"></div>
       </div>
 
+      <!-- The three seasonal cards. Each one is display:none until its own data says otherwise
+           — see outlook.js. -->
+      <div class="card" data-panel="severe" id="severe-card" style="display:none">
+        <h2>Severe outlook</h2>
+        <div id="severe-risk" style="font-weight:600;margin-bottom:6px"></div>
+        <div id="severe-params" class="kv-rows"></div>
+      </div>
+      <div class="card" data-panel="winter" id="winter-card" style="display:none">
+        <h2>Snowfall · 7 days</h2>
+        <div id="winter-total" style="font-weight:600;margin-bottom:6px"></div>
+        <div id="winter-days" class="kv-rows"></div>
+      </div>
+      <div class="card" data-panel="tropical" id="tropical-card" style="display:none">
+        <h2>Tropics</h2>
+        <div id="tropical-list" class="kv-rows"></div>
+      </div>
+
       <div class="card" data-panel="changes"><h2>Forecast changes</h2><div id="changes" class="muted">--</div></div>
       <div class="card" data-panel="verify"><h2>Forecast accuracy</h2><div id="verify" class="muted">--</div></div>
 
@@ -542,7 +587,7 @@
        lightning, SPC, alerts already work there). Inline it into map.js only if the two need shared state. -->
   <section class="page" id="lab" style="padding:0"><iframe id="lab-frame" title="Forecast Lab"></iframe></section>
   <section class="page" id="signals">
-    <div class="grid">
+    <div class="grid" id="signals-grid">
       <div class="card">
         <h2>Live wind · websocket</h2>
         <div class="live-wind-wrap">
@@ -574,7 +619,7 @@
     </div>
   </section>
   <section class="page" id="data">
-    <div class="grid">
+    <div class="grid" id="data-grid">
       <div class="card"><h2 id="board-temp">Temperature</h2><canvas id="c-temp" class="chart"></canvas></div>
       <div class="card"><h2 id="board-rain">Rain</h2><canvas id="c-rain" class="chart"></canvas></div>
       <div class="card"><h2 id="board-wind">Wind</h2><canvas id="c-wind" class="chart"></canvas></div>
@@ -588,6 +633,23 @@
       <div class="card"><h2>Garden</h2><div id="garden" class="kv-rows"></div></div>
       <div class="card"><h2>Almanac · all time</h2><div id="almanac" class="kv-rows"></div></div>
       <div class="card"><h2 id="board-monthly">Month by month</h2><canvas id="c-monthly" class="chart"></canvas></div>
+      <div class="card" style="grid-column: span 2">
+        <h2>Explore the archive</h2>
+        <div class="row" style="margin-top:0">
+          <input id="ex-from" type="date" aria-label="From date" style="flex:1">
+          <input id="ex-to" type="date" aria-label="To date" style="flex:1">
+          <select id="ex-metric" style="flex:1">
+            <option value="tempMax">High temperature</option>
+            <option value="tempMin">Low temperature</option>
+            <option value="gustMax">Peak gust</option>
+            <option value="rain">Rain</option>
+            <option value="strikes">Lightning strikes</option>
+          </select>
+          <button id="btn-explore" style="flex:0 0 auto">Show</button>
+        </div>
+        <canvas id="c-explore" class="chart"></canvas>
+        <div id="ex-summary" class="muted" style="font-size:13px"></div>
+      </div>
     </div>
   </section>
 
@@ -615,6 +677,14 @@
       <option value="auto">Auto — light by day</option>
     </select>
     <label>Accent colour</label><input id="set-accent" type="color" value="#4fb8ff">
+    <label>Palette</label>
+    <select id="set-palette">
+      <option value="">Default</option>
+      <option value="oled">OLED black</option>
+      <option value="solarized">Solarized</option>
+      <option value="contrast">High contrast</option>
+      <option value="eink">E-ink (flat, no shadows)</option>
+    </select>
     <label>Text size</label>
     <select id="set-font">
       <option value="0.85">Small</option>
@@ -629,6 +699,7 @@
     <h2 style="font-size:13px;margin-top:18px">Kiosk</h2>
     <label>Cycle tabs every (seconds, 0 = off)</label><input id="set-kiosk" type="number" min="0" step="5">
     <label><input id="set-night-dim" type="checkbox"> Dim the screen overnight</label>
+    <label><input id="set-speak" type="checkbox"> Read severe alerts aloud</label>
 
     <label style="margin-top:14px">Eco mode (slower polling, no animation)</label>
     <select id="set-eco">
@@ -636,10 +707,20 @@
       <option value="on">Always on</option>
       <option value="off">Off</option>
     </select>
+    <h2 style="font-size:13px;margin-top:18px">This computer</h2>
+    <label>LAN dashboard port (blank = 8088; restart to apply)</label>
+    <input id="set-http-port" type="number" min="1" max="65535" placeholder="8088">
+    <label>CWOP station ID (blank = don't report)</label>
+    <input id="set-cwop" placeholder="e.g. EW1234">
+    <p class="muted" style="font-size:12px">Sends your readings to the Citizen Weather Observer
+      Program every ten minutes, where forecast models can use them. Callsigns are public.</p>
+
     <div class="row">
       <button id="btn-export">Export settings</button>
       <button id="btn-import">Import settings</button>
       <button id="btn-csv">History CSV</button>
+      <button id="btn-backup">Backup archive</button>
+      <button id="btn-update">Check for updates</button>
     </div>
     <input id="import-file" type="file" accept="application/json,.json" hidden>
     <div class="row">
@@ -656,6 +737,10 @@
     </div>
     <div id="layout-list"></div>
     <div id="hidden-list"></div>
+    <h2 style="font-size:13px;margin-top:18px">Panel catalog</h2>
+    <p class="muted" style="font-size:12px">Move any Desk panel to another tab. It keeps working
+      where it lands — the gauges on the Data tab are the same gauges.</p>
+    <div id="panel-catalog"></div>
     <div class="muted" style="font-size:12px;margin-top:6px">
       Hover a panel for its grip: drag the grip to move it, drag the bottom-right corner to resize,
       double-click the grip to restore that panel's size. The × beside the grip hides a panel;
@@ -700,18 +785,42 @@
       <input id="rule-dur" type="number" min="0" placeholder="minutes" style="flex:0 0 90px">
       <button id="btn-rule-add" style="flex:0 0 auto">Add</button>
     </div>
+    <!-- Second condition, folded away until asked for: most rules are one threshold, and an
+         empty row of extra inputs makes the simple case look complicated. -->
+    <div class="row" style="margin-top:6px">
+      <button id="btn-rule-and" style="flex:0 0 auto">+ AND</button>
+    </div>
+    <div id="rule-and-row" style="display:none">
+      <div class="row" style="margin-top:6px">
+        <select id="rule-metric2"></select>
+        <select id="rule-op2" style="flex:0 0 auto"><option value="&gt;">above</option><option value="&lt;">below</option></select>
+        <input id="rule-value2" type="number" step="any" placeholder="value" style="flex:0 0 90px">
+      </div>
+    </div>
+
+    <h2 style="font-size:13px;margin-top:18px">Quiet hours</h2>
+    <p class="muted" style="font-size:12px">No chime and no push between these times. Severe and
+      extreme warnings still come through. Leave both blank for off.</p>
+    <div class="row">
+      <input id="set-quiet-start" type="time" aria-label="Quiet hours start">
+      <input id="set-quiet-end" type="time" aria-label="Quiet hours end">
+    </div>
 
     <h2 style="font-size:13px;margin-top:18px">Push notifications</h2>
     <label>ntfy topic (phone push)</label><input id="set-ntfy-topic" placeholder="pick something unguessable">
     <label>ntfy server</label><input id="set-ntfy-url" placeholder="https://ntfy.sh">
     <label>Webhook URL</label><input id="set-webhook" placeholder="https://…">
-    <p class="muted" style="font-size:12px">Alerts are sent as title, body and category only — never your token.
+    <p class="muted" style="font-size:12px">Discord and Telegram webhook URLs are recognised and
+      formatted for them automatically. Alerts are sent as title, body and category only — never your token.
       An ntfy.sh topic is public to anyone who guesses it, so make it long.</p>
 
     <h2 style="font-size:13px;margin-top:18px">Smart home</h2>
     <label>MQTT WebSocket URL</label><input id="set-mqtt-url" placeholder="ws://homeassistant.local:9001">
     <label>MQTT username</label><input id="set-mqtt-user" autocomplete="off">
     <label>MQTT password</label><input id="set-mqtt-pass" type="password" autocomplete="off">
+    <label>Broker topics to show (one per line: topic | label | unit)</label>
+    <textarea id="set-mqtt-subs" rows="3" placeholder="home/greenhouse/temp | Greenhouse | °F"
+      style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
     <label>Home Assistant URL</label><input id="set-ha-url" placeholder="http://homeassistant.local:8123">
     <label>Home Assistant token</label><input id="set-ha-token" type="password" placeholder="long-lived access token">
     <label>Entities to show</label><input id="set-ha-entities" placeholder="light.porch, sensor.attic_temp">

@@ -83,6 +83,16 @@ const holds = (v, op, target) => (op === '>' ? v > target : v < target);
 // otherwise notify on every single report. Same latch the gust alert in home.js uses.
 const rearmed = (v, op, target) => (op === '>' ? v < target * 0.9 : v > target * 1.1);
 
+// A rule may carry a second condition (`metric2`/`op2`/`value2`), and then both have to hold —
+// "over 25 mph AND under 40% humidity" is a fire day, either half alone is a Tuesday. Rules
+// saved before v3 have none of those keys and this returns true for them unchanged.
+function second(m, r) {
+  if (!r.metric2) return true;
+  const v = m[r.metric2];
+  if (!METRICS[r.metric2] || v == null || Number.isNaN(v)) return false;
+  return holds(v, r.op2 || '>', r.value2);
+}
+
 export function evaluate(m, rules = settings().rules || [], nowSec = Math.floor(Date.now() / 1000)) {
   const fired = [];
   rules.forEach((r, i) => {
@@ -90,7 +100,7 @@ export function evaluate(m, rules = settings().rules || [], nowSec = Math.floor(
     const v = m[r.metric];
     if (!spec || v == null || Number.isNaN(v)) return;
     const st = state.get(i) || { since: null, latched: false };
-    if (!holds(v, r.op, r.value)) {
+    if (!holds(v, r.op, r.value) || !second(m, r)) {
       st.since = null;
       if (st.latched && rearmed(v, r.op, r.value)) st.latched = false;
       state.set(i, st);
@@ -99,7 +109,7 @@ export function evaluate(m, rules = settings().rules || [], nowSec = Math.floor(
     st.since ??= nowSec;
     if (!st.latched && nowSec - st.since >= (r.durMin || 0) * 60) {
       st.latched = true;
-      fired.push({ rule: r, value: v });
+      fired.push({ rule: r, value: v, index: i });
     }
     state.set(i, st);
   });
@@ -107,7 +117,10 @@ export function evaluate(m, rules = settings().rules || [], nowSec = Math.floor(
 }
 
 function run(m) {
-  for (const { rule, value } of evaluate(derive(m))) {
+  for (const { rule, value, index } of evaluate(derive(m))) {
+    // home.js turns this into a per-rule binary sensor; the banner alone had no way to say
+    // which rule it came from.
+    window.dispatchEvent(new CustomEvent('wd:rule', { detail: { index, rule, value } }));
     const [label, unit, digits] = METRICS[rule.metric];
     notify({
       category: 'rule',
@@ -143,11 +156,18 @@ export function renderRules() {
   const rules = settings().rules || [];
   const opts = Object.entries(METRICS).map(([k, [label]]) => `<option value="${k}">${label}</option>`).join('');
   $('rule-metric').innerHTML = opts;
+  $('rule-metric2').innerHTML = opts;
+  const describe = (metric, op, value) => {
+    const [label, unit, digits] = METRICS[metric] || ['(unknown metric)', () => '', 0];
+    return `${label} ${OPS[op] || op} ${num(value, digits)}${unit()}`;
+  };
   $('rule-list').innerHTML = rules.length
     ? rules.map((r, i) => {
-        const [label, unit, digits] = METRICS[r.metric] || ['(unknown metric)', () => '', 0];
+        const text = describe(r.metric, r.op, r.value)
+          + (r.metric2 ? ` AND ${describe(r.metric2, r.op2, r.value2)}` : '')
+          + (r.durMin ? ` · ${r.durMin} min` : '');
         return `<div class="row" style="margin:0">
-          <span class="place-hit" style="flex:1">${label} ${OPS[r.op] || r.op} ${num(r.value, digits)}${unit()}${r.durMin ? ` · ${r.durMin} min` : ''}</span>
+          <span class="place-hit" style="flex:1">${text}</span>
           <button class="sig-x" data-rule="${i}">×</button></div>`;
       }).join('')
     : '<div class="muted" style="font-size:12px">No rules yet</div>';
@@ -163,18 +183,30 @@ export function renderRules() {
 }
 
 export function initRules() {
+  $('btn-rule-and').onclick = () => {
+    const row = $('rule-and-row');
+    row.style.display = row.style.display === 'none' ? '' : 'none';
+    if (row.style.display === 'none') $('rule-value2').value = '';
+  };
   $('btn-rule-add').onclick = () => {
     const value = parseFloat($('rule-value').value);
     if (Number.isNaN(value)) return;
+    const value2 = parseFloat($('rule-value2').value);
+    const and = $('rule-and-row').style.display !== 'none' && !Number.isNaN(value2);
     saveSettings({
       rules: [...(settings().rules || []), {
         metric: $('rule-metric').value,
         op: $('rule-op').value,
         value,
         durMin: +$('rule-dur').value || 0,
+        // Absent, not null, when there is no second condition: an older client reading the same
+        // /config blob has to see exactly the rule shape it wrote.
+        ...(and ? { metric2: $('rule-metric2').value, op2: $('rule-op2').value, value2 } : {}),
       }],
     });
     $('rule-value').value = '';
+    $('rule-value2').value = '';
+    $('rule-and-row').style.display = 'none';
     renderRules();
   };
   renderRules();
@@ -197,5 +229,16 @@ if (location.search.includes('selftest')) {
   console.assert(evaluate({ temp: 30 }, d, 600).length === 1, 'rules: fires at the duration');
   state.clear();
   console.assert(evaluate({ temp: null }, d, 0).length === 0, 'rules: missing reading never fires');
+  state.clear();
+
+  // AND rules: both halves, and a pre-v3 rule with no second half unchanged
+  const both = [{ metric: 'gust', op: '>', value: 25, durMin: 0, metric2: 'rh', op2: '<', value2: 40 }];
+  console.assert(evaluate({ gust: 30, rh: 50 }, both, 0).length === 0, 'rules: AND needs both');
+  console.assert(evaluate({ gust: 30, rh: 30 }, both, 60).length === 1, 'rules: AND fires when both hold');
+  state.clear();
+  console.assert(evaluate({ gust: 30 }, both, 0).length === 0, 'rules: AND with a missing second reading never fires');
+  state.clear();
+  console.assert(evaluate({ gust: 40 }, [{ metric: 'gust', op: '>', value: 30 }], 0).length === 1,
+    'rules: a rule saved before v3 still fires');
   state.clear();
 }

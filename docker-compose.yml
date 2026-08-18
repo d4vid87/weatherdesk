@@ -1,0 +1,9 @@
+services:
+  weatherdesk:
+    image: ghcr.io/d4vid87/weatherdesk:latest
+    container_name: weatherdesk
+    restart: unless-stopped
+    # Required on Linux: the hub's UDP broadcast never reaches a bridged network.
+    network_mode: host
+    volumes:
+      - ./data:/data

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.davidmay87.weatherdesk</id>
+  <name>WeatherDesk</name>
+  <summary>Self-hosted dashboard for a WeatherFlow Tempest station</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.davidmay87">
+    <name>David May</name>
+  </developer>
+  <description>
+    <p>
+      A dashboard for your own Tempest weather station. It reads the station over your local
+      network as well as the cloud, keeps its own observation archive so the history outlives
+      what WeatherFlow serves, and serves the same dashboard to every other screen in the house.
+    </p>
+    <p>Includes:</p>
+    <ul>
+      <li>Live readings from the hub's own LAN broadcasts, with no internet needed</li>
+      <li>Radar, forecast model comparison, severe weather outlooks and alerts</li>
+      <li>An observation archive with records, normals and year-over-year comparisons</li>
+      <li>Alert rules, phone push, MQTT and Home Assistant</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.davidmay87.weatherdesk.desktop</launchable>
+  <url type="homepage">https://github.com/d4vid87/weatherdesk</url>
+  <url type="bugtracker">https://github.com/d4vid87/weatherdesk/issues</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="3.0.0" date="2026-08-17">
+      <description>
+        <p>The data release: a SQLite archive with history backfilled from WeatherFlow, live
+        streaming to every screen, severe/winter/tropical outlook cards, quiet hours, CWOP
+        reporting and a headless container.</p>
+      </description>
+    </release>
+  </releases>
+</component>

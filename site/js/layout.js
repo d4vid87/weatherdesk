@@ -35,6 +35,40 @@ const entry = (id) => (state[id] ||= {});
 // Containers whose direct children are rearrangeable, in the order they appear on the Desk.
 const CONTAINERS = ['desk-stack', 'daycards', 'gauges', 'desk-grid'];
 
+// Tabs a panel can be sent to, and the container it lands in. The Desk entry is where a panel
+// goes home to; the others hold cards that were never draggable, so they are placement targets
+// only and their own children are left alone.
+export const TABS = { desk: 'desk-grid', data: 'data-grid', signals: 'signals-grid' };
+
+// Every panel's home, captured before anything is moved — otherwise sending a panel to the Data
+// tab and back would leave it in whichever grid it happened to be in at reload.
+const home = new Map();
+
+export function panelIds() {
+  return [...document.querySelectorAll('[data-panel]')].map((el) => el.dataset.panel);
+}
+
+export const tabOf = (id) => state[id]?.tab || 'desk';
+
+// Put each panel where the settings say. Called on load and whenever the catalog changes; moving
+// a live node keeps its listeners and its rendered contents, so nothing has to re-render.
+export function applyPlacement() {
+  for (const el of document.querySelectorAll('[data-panel]')) {
+    const id = el.dataset.panel;
+    if (!home.has(id)) home.set(id, el.parentElement);
+    const want = state[id]?.tab;
+    const target = want && want !== 'desk' ? $(TABS[want]) : home.get(id);
+    if (target && el.parentElement !== target) target.appendChild(el);
+  }
+}
+
+export function setTab(id, tab) {
+  if (tab === 'desk') delete entry(id).tab;
+  else entry(id).tab = tab;
+  save();
+  applyPlacement();
+}
+
 let dragged = null;
 
 // Grid children are sized in columns, not pixels: a `width` on a grid item is ignored by the
@@ -81,7 +115,11 @@ function applySaved(el) {
 function applyOrder(container) {
   if (dragged) return; // a background refresh must not yank panels out from under a live drag
   const kids = [...container.children].filter((c) => c.dataset.panel);
-  if (kids.length !== container.children.length) {
+  // A container that is itself a panel carries its own grip and resize handles as children —
+  // they are furniture, not panels, and counting them made every reorder after wire() bail out
+  // with a warning (so a restored layout silently kept the markup order).
+  const others = [...container.children].filter((c) => !c.dataset.panel && !c.classList.contains('grip') && !c.classList.contains('rz'));
+  if (others.length) {
     console.warn('layout: non-panel child in', container.id, '— leaving order alone');
     return;
   }
@@ -285,6 +323,7 @@ export function restore(next) {
     setWidth(el, null); el.style.height = '';
     el.classList.remove('panel-hidden');
   });
+  applyPlacement();
   CONTAINERS.map($).filter(Boolean).forEach((c) => {
     applyOrder(c);
     [...c.children].filter((k) => k.dataset.panel).forEach(applySaved);
@@ -297,6 +336,7 @@ export function resetLayout() {
 }
 
 export function initLayout() {
+  applyPlacement();
   CONTAINERS.map($).filter(Boolean).forEach((c) => { applyOrder(c); wire(c); });
   const btn = $('btn-layout-reset');
   if (btn) btn.onclick = resetLayout;
@@ -343,6 +383,12 @@ if (location.search.includes('selftest')) {
   unhide('sel-hide');
   console.assert(!p.classList.contains('panel-hidden') && !hiddenPanels().length, 'layout: unhide restores');
   p.remove();
+
+  // the catalog: a panel with no tab is on the Desk, and setTab writes the one field
+  state = {};
+  console.assert(tabOf('anything') === 'desk', 'layout: a panel with no tab lives on the Desk');
+  state = { hero: { tab: 'data' } };
+  console.assert(tabOf('hero') === 'data', 'layout: the catalog records the tab');
 
   state = JSON.parse(before);
   save(); // the hide/unhide asserts wrote through to storage — put the real layout back

@@ -8,17 +8,20 @@ import { renderRapid, onStrike } from './signals.js';
 // The app window runs on tauri://localhost, so it gets an absolute URL injected at build of the
 // webview; the LAN tablet is same-origin with the server and uses the relative path.
 const URL = window.__WD_UDP || '/udp';
+const SRV = window.__WD_SRV || '';
 const FRESH_SEC = 10;
 // obs_st is a once-a-minute report, so the 10s window that suits 3s rapid_wind would reject
 // every one of them.
 const OBS_FRESH_SEC = 120;
 
-let misses = 0, off = false, slow = false, lastObs = 0;
+let misses = 0, off = false, slow = false, lastObs = 0, streaming = false;
 
 const schedule = (sec) => every('udp', sec, poll);
 
 async function poll() {
-  if (off) return;
+  // The stream delivers each packet the moment the hub sends it; polling on top of that is a
+  // request every three seconds for something we already have.
+  if (off || streaming) return;
   let j;
   try {
     const r = await fetch(URL, { signal: AbortSignal.timeout(3000) });
@@ -40,6 +43,12 @@ async function poll() {
     return;
   }
 
+  apply(j);
+}
+
+// One poll's worth of packets, keyed by type — which is also the shape of a single streamed
+// packet, so both paths land here.
+function apply(j) {
   const now = Date.now() / 1000;
   const fresh = (p) => p && now - p._at < FRESH_SEC;
 
@@ -69,8 +78,28 @@ async function poll() {
   }
 }
 
+// Everything the server hears, pushed as it arrives: a gust shows up in the same second the hub
+// broadcast it instead of up to three seconds later. The poll stays as the fallback — a static
+// self-host has no /events route, and neither does a v2 desktop app on the LAN.
+function stream() {
+  if (!('EventSource' in window)) return;
+  let es;
+  try { es = new EventSource(`${SRV}/events`); } catch { return; }
+  es.addEventListener('udp', (e) => {
+    let p;
+    try { p = JSON.parse(e.data); } catch { return; }
+    if (!p?.type) return;
+    streaming = true;
+    apply({ [p.type]: p });
+  });
+  es.addEventListener('config', () => window.dispatchEvent(new CustomEvent('wd:config-rev')));
+  // EventSource reconnects by itself; the poll covers the gap until a packet proves it back.
+  es.onerror = () => { streaming = false; };
+}
+
 export function initUdp() {
   schedule(slow ? 60 : 3);
+  stream();
 }
 
 // ponytail-lite self-check alongside layout.js's: the freshness window is the only arithmetic here.

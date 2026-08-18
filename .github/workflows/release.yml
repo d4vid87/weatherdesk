@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   # The three build jobs run in parallel and would each create their own draft,
@@ -103,9 +104,14 @@ jobs:
         if: matrix.mobile != 'android'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update artifacts. Without these the desktop builds still succeed, but
+          # nothing already installed will accept them as an update.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
+          includeUpdaterJson: true
 
       # tauri-action has no notion of a mobile build — it would run `tauri build --apk`, which is
       # not a thing. So the APK is built and uploaded by hand. The upload goes through the API with
@@ -127,3 +133,46 @@ jobs:
             -H "Content-Type: application/vnd.android.package-archive" \
             "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ needs.create-release.outputs.release_id }}/assets?name=WeatherDesk_${{ github.ref_name }}.apk" \
             --input "$apk"
+
+  # The headless image, for a house whose always-on machine has no desktop. Two native runners
+  # rather than qemu: an emulated arm64 Rust build takes the better part of an hour.
+  docker:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            arch: amd64
+          - platform: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}-${{ matrix.arch }}
+
+  # One tag both architectures answer to, so `docker pull` works on a Pi and a NAS alike.
+  docker-manifest:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          for tag in "${{ github.ref_name }}" latest; do
+            docker buildx imagetools create -t "ghcr.io/${{ github.repository }}:$tag" \
+              "ghcr.io/${{ github.repository }}:${{ github.ref_name }}-amd64" \
+              "ghcr.io/${{ github.repository }}:${{ github.ref_name }}-arm64"
+          done

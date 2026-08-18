@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" alt="WeatherDesk" width="420"></p>
+
 # WeatherDesk
 
 A self-hosted weather dashboard for a WeatherFlow Tempest station, built for a wall tablet on the
@@ -53,22 +55,49 @@ the sky. Nothing on the internet is fresher — that delay is the radar itself, 
   shared publicly, so those are still added by ID (or by pasting their tempestwx.com link).
 - **Data** — ten boards off 7-day device history, including a wind rose, plus multi-model output
   and the local verification log, a garden card (growing degree days, evaporation, watering
-  shortfall), and the almanac: all-time records, this day last year and rain month by month, from
-  the app's own observation log.
+  shortfall), the almanac (all-time records, this day last year, rain month by month with last
+  year dashed over it), and an archive explorer: pick any two dates and any column and get the
+  chart, the range and the total.
+
+Three more Desk cards appear only when they have something to say, and hide themselves again
+afterwards: the **severe outlook** (SPC categorical risk for your exact point, with the day's peak
+CAPE and the cap holding it down), **snowfall** for the week, and the **tropics** when there is a
+named storm in the Atlantic or the eastern Pacific.
+
+Every chart has a crosshair — hover, or touch on a tablet, for the value and the time at the
+nearest real sample. The hero says how today compares with the 1991–2020 normal for the date.
+
+## Quiet hours, speech and the panel catalog
+
+`Settings → Quiet hours` silences the chime and every push channel between two times — Severe and
+Extreme warnings still come through, because that is what the setting is for. On a kiosk, **Read
+severe alerts aloud** speaks them. On the desktop, an alert raised while the window is hidden
+becomes a real OS notification.
+
+`Settings → Panel catalog` moves any Desk panel to the Data or Local Signals tab; it keeps working
+where it lands. `Settings → Palette` adds OLED black, Solarized, high contrast and a flat e-ink
+mode on top of the light and dark themes.
+
+`Settings → LAN dashboard port` moves the server off 8088 (restart to apply); the window title
+always shows the address a tablet should open.
 
 ## Alert rules and push
 
 Settings → **Alert rules** builds thresholds on live readings: a metric (temperature, dew point,
 gust, wind, humidity, rain rate, UV, 3h lightning count, 3h pressure change), above or below, a
-value, and how long it has to hold. A rule fires once and re-arms when the reading falls back
-through 90% of its threshold, so a gust hovering on the line does not notify all afternoon.
+value, and how long it has to hold. **+ AND** adds a second condition and then both have to hold —
+"gust above 25 AND humidity below 40" is a fire day; either half alone is a Tuesday. A rule fires
+once and re-arms when the reading falls back through 90% of its threshold, so a gust hovering on
+the line does not notify all afternoon.
 
 Any alert can leave the machine:
 
 - **ntfy** — put a topic in Settings and install the ntfy app on your phone. The topic is the
   whole of the security on ntfy.sh, so make it long and unguessable, or run your own server and
   point the ntfy server field at it.
-- **Webhook** — a POST of `{title, body, category, t}` to any URL.
+- **Webhook** — a POST of `{title, body, category, t}` to any URL. Discord and Telegram webhook
+  URLs are recognised from the URL itself and sent in the shape those two accept, so pasting one
+  in is the whole setup.
 - **MQTT** — every alert is also published to `weatherdesk/<station>/alert` when a broker is
   configured.
 
@@ -130,6 +159,15 @@ protocol websockets
 set to display. Events land on `weatherdesk/<station id>/event/{lightning,rain,gust}` and are not
 retained. `weatherdesk/<station id>/status` is `online`/`offline`, the second written by the
 broker's last-will when the dashboard goes away.
+
+Alongside the raw readings it publishes what a HA automation would otherwise have to work out:
+`feels_like`, `pressure_trend` as a word, a `storm` binary sensor, and one binary sensor per alert
+rule you wrote in the drawer.
+
+Broker topics can also be read *back*: list them under Settings → **Broker topics to show**
+(`topic | label | unit`, one per line) and their values appear on the Home Assistant card. That is
+for the sensors that never went near Home Assistant — a greenhouse probe publishing straight to
+mosquitto.
 
 Home Assistant discovers all of it by itself: the retained `homeassistant/…/config` topics
 materialize one device with every sensor under it, and they survive a Home Assistant restart with
@@ -273,11 +311,63 @@ devices, Fire OS 6 and newer. The phone build talks to WeatherFlow's websocket o
 listens for the hub's LAN broadcasts nor serves the dashboard to other devices, both of which stay
 desktop jobs. Paste the token once per device.
 
-**The observation log.** The desktop app writes every observation the hub broadcasts to
-`<app data>/log/obs-YYYY-MM.jsonl` — raw SI, about 15 MB a year, never rotated. That log is what
-the almanac and the garden card read, and `Settings → History CSV` hands the whole thing over as a
-spreadsheet. It starts the day you first run the app; nothing backfills it, so the almanac says
-how far back it actually goes rather than pretending.
+**The observation archive.** The desktop app keeps every observation the hub broadcasts in a
+SQLite database at `<app data>/weatherdesk.db`. On first run of v3 it imports the v2 JSONL log and
+then leaves those files alone forever as a backup.
+
+About thirty seconds after start it also **backfills from WeatherFlow**: it walks backwards from
+the oldest observation it holds, four days at a time, one request a second, until the station's own
+history runs out. A station that has been up for years gets years of records on the first evening,
+and the almanac says how much it has and whether it is still fetching. The walk is resumable — kill
+the app halfway and it picks up from where it stopped.
+
+`Settings → History CSV` hands the whole archive over as a spreadsheet, and `Backup archive`
+downloads a consistent snapshot of the database itself. To restore one: quit the app, copy the file
+over `<app data>/weatherdesk.db` (delete the `-wal` and `-shm` files beside it if they exist), and
+start it again.
+
+**CWOP.** Put a callsign in `Settings → CWOP station ID` and the app reports your readings to the
+Citizen Weather Observer Program every ten minutes, where NOAA's MADIS feeds them to the models
+this dashboard reads back out. Callsigns are public by design, so this one is not treated as a
+secret.
+
+**Live updates.** Every screen in the house holds one `/events` stream, so a gust shows up the
+second the hub broadcasts it rather than on the next poll, and a setting changed on one screen
+reaches the others without a reload. A browser that can't reach the stream falls back to polling
+exactly as before.
+
+**Updates.** `Settings → Check for updates` downloads and installs a signed release in place on
+Windows, macOS and Linux packages. Flatpak installs update through Flatpak, and Android stays a
+sideload.
+
+### Docker / no desktop at all
+
+The same binary runs with no window and no Tauri in it:
+
+```sh
+docker run -d --name weatherdesk --restart unless-stopped \
+  --network host -v ./data:/data ghcr.io/d4vid87/weatherdesk:latest
+```
+
+or the `docker-compose.yml` in this repo. Then open `http://<host>:8088`.
+
+**`--network host` is not optional on Linux.** The Tempest hub broadcasts to the subnet, and a
+broadcast does not cross a bridged Docker network no matter how many ports you publish — without
+host networking the container serves the dashboard but never hears the hub.
+
+Everything lands in `/data`: `config.json` and `weatherdesk.db`. The image is built with
+`--no-default-features`, so there is no GTK, no WebKit and no Tauri anywhere in it.
+
+A local build of the same thing: `cargo build --release --no-default-features` in `src-tauri/`,
+then run `weatherdesk --headless`.
+
+### Flatpak and AUR
+
+`flatpak/io.github.davidmay87.weatherdesk.yml` builds the Flathub package (regenerate
+`cargo-sources.json` with flatpak-builder-tools whenever `Cargo.lock` changes), and `PKGBUILD`
+builds the Arch package from a release tarball. A Flatpak install keeps its data under
+`~/.var/app/io.github.davidmay87.weatherdesk/` — copy `weatherdesk.db` across if you are moving
+from a .deb.
 
 Building the desktop app yourself: `cargo tauri build` in `src-tauri/` (Rust + the Tauri
 [prerequisites](https://tauri.app/start/prerequisites/) for your OS). Iterate on the HTML/JS with
@@ -341,7 +431,13 @@ MIT. See [LICENSE](LICENSE).
 
 No service worker and no PWA install: the app is useless offline because every source is a cloud
 API, and the LAN origin is insecure anyway, so the Notification API is unavailable. Alerts render
-as an in-page banner queue with a WebAudio chime instead.
+as an in-page banner queue with a WebAudio chime instead. The desktop build does raise real OS
+notifications, through Tauri rather than the browser API, and only when its window is hidden.
+
+Releasing: the desktop updater needs `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the repo secrets, matching the public key in
+`src-tauri/tauri.conf.json`. Lose that private key and no installed copy will ever accept another
+update.
 
 The layout follows the shape of myweatherdesk.com. No code was taken from it; this is written from
 scratch against the same public APIs.
