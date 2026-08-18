@@ -1,12 +1,15 @@
 // The desktop/Android window, and nothing else. Everything this file needs from the LAN server
 // it gets through `start_services`, so the headless build never compiles any of it.
 
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+// The tray, the server and the paths behind them are desktop-only, and so is everything imported
+// for them — Android builds warn about each one otherwise.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
+    Manager,
 };
 
 /// The current temperature, next to the clock, without a window in the way. Linux app
