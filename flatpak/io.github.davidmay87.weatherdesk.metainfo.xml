@@ -27,6 +27,11 @@
   <url type="bugtracker">https://github.com/d4vid87/weatherdesk/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.0.1" date="2026-08-18">
+      <description>
+        <p>The embedded radar now loads from hookecho.pages.dev.</p>
+      </description>
+    </release>
     <release version="3.0.0" date="2026-08-17">
       <description>
         <p>The data release: a SQLite archive with history backfilled from WeatherFlow, live
