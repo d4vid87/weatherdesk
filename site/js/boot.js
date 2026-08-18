@@ -62,11 +62,25 @@ function pushConfig() {
 }
 
 let pushTimer;
-window.addEventListener('wd:layout', () => { clearTimeout(pushTimer); pushTimer = setTimeout(pushConfig, 2000); });
+// A layout event raised while a pull is applying is the server's own layout coming back, not an
+// edit — scheduling a push for it is how this screen used to answer every broadcast with a write.
+window.addEventListener('wd:layout', () => {
+  if (syncing) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushConfig, 2000);
+});
 
 // Someone changed a setting on another screen. Before this, a tablet kept showing yesterday's
 // units until it was reloaded by hand.
-window.addEventListener('wd:config-rev', () => pullConfig());
+//
+// Not our own write, though: the server broadcasts every revision, including the one this screen
+// just PUT. Pulling that back calls restore(), restore() dispatches wd:layout, and the debounced
+// push sends it again — a loop that bumped the revision once a second and held the webview at a
+// full core. A missing rev (older server) still pulls, as it always did.
+export function shouldPull(evRev) {
+  return typeof evRev !== 'number' || evRev !== rev;
+}
+window.addEventListener('wd:config-rev', (e) => { if (shouldPull(e.detail?.rev)) pullConfig(); });
 
 
 function fillDrawer() {
@@ -769,4 +783,12 @@ if (location.search.includes('selftest')) {
   // (unconfigured profile returns the bare viewer URL with no #goto — nothing to assert on)
   const u2 = radarUrl(6.5);
   console.assert(!u2.includes('#goto=') || u2.endsWith(',bm:esri-streets'), 'first-load default basemap', u2);
+
+  // The config echo, the one bug here that costs a whole CPU core rather than a wrong number.
+  const held = rev;
+  rev = 7;
+  console.assert(!shouldPull(7), 'config: our own revision is not pulled back');
+  console.assert(shouldPull(8), 'config: a newer revision from another screen is pulled');
+  console.assert(shouldPull(undefined), 'config: a server that sends no revision still pulls');
+  rev = held;
 }
