@@ -38,6 +38,21 @@ const DEFAULTS = {
   // 'auto' | 'on' | 'off' — see ecoOn(). Auto is the point of the setting: the tablet on the wall
   // should not need anyone to know it is the slow machine.
   eco: 'auto',
+  // Quiet hours, 'HH:MM' each, both empty = off. Suppresses the chime and every push channel;
+  // a Severe or Extreme alert still comes through, because that is what the setting is for.
+  quietStart: '', quietEnd: '',
+  // Kiosk speech: read severe alerts aloud. Off by default — a dashboard that talks without
+  // being asked is a dashboard someone unplugs.
+  speakAlerts: false,
+  // Palette pack on top of the theme: '', 'oled', 'solarized', 'contrast', 'eink'.
+  palette: '',
+  // The LAN server's port. Empty means 8088. Desktop only, and a restart applies it.
+  httpPort: '',
+  // CWOP callsign to report to (empty = off). Not a secret: callsigns are public and the
+  // network's passcode for stations like ours is the constant -1.
+  cwopId: '',
+  // Broker topics to read back and show on the Home card. [{ topic, label, unit }]
+  mqttSubs: [],
 };
 
 // A fresh install starts with the Desk radar off: it is megabytes of wasm in the same WebKit
@@ -110,6 +125,16 @@ const seen = new Set(notifLog.map((n) => n.id).filter(Boolean));
 
 export const notifHistory = () => notifLog;
 
+// Quiet hours: 'HH:MM' to 'HH:MM', wrapping midnight because that is the only interesting case.
+// Both blank means always awake.
+export function inQuiet(s = _settings, now = new Date()) {
+  const [a, b] = [s.quietStart, s.quietEnd];
+  if (!a || !b) return false;
+  const mins = (t) => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+  const [from, to, at] = [mins(a), mins(b), now.getHours() * 60 + now.getMinutes()];
+  return from <= to ? at >= from && at < to : at >= from || at < to;
+}
+
 export function notify({ id, category = 'info', title, body }) {
   if (id) {
     if (seen.has(id)) return;
@@ -122,7 +147,10 @@ export function notify({ id, category = 'info', title, body }) {
   store('wd.notifLog', notifLog);
   // detail is what home.js republishes to the broker — it needs no second copy of this logic
   window.dispatchEvent(new CustomEvent('wd:notif', { detail: entry }));
-  if (category !== 'info') push(entry);
+  // Asleep: the banner still goes up (it costs nothing and is there in the morning), but
+  // nothing makes a sound or reaches a phone. Severe weather is the exception it exists for.
+  const quiet = inQuiet() && category !== 'severe';
+  if (category !== 'info' && !quiet) push(entry);
   const wrap = document.getElementById('notif-stack');
   const el = document.createElement('div');
   el.className = `notif notif-${category}`;
@@ -131,7 +159,29 @@ export function notify({ id, category = 'info', title, body }) {
   el.querySelector('.notif-body').textContent = body || '';
   el.querySelector('.notif-x').onclick = () => el.remove();
   wrap.prepend(el);
+  if (quiet) return;
   chime();
+  speak(entry);
+  native(entry);
+}
+
+// A wall panel across the room can't be read, and the person it matters to isn't holding it.
+// Severe only, and only when asked: `speakAlerts`.
+function speak({ category, title }) {
+  if (!_settings.speakAlerts || category !== 'severe' || !('speechSynthesis' in window)) return;
+  try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(title)); }
+  catch { /* no voices installed; the banner is still there */ }
+}
+
+// An in-page banner is no use behind another window. Desktop only, and only when this window
+// isn't the one being looked at — a visible dashboard already showed the banner.
+function native({ category, title, body }) {
+  const api = window.__TAURI__?.notification;
+  if (!api || category === 'info' || !document.hidden) return;
+  api.isPermissionGranted()
+    .then((ok) => (ok ? true : api.requestPermission().then((p) => p === 'granted')))
+    .then((ok) => ok && api.sendNotification({ title, body: body || '' }))
+    .catch(() => {});
 }
 
 // Off the machine: a banner is no use to anyone who isn't looking at the dashboard.
@@ -154,10 +204,24 @@ function push({ category, title, body }) {
     fetch(s.webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, body, category, t: Date.now() }),
+      body: JSON.stringify(webhookBody(s.webhookUrl, { category, title, body })),
     }).catch((e) => console.warn('webhook:', e.message));
   }
   // MQTT rides the wd:notif event — home.js already owns the one connection.
+}
+
+// Discord and Telegram are the two webhooks people actually paste in, and neither accepts the
+// generic shape. Recognised from the URL itself — no extra setting, and no second place to
+// store a bot token: whatever the user pasted is the whole credential and it is already
+// redacted from the public config as `webhookUrl`.
+export function webhookBody(url, { category, title, body }) {
+  const text = body ? `${title}\n${body}` : title;
+  if (/discord(app)?\.com\/api\/webhooks\//.test(url)) return { content: text };
+  if (/api\.telegram\.org\/bot/.test(url)) {
+    // The chat id rides in the URL the user pasted: .../sendMessage?chat_id=123
+    return { text };
+  }
+  return { title, body, category, t: Date.now() };
 }
 
 let audioCtx;
@@ -273,6 +337,10 @@ export function applyTheme() {
   const light = s.theme === 'light' || (s.theme === 'auto' && !isNight());
   document.documentElement.dataset.theme = light ? 'light' : 'dark';
   document.documentElement.dataset.density = s.density || 'normal';
+  // Palette packs sit on top of the theme: each is a handful of variable overrides in
+  // index.html, so nothing else on the page has to know they exist.
+  if (s.palette) document.documentElement.dataset.palette = s.palette;
+  else delete document.documentElement.dataset.palette;
   // A scale, not a size: everything on the page is already relative to the root font.
   // `zoom`, not a root font-size: the stylesheet is in px throughout (deliberately — panel sizes
   // are stored in px too), so a root font-size would scale almost nothing on screen. Zoom is
@@ -404,6 +472,26 @@ if (location.search.includes('selftest')) {
   _settings.eco = 'off';
   console.assert(paceFor('desk-forecast', 300) === (night ? 900 : 300), 'pace: eco off');
   _settings = save;
+
+  // quiet hours: the window that wraps midnight is the one worth checking
+  const q = { quietStart: '22:00', quietEnd: '07:00' };
+  console.assert(inQuiet(q, new Date(2020, 0, 1, 23, 0)), 'quiet: 23:00 is inside a wrapped window');
+  console.assert(inQuiet(q, new Date(2020, 0, 1, 3, 0)), 'quiet: 03:00 is inside a wrapped window');
+  console.assert(!inQuiet(q, new Date(2020, 0, 1, 12, 0)), 'quiet: noon is outside');
+  console.assert(!inQuiet(q, new Date(2020, 0, 1, 7, 0)), 'quiet: the end time is already awake');
+  const day = { quietStart: '09:00', quietEnd: '17:00' };
+  console.assert(inQuiet(day, new Date(2020, 0, 1, 12, 0)), 'quiet: a same-day window works too');
+  console.assert(!inQuiet(day, new Date(2020, 0, 1, 20, 0)), 'quiet: outside a same-day window');
+  console.assert(!inQuiet({ quietStart: '', quietEnd: '' }), 'quiet: unset means never quiet');
+
+  // webhook shaping: the two services that reject the generic payload
+  const alert = { category: 'severe', title: 'Tornado Warning', body: 'Take cover' };
+  console.assert(webhookBody('https://discord.com/api/webhooks/1/abc', alert).content.includes('Tornado'),
+    'webhook: discord takes content');
+  console.assert(webhookBody('https://api.telegram.org/bot1:abc/sendMessage?chat_id=2', alert).text.includes('cover'),
+    'webhook: telegram takes text');
+  console.assert(webhookBody('https://example.com/hook', alert).category === 'severe',
+    'webhook: anything else keeps the generic shape');
 }
 
 export function fullscreen() {

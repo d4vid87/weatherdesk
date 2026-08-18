@@ -1,9 +1,12 @@
 // A publish-only MQTT 3.1.1 client over WebSockets.
 //
-// ponytail: hand-rolled, ~150 lines, because that is all this dashboard needs — CONNECT, PUBLISH
-// at QoS 0, PINGREQ. Nothing here subscribes (the read-back path is Home Assistant's REST API), so
-// the parts of the protocol that cost real code — QoS 1/2 flows, inflight windows, retransmit
-// timers — never run. Vendoring mqtt.js would add 200 KB to a directory with no build step.
+// ponytail: hand-rolled, ~200 lines, because that is all this dashboard needs — CONNECT,
+// PUBLISH, SUBSCRIBE, PINGREQ, all at QoS 0. The parts of the protocol that cost real code —
+// QoS 1/2 flows, inflight windows, retransmit timers — never run. Vendoring mqtt.js would add
+// 200 KB to a directory with no build step.
+//
+// QoS 0 for subscriptions too: a missed reading from a doorstep sensor is replaced by the next
+// one a minute later, which is cheaper than a delivery guarantee nobody would notice working.
 //
 // Broker must expose a WebSocket listener with the `mqtt` subprotocol (mosquitto:
 // `listener 9001` + `protocol websockets`).
@@ -51,9 +54,32 @@ export function publishPacket(topic, payload, retain = false) {
   return packet(3, retain ? 1 : 0, [...str(topic), ...enc.encode(payload)]);
 }
 
+// SUBSCRIBE carries a packet id even at QoS 0 — the only place in this client that needs one,
+// and it is never read back for anything but the SUBACK we ignore.
+export function subscribePacket(topics, id = 1) {
+  const body = [id >> 8, id & 0xff];
+  for (const t of topics) body.push(...str(t), 0);
+  return packet(8, 2, body);
+}
+
+// Incoming PUBLISH, QoS 0: length-prefixed topic, then the payload to the end of the packet.
+export function parsePublish(b) {
+  if ((b[0] >> 4) !== 3) return null;
+  let i = 1, mult = 1, len = 0, byte;
+  do {
+    byte = b[i++];
+    len += (byte & 127) * mult;
+    mult *= 128;
+  } while (byte & 0x80);
+  const end = i + len;
+  const tlen = (b[i] << 8) | b[i + 1];
+  const topic = new TextDecoder().decode(b.slice(i + 2, i + 2 + tlen));
+  return { topic, payload: new TextDecoder().decode(b.slice(i + 2 + tlen, end)) };
+}
+
 /// Connect, and keep reconnecting. Returns an object with `publish` and the current state; the
 /// caller re-publishes its retained topics from `onConnect`.
-export function mqtt({ url, user, pass, clientId, will, onConnect, onState }) {
+export function mqtt({ url, user, pass, clientId, will, onConnect, onState, onMessage }) {
   let ws = null, ping = null, backoff = 1000, closed = false;
   const state = (s) => onState?.(s);
 
@@ -71,7 +97,12 @@ export function mqtt({ url, user, pass, clientId, will, onConnect, onState }) {
     ws.onopen = () => ws.send(connectPacket({ clientId, user, pass, will }));
     ws.onmessage = (ev) => {
       const b = new Uint8Array(ev.data);
-      if ((b[0] >> 4) !== 2) return; // only CONNACK matters to a publisher
+      if ((b[0] >> 4) === 3) {
+        const m = parsePublish(b);
+        if (m) onMessage?.(m.topic, m.payload);
+        return;
+      }
+      if ((b[0] >> 4) !== 2) return; // CONNACK; SUBACK and PINGRESP need no handling
       if (b[3] !== 0) { // return code: 4 = bad credentials, 5 = not authorized
         state(`refused (code ${b[3]})`);
         closed = true;
@@ -100,6 +131,9 @@ export function mqtt({ url, user, pass, clientId, will, onConnect, onState }) {
     publish(topic, payload, retain) {
       if (ws?.readyState === 1) ws.send(publishPacket(topic, String(payload), retain));
     },
+    subscribe(topics) {
+      if (ws?.readyState === 1 && topics.length) ws.send(subscribePacket(topics));
+    },
     close() { closed = true; clearInterval(ping); try { ws?.close(); } catch { /* nothing open */ } },
   };
 }
@@ -115,4 +149,9 @@ if (typeof location !== 'undefined' && location.search.includes('selftest')) {
   const p = publishPacket('a/b', 'hi', true);
   console.assert([...p].join(',') === [49, 7, 0, 3, 97, 47, 98, 104, 105].join(','), 'PUBLISH bytes', [...p]);
   console.assert(varint(321).join(',') === '193,2', 'varint');
+  const sub = subscribePacket(['a/b'], 1);
+  console.assert([...sub].join(',') === [130, 8, 0, 1, 0, 3, 97, 47, 98, 0].join(','), 'SUBSCRIBE bytes', [...sub]);
+  // round trip: what we would send as a publish is what we must be able to read back
+  const got = parsePublish(publishPacket('a/b', 'hi'));
+  console.assert(got.topic === 'a/b' && got.payload === 'hi', 'PUBLISH parses back', got);
 }

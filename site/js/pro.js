@@ -5,6 +5,7 @@ import { settings, coords, U, num, timeStr, deg2compass, every, ecoOn } from './
 import { forecast as deskForecast } from './desk.js';
 import * as icon from './icons.js';
 import { initLayout } from './layout.js';
+import { normalToday } from './almanac.js';
 
 const $ = (id) => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -74,6 +75,19 @@ function renderHero(fc) {
   $('hero-moon').innerHTML = `${moonGlyph(m.age)} ${m.name} · ${m.illum}%`;
   $('hero-moonset').textContent = `${m.nextName} ${m.nextDate.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric' })}`;
   $('hero-icon').innerHTML = icon.wxHero(c.icon, 150);
+  renderNormal(d);
+}
+
+// "68°" is a number; "68°, five below normal for the date" is the sentence. Thirty years of
+// reanalysis, fetched once and kept — see api.normals().
+async function renderNormal(d) {
+  const n = await normalToday().catch(() => null);
+  const el = $('hero-normal');
+  if (!n || d.air_temp_high == null) { el.textContent = ''; return; }
+  const diff = d.air_temp_high - n.hi;
+  const word = Math.abs(diff) < 1 ? 'right at normal'
+    : `${num(Math.abs(diff))}° ${diff > 0 ? 'above' : 'below'} normal`;
+  el.textContent = `Normal high ${num(n.hi)}° — today is ${word}`;
 }
 
 function renderStatus() {
@@ -159,6 +173,19 @@ function renderTrends(fc) {
 
 // ---------- 48h combined chart ----------
 
+// The spread of the GFS ensemble, shaded behind the deterministic line. A single line has always
+// looked more certain than any forecast is; this is the honest version of the same picture.
+let band = [];
+async function loadEnsemble() {
+  if (coords().lat == null) return; // no station yet — nothing to ask about
+  try {
+    band = api.ensembleBand(await api.ensemble());
+  } catch {
+    band = [];
+  }
+  if (deskForecast()) render48(deskForecast());
+}
+
 function render48(fc) {
   const hrs = fc.forecast.hourly.slice(0, 48);
   const temps = hrs.map((h) => h.air_temperature);
@@ -166,6 +193,17 @@ function render48(fc) {
   const W = 1000, H = 90;
   const x = (i) => (i / (hrs.length - 1)) * (W - 20) + 10;
   const y = (t) => H - 12 - ((t - lo) / Math.max(hi - lo, 1)) * (H - 30);
+
+  // The band is on its own hourly grid; line it up by timestamp and clamp to the drawn box, so
+  // an outlying member widens the shading rather than rescaling the whole chart.
+  const clamp = (v) => Math.max(0, Math.min(H, y(v)));
+  const at = (t) => band.find((b) => Math.abs(b.x / 1000 - t) < 1800);
+  const spread = hrs.map((h, i) => ({ i, b: at(h.time) })).filter((p) => p.b && p.b.lo != null);
+  const bandPath = spread.length > 2
+    ? `<path d="${spread.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${clamp(p.b.hi).toFixed(1)}`).join('')}`
+      + `${spread.slice().reverse().map((p) => `L${x(p.i).toFixed(1)},${clamp(p.b.lo).toFixed(1)}`).join('')}Z"`
+      + ' fill="#ff9d4f" opacity="0.18"/>'
+    : '';
 
   const path = hrs.map((h, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(h.air_temperature).toFixed(1)}`).join('');
   // a dot and a reading every 6th hour, so the line has anchors instead of floating
@@ -175,6 +213,7 @@ function render48(fc) {
       + `<text x="${x(i).toFixed(1)}" y="${(y(h.air_temperature) + 16).toFixed(1)}" class="c-lbl">${num(h.air_temperature)}°</text>`
     : '')).join('');
   $('c48-temp').innerHTML = `<svg viewBox="0 0 ${W} ${H}">
+    ${bandPath}
     <path d="${path}" fill="none" stroke="#ff9d4f" stroke-width="2.5" vector-effect="non-scaling-stroke"/>
     ${marks}</svg>`;
 
@@ -244,7 +283,10 @@ function renderDays(fc) {
 
 // A gauge is its face plus the readout layered over it; the face decides what the value looks
 // like (compass needle, barometer dial, filling droplet) rather than every quantity being a ring.
-const gauge = (face, inner) => `<div class="gwrap">${face}<div class="ginner">${inner}</div></div>`;
+// The dial is decoration; the number inside it is the reading. Marked up that way, a screen
+// reader reads "Wind 12 mph" instead of announcing an unlabelled graphic and then the text.
+const gauge = (face, inner) => `<div class="gwrap">`
+  + `<span aria-hidden="true">${face}</span><div class="ginner">${inner}</div></div>`;
 
 // Sea-level pressure from the station's own obs (every `refreshSec`, 60s by default) rather than
 // the forecast payload, which is rounded to two decimals and only refreshes every five minutes —
@@ -416,6 +458,7 @@ export function initPro() {
   every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
   every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
   every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
+  every('pro-ensemble', 1800, loadEnsemble);
   // A second hand is a repaint a second, forever — the single most expensive idle thing on the
   // page. In eco the seconds go and so does 29 of every 30 repaints.
   const eco = ecoOn();

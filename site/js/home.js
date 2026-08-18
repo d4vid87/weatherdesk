@@ -8,7 +8,7 @@
 // HomeKit, Alexa and Google are reached through Home Assistant's own bridges — see README. There
 // is no native code here for them, and there shouldn't be.
 
-import { settings, every, stamp } from './app.js';
+import { settings, every, stamp, stormMode } from './app.js';
 import { OBS } from './api.js';
 import { mqtt } from './mqtt.js';
 
@@ -37,6 +37,14 @@ const FIELDS = {
   strikes: [OBS.strikes, null, 'strikes', 'measurement'],
 };
 
+// Derived values Home Assistant can't work out for itself from the raw topics: what the air
+// actually feels like, which way the barometer is going, and whether the dashboard has decided
+// there is a storm on. Published on the same cadence as everything else.
+const DERIVED = {
+  feels_like: ['temperature', '°C', 'measurement'],
+  pressure_trend: [null, null, null],
+};
+
 // Retained config topics: Home Assistant materializes the device from these the moment it (re)starts,
 // with no help from this page. One shared `device` block keeps them under a single device.
 function announce() {
@@ -60,6 +68,35 @@ function announce() {
     if (dc) cfg.device_class = dc;
     client.publish(`homeassistant/sensor/wd_${s.stationId}_${field}/config`, JSON.stringify(cfg), true);
   }
+  for (const [field, [dc, unit, sc]] of Object.entries(DERIVED)) {
+    const cfg = {
+      name: field.replace(/_/g, ' '),
+      unique_id: `wd_${s.stationId}_${field}`,
+      state_topic: `${base()}/${field}`,
+      availability_topic: availability(),
+      device,
+    };
+    if (unit) cfg.unit_of_measurement = unit;
+    if (sc) cfg.state_class = sc;
+    if (dc) cfg.device_class = dc;
+    client.publish(`homeassistant/sensor/wd_${s.stationId}_${field}/config`, JSON.stringify(cfg), true);
+  }
+  // Binary sensors: the storm flag, and one per user rule so an automation can hang off a
+  // threshold the user already wrote in the drawer instead of a second copy of it in YAML.
+  const binaries = [['storm', 'safety'], ...(s.rules || []).map((r, i) => [`rule_${i + 1}`, null])];
+  for (const [field, dc] of binaries) {
+    const cfg = {
+      name: field.replace(/_/g, ' '),
+      unique_id: `wd_${s.stationId}_${field}`,
+      state_topic: `${base()}/${field}`,
+      payload_on: 'ON', payload_off: 'OFF',
+      availability_topic: availability(),
+      device,
+    };
+    if (dc) cfg.device_class = dc;
+    client.publish(`homeassistant/binary_sensor/wd_${s.stationId}_${field}/config`, JSON.stringify(cfg), true);
+    client.publish(`${base()}/${field}`, 'OFF', true);
+  }
   for (const [name, types] of [['lightning', ['strike']], ['rain', ['start']], ['gust', ['gust']]]) {
     client.publish(`homeassistant/event/wd_${s.stationId}_${name}/config`, JSON.stringify({
       name, unique_id: `wd_${s.stationId}_${name}_evt`,
@@ -78,6 +115,14 @@ function publishObs(obs) {
     const v = obs[i];
     if (v != null) client.publish(`${base()}/${field}`, v, true);
   }
+  // Feels-like: the same apparent temperature the hero shows, in SI so the history stays one
+  // unit system forever. Heat index above 27 °C, wind chill below 10 °C, the reading between.
+  const t = obs[OBS.temp], rh = obs[OBS.rh], w = obs[OBS.windAvg];
+  if (t != null) client.publish(`${base()}/feels_like`, +feelsLike(t, rh, w).toFixed(1), true);
+  const p = obs[OBS.press];
+  if (p != null) client.publish(`${base()}/pressure_trend`, pressTrend(p, obs[OBS.time]), true);
+  client.publish(`${base()}/storm`, stormMode() ? 'ON' : 'OFF', true);
+
   // Rain start: the edge, not the state — an automation wants to be told once.
   const precip = obs[OBS.precipType] || 0;
   if (precip && !lastPrecip) event('rain', { event_type: 'start', precip_type: precip });
@@ -97,6 +142,38 @@ function publishObs(obs) {
   }
 }
 
+// Apparent temperature, SI in and SI out. Two standard formulas and the plain reading between
+// them, which is what every weather service does — anything cleverer here would disagree with
+// the number on the hero for no reason.
+export function feelsLike(c, rh, ms) {
+  if (c >= 27 && rh != null) {
+    const f = c * 9 / 5 + 32;
+    const hi = -42.379 + 2.04901523 * f + 10.14333127 * rh - 0.22475541 * f * rh
+      - 6.83783e-3 * f * f - 5.481717e-2 * rh * rh + 1.22874e-3 * f * f * rh
+      + 8.5282e-4 * f * rh * rh - 1.99e-6 * f * f * rh * rh;
+    return (hi - 32) * 5 / 9;
+  }
+  if (c <= 10 && ms != null && ms > 1.34) {
+    const kph = ms * 3.6;
+    return 13.12 + 0.6215 * c - 11.37 * kph ** 0.16 + 0.3965 * c * kph ** 0.16;
+  }
+  return c;
+}
+
+// Three hours of pressure in one word — the reading Home Assistant automations actually branch
+// on, and the same bands the Desk's trend strip uses.
+const pressRing = [];
+export function pressTrend(mb, tSec = Math.floor(Date.now() / 1000)) {
+  pressRing.push({ t: tSec, mb });
+  while (pressRing.length && pressRing[0].t < tSec - 3 * 3600) pressRing.shift();
+  const d = mb - pressRing[0].mb;
+  if (d <= -2) return 'falling rapidly';
+  if (d <= -0.5) return 'falling';
+  if (d >= 2) return 'rising rapidly';
+  if (d >= 0.5) return 'rising';
+  return 'steady';
+}
+
 // Events are never retained: replaying an hour-old lightning strike into an automation on every
 // Home Assistant restart would be worse than losing it.
 function event(name, payload) {
@@ -114,7 +191,13 @@ export function initHome() {
       // Last will: the broker marks us offline when this tab goes away, so Home Assistant shows
       // the sensors as unavailable rather than serving a frozen reading forever.
       will: { topic: availability(), payload: 'offline', retain: true },
-      onConnect: announce,
+      onConnect: () => {
+        announce();
+        // Read-back from the broker itself, for the sensors that never went near Home
+        // Assistant — a greenhouse probe publishing straight to mosquitto is the common case.
+        client.subscribe((settings().mqttSubs || []).map((x) => x.topic));
+      },
+      onMessage: (topic, payload) => { subValues.set(topic, payload); renderSubs(); },
       onState: (st) => { const el = $('mqtt-state'); if (el) { el.textContent = st; el.className = st === 'connected' ? 'ok' : 'muted'; } },
     });
   }
@@ -130,10 +213,42 @@ window.addEventListener('wd:notif', (e) => {
   if (!n || n.category === 'info') return;
   client?.publish(`${base()}/alert`, JSON.stringify({ title: n.title, body: n.body, category: n.category, t: n.t }));
 });
+// A rule that fired is a binary sensor going ON, and back OFF five minutes later — the rules
+// engine reports edges, not levels, and an automation needs something to trigger on.
+window.addEventListener('wd:rule', (e) => {
+  if (!client) return;
+  const field = `rule_${(e.detail?.index ?? 0) + 1}`;
+  client.publish(`${base()}/${field}`, 'ON', true);
+  setTimeout(() => client?.publish(`${base()}/${field}`, 'OFF', true), 5 * 60000);
+});
+
 window.addEventListener('wd:ws-strike', (e) => {
   // [epoch, distance km, energy]
   event('lightning', { event_type: 'strike', distance_km: e.detail[1] });
 });
+
+// --- broker read-back ---
+
+const subValues = new Map();
+
+function renderSubs() {
+  const el = $('mqtt-subs');
+  if (!el) return;
+  const subs = settings().mqttSubs || [];
+  el.innerHTML = subs
+    .filter((x) => subValues.has(x.topic))
+    .map((x) => `<div><span></span><span class="ok"></span></div>`)
+    .join('');
+  let i = 0;
+  for (const x of subs) {
+    if (!subValues.has(x.topic)) continue;
+    const row = el.children[i++];
+    row.children[0].textContent = x.label || x.topic;
+    row.children[1].textContent = `${subValues.get(x.topic)}${x.unit ? ` ${x.unit}` : ''}`;
+  }
+  const panel = $('ha-panel');
+  if (panel && el.children.length) panel.style.display = '';
+}
 
 // --- Home Assistant read-back ---
 

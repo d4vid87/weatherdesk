@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=WeatherDesk
+Comment=Self-hosted dashboard for a WeatherFlow Tempest station
+Exec=weatherdesk
+Icon=io.github.davidmay87.weatherdesk
+Terminal=false
+Categories=Utility;Science;

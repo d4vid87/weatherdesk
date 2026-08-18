@@ -145,7 +145,10 @@ export function nwsPoint(lat = coords().lat, lon = coords().lon) {
 
 // --- Open-Meteo ---
 
-export const MODELS = 'gfs_seamless,ecmwf_ifs025,icon_seamless,gem_seamless';
+// HRRR is the short-range storm-scale model — three kilometres and hourly runs, which is the
+// one that knows about the thunderstorm this afternoon. It only reaches 48 hours, so it drops
+// out of the far end of the agreement panel on its own.
+export const MODELS = 'gfs_seamless,ecmwf_ifs025,icon_seamless,gem_seamless,gfs_hrrr';
 
 export function multiModel(lat = coords().lat, lon = coords().lon) {
   const imperial = settings().units !== 'metric';
@@ -186,6 +189,136 @@ export function geocode(q) {
   return getJSON(`https://photon.komoot.io/api/?${qs({ q, limit: 5 })}`);
 }
 
+// 31 members of the GFS ensemble, which between them are an honest answer to "how sure is
+// this?" — a single deterministic line never was.
+export function ensemble(lat = coords().lat, lon = coords().lon) {
+  const imperial = settings().units !== 'metric';
+  return getJSON(`https://ensemble-api.open-meteo.com/v1/ensemble?${qs({
+    latitude: lat, longitude: lon, models: 'gfs025',
+    hourly: 'temperature_2m', forecast_days: 3, timezone: 'auto',
+    ...(imperial ? { temperature_unit: 'fahrenheit' } : {}),
+  })}`);
+}
+
+// Percentile across the ensemble members at each hour. 10-90 rather than the full spread: one
+// runaway member should not make the band look like the weather could do anything at all.
+export function ensembleBand(j, lo = 0.1, hi = 0.9) {
+  const h = j?.hourly || {};
+  const members = Object.keys(h).filter((k) => k.startsWith('temperature_2m_member'));
+  if (!members.length) return [];
+  return (h.time || []).map((t, i) => {
+    const vals = members.map((m) => h[m][i]).filter((v) => v != null).sort((a, b) => a - b);
+    if (!vals.length) return { x: Date.parse(t), lo: null, hi: null };
+    const at = (p) => vals[Math.min(vals.length - 1, Math.floor(p * vals.length))];
+    return { x: Date.parse(t), lo: at(lo), hi: at(hi) };
+  });
+}
+
+// Instability and the cap holding it down. The numbers a severe-weather day is actually read
+// from, next to the outlook that summarises them.
+export function severeParams(lat = coords().lat, lon = coords().lon) {
+  return getJSON(`https://api.open-meteo.com/v1/forecast?${qs({
+    latitude: lat, longitude: lon,
+    hourly: 'cape,convective_inhibition,lifted_index',
+    forecast_days: 2, timezone: 'auto',
+  })}`);
+}
+
+// Snowfall for the week. Reported in cm by open-meteo whatever else is asked for, so the panel
+// converts; asking for `snowfall_sum` in inches would silently be liquid-equivalent elsewhere.
+export function snowfall(lat = coords().lat, lon = coords().lon) {
+  return getJSON(`https://api.open-meteo.com/v1/forecast?${qs({
+    latitude: lat, longitude: lon, daily: 'snowfall_sum', forecast_days: 7, timezone: 'auto',
+  })}`);
+}
+
+// --- SPC convective outlook ---
+
+// Categorical risk polygons for the day. SPC serves these with CORS open, so the page can read
+// them directly.
+export function spcOutlook(day = 1) {
+  return getJSON(`https://www.spc.noaa.gov/products/outlook/day${day}otlk_cat.lyr.geojson`);
+}
+
+// Ray casting, the textbook version: count the edges a ray east of the point crosses. Odd means
+// inside. Holes in a polygon fall out of it for free — a hole is just more edges to cross.
+export function pointInRing(lon, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/// The strongest category whose polygon contains the point, or null. SPC ships the outlook
+// smallest-risk-first, so the last match is the highest risk.
+export function riskAt(geojson, lat, lon) {
+  let found = null;
+  for (const f of geojson?.features || []) {
+    const g = f.geometry;
+    if (!g) continue;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+    for (const poly of polys) {
+      if (poly[0] && pointInRing(lon, lat, poly[0])) {
+        found = { label: f.properties?.LABEL2 || f.properties?.LABEL || '', code: f.properties?.LABEL || '' };
+      }
+    }
+  }
+  return found;
+}
+
+// --- Tropical ---
+
+// NHC serves CurrentStorms.json without CORS headers, so the page cannot read it directly. The
+// desktop app's own server fetches it instead; a static self-host has no such route and the card
+// links out rather than pretending.
+export function tropical() {
+  const srv = window.__WD_SRV ?? (window.location.protocol.startsWith('http') ? '' : null);
+  if (srv == null) return Promise.reject(new Error('no server to proxy NHC'));
+  return getJSON(`${srv}/proxy/nhc`);
+}
+
+// --- Climate normals (ERA5 reanalysis via open-meteo, keyless) ---
+
+// "68°" means nothing on its own; "68°, five above normal for the date" is the sentence people
+// actually want. Thirty years of daily reanalysis is one request and about 200 KB, so it is
+// fetched once and kept — normals do not change, and the alternative was 365 requests.
+const NORMALS_KEY = 'wd.normals';
+
+export async function normals(lat = coords().lat, lon = coords().lon) {
+  const place = `${(+lat).toFixed(2)},${(+lon).toFixed(2)},${settings().units}`;
+  try {
+    const cached = JSON.parse(localStorage.getItem(NORMALS_KEY) || 'null');
+    if (cached?.place === place) return cached.days;
+  } catch { /* cache is a nicety */ }
+  const imperial = settings().units !== 'metric';
+  const j = await getJSON(`https://archive-api.open-meteo.com/v1/archive?${qs({
+    latitude: lat, longitude: lon, start_date: '1991-01-01', end_date: '2020-12-31',
+    daily: 'temperature_2m_max,temperature_2m_min', timezone: 'auto',
+    ...(imperial ? { temperature_unit: 'fahrenheit' } : {}),
+  })}`);
+  const acc = {};
+  const d = j.daily || {};
+  (d.time || []).forEach((t, i) => {
+    const key = t.slice(5); // MM-DD
+    const a = (acc[key] ||= { hi: 0, lo: 0, n: 0 });
+    if (d.temperature_2m_max[i] == null || d.temperature_2m_min[i] == null) return;
+    a.hi += d.temperature_2m_max[i];
+    a.lo += d.temperature_2m_min[i];
+    a.n++;
+  });
+  const days = {};
+  for (const [k, a] of Object.entries(acc)) {
+    if (a.n) days[k] = { hi: a.hi / a.n, lo: a.lo / a.n };
+  }
+  try { localStorage.setItem(NORMALS_KEY, JSON.stringify({ place, days })); } catch { /* full; recompute next time */ }
+  return days;
+}
+
+export const normalFor = (days, date = new Date()) =>
+  days?.[`${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`] || null;
+
 // --- Storm reports ---
 
 export function stormReports(hours = 24) {
@@ -198,6 +331,18 @@ if (location.search.includes('selftest')) {
   console.assert(errHint(401, `${SWD}/stations/1`).includes('token'), 'api: 401 names the token');
   console.assert(errHint(404, `${SWD}/stations/1`).includes('station'), 'api: 404 names the ID');
   console.assert(errHint(404, 'https://api.open-meteo.com/v1/forecast') === '', 'api: no station hint off Tempest');
+
+  // point-in-polygon: a unit square, and a point outside it that is due east of an edge
+  const square = [[-1, -1], [1, -1], [1, 1], [-1, 1], [-1, -1]];
+  console.assert(pointInRing(0, 0, square), 'api: centre is inside the polygon');
+  console.assert(!pointInRing(2, 0, square), 'api: a point east of the polygon is outside');
+  console.assert(!pointInRing(0, 2, square), 'api: a point north of the polygon is outside');
+  console.assert(!pointInRing(-2, 0, square), 'api: a point west of the polygon is outside');
+
+  const band = ensembleBand({ hourly: { time: ['1970-01-01T00:00'], temperature_2m_member01: [1], temperature_2m_member02: [9] } });
+  console.assert(band[0].lo === 1 && band[0].hi === 9, 'api: ensemble band spans the members');
+
+  console.assert(normalFor({ '03-04': { hi: 60, lo: 40 } }, new Date(2020, 2, 4)).hi === 60, 'api: normals key is month-day');
 }
 
 // --- Diagnostics: ping each source, return [{name, ok, detail}] ---
