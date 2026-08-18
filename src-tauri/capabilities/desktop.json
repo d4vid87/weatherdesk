@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "The in-app update check. Desktop only — the updater plugin is not in the Android build, and naming its permission there fails the build.",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["main"],
+  "permissions": [
+    "updater:default"
+  ]
+}
