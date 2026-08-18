@@ -8,7 +8,7 @@
 // HomeKit, Alexa and Google are reached through Home Assistant's own bridges — see README. There
 // is no native code here for them, and there shouldn't be.
 
-import { settings, every, stamp, stormMode } from './app.js';
+import { settings, every, stamp, stormMode, expires } from './app.js';
 import { OBS } from './api.js';
 import { mqtt } from './mqtt.js';
 
@@ -266,7 +266,7 @@ function initHaPanel() {
     const rows = await Promise.all(ids.map(async (id) => {
       try {
         const r = await fetch(`${url}/api/states/${encodeURIComponent(id)}`, {
-          signal: AbortSignal.timeout(15000),
+          signal: expires(15000),
           headers: { Authorization: `Bearer ${s.haToken}` },
         });
         if (!r.ok) throw new Error(`${r.status}`);

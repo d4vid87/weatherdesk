@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk } from './app.js';
+import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -33,7 +33,7 @@ let rev = null;
 async function pullConfig() {
   syncing = true;
   try {
-    const r = await fetch(`${SRV}/${PUBLIC ? 'config-public' : 'config'}`, { signal: AbortSignal.timeout(2000) });
+    const r = await fetch(`${SRV}/${PUBLIC ? 'config-public' : 'config'}`, { signal: expires(2000) });
     if (!r.ok) return;
     const j = await r.json();
     if (typeof j._rev === 'number') rev = j._rev;
@@ -50,8 +50,16 @@ async function pullConfig() {
 // saw, and the server merges it and hands the result back. Whole-blob writes still work (that is
 // what a v2 client does), but tagging keeps a key only another screen knows about from being
 // dropped by this one.
+
+// A screen that has never heard back from the server has nothing to tell it. Before this, a
+// tablet whose pull failed kept its blank defaults and then pushed them — and the host's token
+// and station were gone, replaced by the empty strings of a browser that had just been opened.
+export function mayPush(pulled = rev !== null) {
+  return pulled || configured();
+}
+
 function pushConfig() {
-  if (syncing || PUBLIC) return;
+  if (syncing || PUBLIC || !mayPush()) return;
   fetch(`${SRV}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -504,7 +512,7 @@ $('import-file').onchange = async (e) => {
 // button would be a second code path for something done once in a lifetime.
 $('btn-backup').onclick = async () => {
   try {
-    const r = await fetch(`${SRV}/backup.db`, { signal: AbortSignal.timeout(120000) });
+    const r = await fetch(`${SRV}/backup.db`, { signal: expires(120000) });
     if (!r.ok) throw new Error(`${r.status}`);
     download('weatherdesk.db', await r.blob());
   } catch {
@@ -536,7 +544,7 @@ $('btn-update').onclick = async () => {
 
 $('btn-csv').onclick = async () => {
   try {
-    const r = await fetch(`${SRV}/history.csv`, { signal: AbortSignal.timeout(60000) });
+    const r = await fetch(`${SRV}/history.csv`, { signal: expires(60000) });
     if (!r.ok) throw new Error(`${r.status}`);
     download('weatherdesk-history.csv', await r.blob());
   } catch {
@@ -783,6 +791,16 @@ if (location.search.includes('selftest')) {
   // (unconfigured profile returns the bare viewer URL with no #goto — nothing to assert on)
   const u2 = radarUrl(6.5);
   console.assert(!u2.includes('#goto=') || u2.endsWith(',bm:esri-streets'), 'first-load default basemap', u2);
+
+  // The push guard. A blank screen that has heard nothing from the host must stay quiet, or it
+  // overwrites what the host knew with its own empty defaults.
+  console.assert(mayPush(true), 'config: a screen that has pulled may push');
+  console.assert(mayPush(false) === configured(), 'config: without a pull, only a configured screen pushes');
+
+  // The fetch deadline every screen depends on, on the browsers that have no AbortSignal.timeout.
+  const sig = expires(50);
+  console.assert(sig.aborted === false, 'expires: not aborted yet');
+  console.assert(typeof sig.addEventListener === 'function', 'expires: returns a real signal');
 
   // The config echo, the one bug here that costs a whole CPU core rather than a wrong number.
   const held = rev;
