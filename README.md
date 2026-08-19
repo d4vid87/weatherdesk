@@ -15,6 +15,11 @@ embedded here and centered on the station.
 the Desk filling in with live temperature, seven day cards and dial gauges, an NWS warning polygon
 with its full text, the national radar mosaic, then Hook Echo-WX zoomed on a storm cell](docs/hero-3.0.5.gif)
 
+![The full Desk: sky hero at 106° Clear, station-vs-model and temperature and pressure trend panels,
+a 48h forecast chart with rain dots and wind barbs, six day cards, dial gauges for wind, rain,
+humidity, pressure, dew point, UV, lightning and wet bulb, then the 10-day, alert center, 24h
+weather story and model agreement across GFS, ECMWF, ICON and GEM](docs/weatherdeskgauges.png)
+
 ![The Desk on a wide screen: sky hero reading 106° Clear against a 93° normal, a row of Reality
 signals comparing the station with the models, and Hook Echo-WX filling the page with the national
 MRMS mosaic — every radar product listed down the left, 67 active alerts, LIVE playback along the
