@@ -2,16 +2,18 @@
 
 # WeatherDesk
 
-A self-hosted weather dashboard for a WeatherFlow Tempest station, built for a wall tablet on the
-LAN. Vanilla JS, native ES modules, no build step, no framework, no chart library, no backend —
+A self-hosted weather dashboard for your own weather station, built for a wall tablet on the LAN.
+WeatherFlow Tempest, Ecowitt, Ambient Weather, Davis, AcuRite, La Crosse and any Weather
+Underground-protocol console all work; with no station at all it runs on a forecast for a place you
+name. Vanilla JS, native ES modules, no build step, no framework, no chart library, no backend —
 every call goes browser-direct to a free public API.
 
 Radar comes from [Hook Echo-WX](https://github.com/d4vid87/hookecho) — my own NEXRAD viewer,
 embedded here and centered on the station.
 
-![A walkthrough: the Desk with live station temperature, NWS alert toasts, dial gauges and seven day
-cards, then the Forecast Lab's full-screen Hook Echo-WX radar on a live storm, then back down the
-Desk past the 48h chart, alert center and model agreement panels](docs/hero.gif)
+![A ten second walkthrough: pasting a Tempest token into the first-run wizard and picking a station,
+the Desk filling in with live temperature, seven day cards and dial gauges, an NWS warning polygon
+with its full text, the national radar mosaic, then Hook Echo-WX zoomed on a storm cell](docs/hero.gif)
 
 ![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
 gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
