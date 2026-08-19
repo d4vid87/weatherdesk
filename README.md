@@ -20,10 +20,6 @@ signals comparing the station with the models, and Hook Echo-WX filling the page
 MRMS mosaic — every radar product listed down the left, 67 active alerts, LIVE playback along the
 bottom](docs/screenshot-national.png)
 
-![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
-gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
-chart](docs/screenshot.png)
-
 ## Sections
 
 - **Desk** — every panel drags by its grip and resizes from its corner, with the arrangement kept
