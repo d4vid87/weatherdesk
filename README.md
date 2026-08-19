@@ -15,6 +15,11 @@ embedded here and centered on the station.
 the Desk filling in with live temperature, seven day cards and dial gauges, an NWS warning polygon
 with its full text, the national radar mosaic, then Hook Echo-WX zoomed on a storm cell](docs/hero-3.0.5.gif)
 
+![The Desk on a wide screen: sky hero reading 106° Clear against a 93° normal, a row of Reality
+signals comparing the station with the models, and Hook Echo-WX filling the page with the national
+MRMS mosaic — every radar product listed down the left, 67 active alerts, LIVE playback along the
+bottom](docs/screenshot-national.png)
+
 ![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
 gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
 chart](docs/screenshot.png)
