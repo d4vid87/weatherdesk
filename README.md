@@ -277,7 +277,7 @@ tab don't share settings.
 ## Download & run
 
 Grab the installer for your OS from [Releases](https://github.com/d4vid87/weatherdesk/releases) and
-double-click it. The app opens in its own window *and* serves the same dashboard to the rest of your
+double-click it. What changed in each version is in [CHANGELOG.md](CHANGELOG.md). The app opens in its own window *and* serves the same dashboard to the rest of your
 network on port 8088 — the wall tablet just opens the URL shown in the window title. Nothing else to
 install; leave the app running.
 
