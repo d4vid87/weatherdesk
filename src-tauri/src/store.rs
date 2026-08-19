@@ -161,6 +161,30 @@ pub fn daily_json(conn: &Connection, tz_off_min: i64) -> String {
 
 /// Cheap cache key for the aggregate above: the table is append-only in practice, so a row
 /// count and the newest timestamp change whenever the answer would.
+/// Recent rows, whole tuples, newest last — the shape `api.js` already reads for a Tempest's
+/// cloud history, so the page's trend code needs no second parser.
+pub fn tuples_json(conn: &Connection, hours: i64) -> String {
+    let cols = FIELDS.join(", ");
+    let mut stmt = match conn.prepare(&format!(
+        "SELECT ts, {cols} FROM obs WHERE ts >= strftime('%s','now') - ?1 ORDER BY ts"
+    )) {
+        Ok(s) => s,
+        Err(_) => return "{\"obs\":[]}".into(),
+    };
+    let rows = stmt.query_map([hours * 3600], |r| {
+        let mut out = vec![r.get::<_, i64>(0)?.to_string()];
+        for i in 1..=FIELDS.len() {
+            out.push(r.get::<_, Option<f64>>(i)?.map(|v| v.to_string()).unwrap_or_else(|| "null".into()));
+        }
+        Ok(format!("[{}]", out.join(",")))
+    });
+    let body: Vec<String> = match rows {
+        Ok(it) => it.flatten().collect(),
+        Err(_) => return "{\"obs\":[]}".into(),
+    };
+    format!("{{\"obs\":[{}]}}", body.join(","))
+}
+
 pub fn stamp(conn: &Connection) -> (i64, i64) {
     conn.query_row("SELECT COUNT(*), COALESCE(MAX(ts), 0) FROM obs", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap_or((0, 0))

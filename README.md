@@ -141,6 +141,64 @@ tablet case is the one that matters, and HTML5 drag-and-drop never fires for tou
 | Multi-model agreement, 15-minute nowcast, AQI | `api.open-meteo.com` |
 | Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.pages.dev` |
 | Place search | `photon.komoot.io` |
+| Other brands of station (see below) | your own LAN, `rt.ambientweather.net` |
+
+## Other weather stations
+
+WeatherDesk was written around a Tempest, but the Tempest tuple is only the internal format — the
+desktop app can take a report from most other consumer stations, convert it once on the way in and
+drive the whole dashboard from it. Everything downstream (archive, charts, CSV export, MQTT, alert
+rules, CWOP) works the same, and the forecast comes from open-meteo instead of WeatherFlow.
+
+Pick your brand under Settings → **Another brand of station**, and set the station's latitude and
+longitude (the first-run wizard's "Not a Tempest?" section does both at once).
+
+**Ecowitt — Wittboy, GW1100 / GW1200 / GW2000 / GW3000.** WSView Plus → your gateway → *Customized*
+upload. Protocol **Ecowitt**, server the app's IP, path `/ingest`, port `8088`, interval 16 s or
+slower. Nothing else to fill in here.
+
+**Ambient Weather — WS-2902 / WS-2000 / WS-5000 / WS-1550-IP.** Console firmware 4.2.8 or newer,
+then the awnet app → *Custom server*, same address and path. Ambient's consoles speak their own
+query-string format; the server recognises it.
+
+**Weather Underground protocol.** Many other consoles can only be told a WU server. Point them at
+the app's IP and port and leave the path alone — `/weatherstation/updateweatherstation.php` is
+answered too, with the `success` body those clients look for.
+
+**Davis — Vantage Pro2, Vantage Pro2 Plus, Vantage Vue.** Needs a WeatherLink Live (or a Console
+6313) on the network. Put its IP in *WeatherLink Live address*; the app polls its local API every
+ten seconds. No cloud, no key.
+
+**KestrelMet 6000, or any Ambient console you would rather leave on Ambient's servers.** Both keys
+from ambientweather.net → *My devices* → API keys, into *AWN API key* and *AWN application key*.
+Polled once a minute.
+
+**AcuRite Iris (5-in-1).** AcuRite publish no API, local or otherwise. What works is listening to
+the sensor directly with an RTL-SDR dongle and piping the result in:
+
+```sh
+rtl_433 -C si -F json | while read -r line; do
+  curl -s -XPOST -H 'Content-Type: application/json' --data "$line" http://<host>:8088/ingest
+done
+```
+
+Anything `rtl_433` decodes lands the same way, so this is also the escape hatch for a station no
+other section covers.
+
+**La Crosse Technology (C85845 and friends).** Account email and password. This one is unofficial —
+it reads the API their own app uses, and it can stop working without notice. Those readings are
+tagged separately in the archive so they can be deleted on their own if it ever goes wrong.
+
+Notes that apply to all of them:
+
+- **One station per install.** The archive keys on the timestamp with no room for a second
+  station; two consoles pointed at one app would interleave.
+- **Rain and lightning** arrive as running daily totals and are stored as per-interval amounts.
+  A restart forfeits one interval — a minute of rain, once.
+- **Ingest key.** Leave it blank on a network you trust (the same trust model as `/config`, below).
+  Set it and the console has to report to `/ingest/<key>` instead.
+- **Battery and sensor health** stay blank: every other brand reports a flag rather than a voltage,
+  and the health card's thresholds are a Tempest's.
 
 ## Smart home
 
