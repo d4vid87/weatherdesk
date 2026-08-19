@@ -145,8 +145,11 @@ export function renderTrack() {
           + ch.items.map((i) => `<div><b>${i.day}</b> ${i.text}</div>`).join('')
         : `<div class="muted">Steady — no notable change vs ${ch.age}h ago.</div>`);
 
+  // The diff reruns on every forecast fetch and the numbers wander by a degree between them, so
+  // an id carrying the text announced the same change again and again — ten banners for one day.
+  // One notification per day per comparison snapshot; the panel above still shows the live text.
   ch.items.forEach((i) => notify({
-    id: `chg-${i.day}-${i.text}`, category: 'changes',
+    id: `chg-${i.key}-${ch.base}`, category: 'changes',
     title: `Forecast change · ${i.day}`, body: i.text,
   }));
 

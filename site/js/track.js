@@ -50,9 +50,11 @@ export function changes(fc) {
     if (Math.abs(d.lo - o.lo) >= 3) bits.push(`lo ${num(o.lo)}→${num(d.lo)}${U.temp()}`);
     if (Math.abs((d.pop || 0) - (o.pop || 0)) >= 20) bits.push(`rain ${num(o.pop)}%→${num(d.pop)}%`);
     if (d.cond !== o.cond) bits.push(`${o.cond}→${d.cond}`);
-    if (bits.length) items.push({ day: d.label, text: bits.join(', ') });
+    // key is the calendar day, not the weekday label: 'Wed' comes round again every week, and a
+    // notification id built from the label would collide with last week's.
+    if (bits.length) items.push({ key: d.key, day: d.label, text: bits.join(', ') });
   }
-  return { age: Math.round((Date.now() - old.t) / H), items };
+  return { age: Math.round((Date.now() - old.t) / H), base: old.t, items };
 }
 
 // --- verification: record what was forecast for a future hour, score it when that hour arrives ---
