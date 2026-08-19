@@ -159,6 +159,15 @@ export function notify({ id, category = 'info', title, body }) {
   el.querySelector('.notif-body').textContent = body || '';
   el.querySelector('.notif-x').onclick = () => el.remove();
   wrap.prepend(el);
+  // A dashboard is left running for days, and nothing here ever took a banner down: an overnight
+  // run of forecast changes buried the screen. Severe alerts stay until dismissed by hand.
+  if (category !== 'severe') setTimeout(() => el.remove(), 30000);
+  // Cap the stack too — the oldest goes first, but never a severe one over a routine one.
+  while (wrap.children.length > 4) {
+    const drop = [...wrap.children].reverse().find((n) => !n.classList.contains('notif-severe'));
+    if (!drop) break;
+    drop.remove();
+  }
   if (quiet) return;
   chime();
   speak(entry);
