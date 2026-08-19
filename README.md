@@ -2,8 +2,10 @@
 
 # WeatherDesk
 
-A self-hosted weather dashboard for a WeatherFlow Tempest station, built for a wall tablet on the
-LAN. Vanilla JS, native ES modules, no build step, no framework, no chart library, no backend —
+A self-hosted weather dashboard for your own weather station, built for a wall tablet on the LAN.
+WeatherFlow Tempest, Ecowitt, Ambient Weather, Davis, AcuRite, La Crosse and any Weather
+Underground-protocol console all work; with no station at all it runs on a forecast for a place you
+name. Vanilla JS, native ES modules, no build step, no framework, no chart library, no backend —
 every call goes browser-direct to a free public API.
 
 Radar comes from [Hook Echo-WX](https://github.com/d4vid87/hookecho) — my own NEXRAD viewer,
