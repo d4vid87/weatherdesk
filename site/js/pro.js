@@ -350,10 +350,15 @@ const uvWord = (v) => (v >= 11 ? 'Extreme' : v >= 8 ? 'Very high' : v >= 6 ? 'Hi
 
 async function loadHistory() {
   const s = settings();
-  if (!s.deviceId || !/^\d+$/.test(s.deviceId)) return;
   const end = Math.floor(Date.now() / 1000);
   try {
-    const j = await api.deviceObs(s.deviceId, end - 3 * 3600, end);
+    // A Tempest reads its own three hours back out of WeatherFlow; every other brand reads them
+    // out of this server's archive, which is where its reports were stored on the way in. Same
+    // tuples either way, so the trends, the arrows and the ticker don't know the difference.
+    let j = null;
+    if (s.deviceId && /^\d+$/.test(s.deviceId)) j = await api.deviceObs(s.deviceId, end - 3 * 3600, end);
+    else if (s.stationSource) j = await api.localObs(3);
+    if (!j) return;
     history = j.obs || [];
     renderStatus();
   } catch { /* trends fall back to '--' */ }
@@ -416,11 +421,12 @@ function renderLocal(o) {
   const r = (mm) => (mm == null ? null : metric ? mm : mm / 25.4);
 
   const temp = t(o[I.temp]), rh = o[I.rh];
-  $('hero-place').textContent = settings().stationName || 'Local station · UDP';
+  $('hero-place').textContent = settings().stationName
+    || (settings().stationSource ? 'Local station' : 'Local station · UDP');
   $('hero-temp').textContent = `${num(temp)}°`;
-  $('hero-cond').textContent = 'Live · hub broadcast';
+  $('hero-cond').textContent = settings().stationSource ? 'Live · station report' : 'Live · hub broadcast';
   $('hero-live').className = 'live on';
-  $('hero-live').textContent = '● Live · UDP';
+  $('hero-live').textContent = settings().stationSource ? '● Live' : '● Live · UDP';
   $('hero-batt').textContent = o[I.battery] ? `${num(o[I.battery], 2)} V` : '';
 
   const windMax = metric ? 60 : 40;

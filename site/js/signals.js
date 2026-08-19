@@ -1,6 +1,6 @@
 // 03 Local Signals — nearby public Tempest stations vs yours, plus the live websocket feed.
 import * as api from './api.js';
-import { settings, saveSettings, configured, U, num, deg2compass, every, notify, store, load, notifHistory, timeStr } from './app.js';
+import { settings, saveSettings, configured, hasSource, U, num, deg2compass, every, notify, store, load, notifHistory, timeStr } from './app.js';
 import { milesBetween } from './boot.js';
 
 const $ = (id) => document.getElementById(id);
@@ -244,7 +244,9 @@ export function initSignals() {
     $('add-station-id').value = '';
     refreshSignals();
   };
-  if (configured()) {
+  // connectWs() self-guards on the token, so a non-Tempest station gets the neighbour scan and
+  // the comparison rows without one.
+  if (hasSource()) {
     every('signals', 300, refreshSignals);
     // every() runs its job immediately, and Save re-runs initSignals — so this is a rescan on
     // boot, on every settings save, and once a day, with no change detection to keep in sync.

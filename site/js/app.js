@@ -53,6 +53,17 @@ const DEFAULTS = {
   cwopId: '',
   // Broker topics to read back and show on the Home card. [{ topic, label, unit }]
   mqttSubs: [],
+  // --- Other brands of station. Empty means a Tempest (or nothing yet). ---
+  // '' | 'ecowitt' | 'ambient' | 'wu' | 'wll' | 'awn' | 'lacrosse' | 'rtl433'. The push
+  // protocols need no setting beyond this one — the console is told where to report and the
+  // server takes whatever arrives. The rest name what has to be polled.
+  stationSource: '',
+  wllHost: '',                          // Davis WeatherLink Live, LAN address
+  awnApiKey: '', awnAppKey: '',         // Ambient Weather Network, which is also a KestrelMet
+  lacrosseEmail: '', lacrossePass: '',  // La Crosse — unofficial API, expect it to break
+  // Optional shared secret for the ingest path. Empty by default: this server already trusts
+  // its LAN with /config, and a console that must be told a secret is one nobody sets up.
+  ingestKey: '',
 };
 
 // A fresh install starts with the Desk radar off: it is megabytes of wasm in the same WebKit
@@ -83,6 +94,11 @@ export function store(key, value) {
 }
 
 export const configured = () => !!(_settings.token && _settings.stationId);
+
+// Whether there is a station behind this dashboard at all — a Tempest with a token, or any other
+// brand reporting into the LAN server. `configured()` still means "Tempest REST is usable" and
+// still gates everything that talks to WeatherFlow; this gates what any station can drive.
+export const hasSource = () => configured() || !!(_settings.stationSource && _settings.lat != null);
 
 // Coordinates the non-Tempest panels point at: the active saved place, else the station.
 export function coords() {

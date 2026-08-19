@@ -495,6 +495,18 @@
     </div>
     <p class="muted" style="font-size:12px">No station? The desktop app also reads a Tempest hub
       directly off the network with no token at all.</p>
+    <details id="wiz-other" style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:13px">Not a Tempest? Ecowitt, Ambient, Davis, AcuRite, La Crosse…</summary>
+      <p class="muted" style="font-size:12px">Pick the brand, then say where the station is —
+        the forecast comes from open-meteo, the readings come from your own sensors.</p>
+      <select id="wiz-source"></select>
+      <div class="row" style="margin-top:8px">
+        <input id="wiz-place" placeholder="town or postcode">
+        <button id="btn-wiz-place" style="flex:0 0 auto">Find</button>
+      </div>
+      <div id="wiz-place-list" style="margin-top:8px"></div>
+      <p id="wiz-target" class="muted" style="font-size:12px"></p>
+    </details>
   </div>
 </div>
 
@@ -710,6 +722,43 @@
     <label>Tempest API token</label><input id="set-token" type="password" placeholder="personal use token">
     <label>Station ID</label><input id="set-station" inputmode="numeric">
     <label>Device ID (Tempest sensor)</label><input id="set-device" inputmode="numeric">
+    <h2 style="font-size:13px;margin-top:18px">Another brand of station</h2>
+    <p class="muted" style="font-size:12px">Leave as Tempest unless you have one of these. Push
+      brands need no keys — point the console at the address shown below.</p>
+    <label>Station brand</label>
+    <select id="set-source">
+      <option value="">Tempest (or none)</option>
+      <option value="ecowitt">Ecowitt — Wittboy, GW1100/2000/3000</option>
+      <option value="ambient">Ambient Weather — WS-2902 / WS-2000 / WS-5000</option>
+      <option value="wu">Weather Underground protocol (other clones)</option>
+      <option value="wll">Davis — Vantage Pro2 / Vue via WeatherLink Live</option>
+      <option value="awn">Ambient Weather Network cloud (incl. KestrelMet 6000)</option>
+      <option value="lacrosse">La Crosse Technology (unofficial)</option>
+      <option value="rtl433">rtl_433 / SDR (AcuRite Iris and friends)</option>
+    </select>
+    <div id="src-push" hidden>
+      <label>Point the console here</label>
+      <input id="src-url" readonly>
+      <p class="muted" style="font-size:12px">Ecowitt: WSView Plus → Customized → protocol
+        Ecowitt, path <code>/ingest</code>. Ambient: awnet app → Custom server (firmware 4.2.8+).
+        Upload interval 16 s or slower.</p>
+    </div>
+    <div id="src-wll" hidden>
+      <label>WeatherLink Live address on the LAN</label>
+      <input id="set-wll" placeholder="192.168.1.50">
+    </div>
+    <div id="src-awn" hidden>
+      <label>AWN API key</label><input id="set-awn-api" type="password">
+      <label>AWN application key</label><input id="set-awn-app" type="password">
+    </div>
+    <div id="src-lax" hidden>
+      <label>La Crosse account email</label><input id="set-lax-email">
+      <label>La Crosse password</label><input id="set-lax-pass" type="password">
+      <p class="muted" style="font-size:12px">La Crosse publish no API. This reads the one their
+        app uses, and it can stop working without notice.</p>
+    </div>
+    <label>Ingest key (optional — pins the upload path)</label>
+    <input id="set-ingest-key" type="password" placeholder="blank = any device on the LAN">
     <label>Units</label>
     <select id="set-units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
     <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">

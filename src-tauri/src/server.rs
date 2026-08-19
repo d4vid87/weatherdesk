@@ -9,6 +9,7 @@
 // that includes the Tempest token. `/public` and `/config-public` are the redacted view for
 // screens you don't trust that far.
 
+use crate::ingest;
 use crate::store;
 use include_dir::{include_dir, Dir};
 use std::collections::HashMap;
@@ -117,7 +118,21 @@ fn json(body: String) -> ResponseBox {
 ///
 /// `cwopId` is deliberately absent: a CWOP callsign is public by design (the network's passcode
 /// for receive-only stations is the constant -1), and redacting it would only break the badge.
-const SECRET_KEYS: [&str; 6] = ["token", "mqttUser", "mqttPass", "haToken", "ntfyTopic", "webhookUrl"];
+const SECRET_KEYS: [&str; 11] = [
+    "token",
+    "mqttUser",
+    "mqttPass",
+    "haToken",
+    "ntfyTopic",
+    "webhookUrl",
+    // The other brands' credentials: two Ambient Weather Network keys, a La Crosse account,
+    // and the shared secret a console puts in its upload path.
+    "awnApiKey",
+    "awnAppKey",
+    "lacrosseEmail",
+    "lacrossePass",
+    "ingestKey",
+];
 
 fn redact(config_json: &str) -> String {
     let Ok(mut v) = serde_json::from_str::<serde_json::Value>(config_json) else {
@@ -224,7 +239,7 @@ fn sse(state: &Arc<State>, req: Request) {
 
 // --- Routes ---
 
-fn query(url: &str, key: &str) -> Option<String> {
+pub fn query(url: &str, key: &str) -> Option<String> {
     url.split('?')
         .nth(1)?
         .split('&')
@@ -265,6 +280,26 @@ fn handle(state: &Arc<State>, mut req: Request) {
 
     if path == "/events" {
         sse(state, req);
+        return;
+    }
+
+    // Where every other brand of station reports. `/ingest` is ours; the other three are the
+    // paths consoles default to and can't always be talked out of, so we answer on those too.
+    // A Weather Underground client checks the body for the literal `success`.
+    if path == "/ingest"
+        || path.starts_with("/ingest/")
+        || path == "/data/report/"
+        || path == "/weatherstation/updateweatherstation.php"
+    {
+        let mut body = String::new();
+        // A station report is a few hundred bytes. The cap is what stops a stray POST of
+        // something else from being read into memory in full.
+        let _ = req.as_reader().take(64 * 1024).read_to_string(&mut body);
+        let code = ingest::accept(state, &url, &body);
+        let res = Response::from_string(if code == 200 { "success" } else { "" })
+            .with_status_code(code)
+            .with_header(header("Content-Type", "text/plain"));
+        let _ = req.respond(res);
         return;
     }
 
@@ -310,6 +345,14 @@ fn handle(state: &Arc<State>, mut req: Request) {
                 *cache = Some((tz, count, max, store::daily_json(&conn, tz)));
             }
             json(cache.as_ref().unwrap().3.clone())
+        }
+        // The raw archive, SI, in `store::FIELDS` order. `/history/daily` answers the almanac's
+        // question; this one answers the Data tab's, which for a non-Tempest station is the only
+        // way to draw a trend — there is no cloud to ask.
+        "/history/tuples" => {
+            let hours = query(&url, "hours").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3).clamp(1, 168);
+            let Some(conn) = state.db() else { return drop(req.respond(Response::empty(503))) };
+            json(store::tuples_json(&conn, hours))
         }
         "/history/coverage" => {
             let Some(conn) = state.db() else { return drop(req.respond(Response::empty(503))) };
@@ -514,9 +557,10 @@ mod tests {
     fn public_config_keeps_no_secrets() {
         let out = redact(
             r#"{"settings":{"token":"abc123","mqttPass":"hunter2","ntfyTopic":"secret-topic",
+                "awnApiKey":"awn-key","awnAppKey":"awn-app","lacrossePass":"lax-pw","ingestKey":"pushpin",
                 "stationId":"1234","lat":33.1,"units":"imperial"}}"#,
         );
-        for needle in ["abc123", "hunter2", "secret-topic"] {
+        for needle in ["abc123", "hunter2", "secret-topic", "awn-key", "awn-app", "lax-pw", "pushpin"] {
             assert!(!out.contains(needle), "{needle} leaked into the public config: {out}");
         }
         assert!(out.contains("1234") && out.contains("imperial"), "public config lost the station");

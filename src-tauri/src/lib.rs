@@ -11,6 +11,8 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod cwop;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod ingest;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod server;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod store;
@@ -65,6 +67,7 @@ pub fn start_services(data_dir: PathBuf, cfg_path: PathBuf) -> (std::sync::Arc<s
     std::thread::spawn(move || server::listen_udp(listener));
     server::start_backfill(state.clone());
     cwop::start(state.data_dir.clone(), state.cfg_path.clone());
+    ingest::start_pollers(state.clone());
     let port = server::serve(state.clone(), want);
     (state, port)
 }

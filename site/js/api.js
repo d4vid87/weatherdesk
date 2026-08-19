@@ -112,9 +112,18 @@ export async function deviceObs(deviceId, timeStart, timeEnd) {
   const j = await getJSON(`${SWD}/observations/device/${deviceId}?${qs({
     token: settings().token, time_start: timeStart, time_end: timeEnd,
   })}`);
+  siToDisplay(j.obs || []);
+  return j;
+}
+
+// SI tuples to whatever the user reads. Its own function because the archive route
+// (`/history/tuples`, every non-Tempest station) hands back the same SI tuples this endpoint
+// does, and one copy of these factors is the difference between a chart being right and a
+// chart being plausible.
+export function siToDisplay(obs) {
   const metric = settings().units === 'metric';
   const conv = (o, i, f) => { if (o[i] != null) o[i] = o[i] * f; };
-  for (const o of j.obs || []) {
+  for (const o of obs) {
     // wind is m/s in both systems — even metric needs km/h
     for (const i of [OBS.windLull, OBS.windAvg, OBS.windGust]) conv(o, i, metric ? 3.6 : 2.23694);
     if (metric) continue;
@@ -124,13 +133,162 @@ export async function deviceObs(deviceId, timeStart, timeEnd) {
     conv(o, OBS.dayRain, 1 / 25.4);
     conv(o, OBS.strikeDist, 0.621371);
   }
+  return obs;
+}
+
+// The same window of history for a station that has no cloud behind it: our own archive, which
+// is where every ingested report lands whatever brand sent it. Shaped like `deviceObs` so
+// `pro.js` reads one or the other without knowing which.
+export async function localObs(hours = 3) {
+  const j = await getJSON(`${window.__WD_SRV || ''}/history/tuples?${qs({ hours })}`);
+  siToDisplay(j.obs || []);
   return j;
 }
 
+// The Desk, the hero, the day cards and the ticker are all driven by one better_forecast
+// payload. A station that is not a Tempest has no such endpoint — so build the same payload out
+// of open-meteo, which this app already leans on for six other panels, and every consumer stays
+// unaware. See `shapeOm`.
 export function betterForecast(stationId = settings().stationId) {
+  if (!settings().token) return omForecast();
   return getJSON(`${SWD}/better_forecast?${qs({
     station_id: stationId, token: settings().token, ...unitParams(),
   })}`);
+}
+
+// The station's own last reading, kept so the forecast payload can be overlaid with it: a
+// dashboard whose hero shows a model's guess at the temperature while a thermometer in the
+// garden says otherwise is the wrong way round.
+let lastTuple = null;
+window.addEventListener('wd:ws-obs', (e) => { lastTuple = e.detail; });
+
+// WMO code to the icon names `desk.js ICON` and `icons.js` already draw. Two variants where the
+// sky matters and one where it doesn't — fog at night still looks like fog.
+const WMO = {
+  0: 'clear', 1: 'partly-cloudy', 2: 'partly-cloudy', 3: 'cloudy', 45: 'foggy', 48: 'foggy',
+  51: 'possibly-rainy', 53: 'possibly-rainy', 55: 'possibly-rainy',
+  56: 'possibly-sleet', 57: 'possibly-sleet',
+  61: 'rainy', 63: 'rainy', 65: 'rainy', 66: 'sleet', 67: 'sleet',
+  71: 'possibly-snow', 73: 'snow', 75: 'snow', 77: 'snow',
+  80: 'possibly-rainy', 81: 'rainy', 82: 'rainy', 85: 'snow', 86: 'snow',
+  95: 'thunderstorm', 96: 'thunderstorm', 99: 'thunderstorm',
+};
+const DAYNIGHT = new Set(['clear', 'partly-cloudy', 'possibly-rainy', 'possibly-sleet', 'possibly-snow', 'possibly-thunderstorm']);
+const WORDS = {
+  clear: 'Clear', 'partly-cloudy': 'Partly Cloudy', cloudy: 'Cloudy', foggy: 'Fog',
+  'possibly-rainy': 'Chance of Rain', 'possibly-sleet': 'Chance of Sleet',
+  'possibly-snow': 'Chance of Snow', rainy: 'Rain', sleet: 'Sleet', snow: 'Snow',
+  thunderstorm: 'Thunderstorms',
+};
+
+export function omIcon(code, day = true) {
+  const base = WMO[code] ?? 'cloudy';
+  return DAYNIGHT.has(base) ? `${base}-${day ? 'day' : 'night'}` : base;
+}
+export const omWords = (code) => WORDS[WMO[code] ?? 'cloudy'] || '';
+
+// One open-meteo response, in the shape Tempest's better_forecast has. Pure and exported so the
+// self-check can feed it a canned payload — this is the one function where a mislabelled field
+// would show up as a wrong hero rather than an error.
+//
+// `ownTuple` is the station's own SI reading. Where a sensor measured something, the sensor
+// wins; the model keeps what no backyard station has (dew point, feels-like, sea-level
+// pressure, wet bulb) rather than this file growing a second psychrometry.
+export function shapeOm(j, ownTuple = null) {
+  const metric = settings().units === 'metric';
+  const cur = j.current || {};
+  const H = j.hourly || {};
+  const D = j.daily || {};
+  const times = H.time || [];
+  // The hourly arrays carry the readings open-meteo has no `current` field for; take the hour
+  // we are standing in rather than hour zero of the run.
+  const now = cur.time || Math.floor(Date.now() / 1000);
+  // The hour we are standing in: the last one that has started. Past the end of the array
+  // (a cached payload on a screen nobody reloaded) means the final hour, not the first.
+  const next = times.findIndex((t) => t > now);
+  const i0 = next < 0 ? Math.max(0, times.length - 1) : Math.max(0, next - 1);
+  const at = (k) => (H[k] ? H[k][i0] : null);
+  const inHg = (hpa) => (hpa == null ? null : metric ? hpa : hpa * 0.02953);
+
+  const daily = (D.time || []).map((t, i) => {
+    const code = D.weather_code?.[i];
+    return {
+      day_start_local: t,
+      sunrise: D.sunrise?.[i],
+      sunset: D.sunset?.[i],
+      icon: omIcon(code, true),
+      conditions: omWords(code),
+      air_temp_high: D.temperature_2m_max?.[i],
+      air_temp_low: D.temperature_2m_min?.[i],
+      precip_probability: D.precipitation_probability_max?.[i],
+    };
+  });
+
+  const hourly = times.map((t, i) => ({
+    time: t,
+    air_temperature: H.temperature_2m?.[i],
+    precip_probability: H.precipitation_probability?.[i],
+    wind_avg: H.wind_speed_10m?.[i],
+    wind_gust: H.wind_gusts_10m?.[i],
+    wind_direction: H.wind_direction_10m?.[i],
+    icon: omIcon(H.weather_code?.[i], true),
+    conditions: omWords(H.weather_code?.[i]),
+  }));
+
+  const day = cur.is_day == null ? true : !!cur.is_day;
+  const c = {
+    time: now,
+    air_temperature: cur.temperature_2m,
+    relative_humidity: cur.relative_humidity_2m,
+    dew_point: cur.dew_point_2m,
+    feels_like: cur.apparent_temperature,
+    wind_avg: cur.wind_speed_10m,
+    wind_gust: cur.wind_gusts_10m,
+    wind_direction: cur.wind_direction_10m,
+    sea_level_pressure: inHg(cur.pressure_msl),
+    station_pressure: inHg(cur.surface_pressure),
+    precip_accum_local_day: D.precipitation_sum?.[0],
+    uv: at('uv_index'),
+    solar_radiation: at('shortwave_radiation'),
+    wet_bulb_temperature: at('wet_bulb_temperature_2m'),
+    icon: omIcon(cur.weather_code, day),
+    conditions: omWords(cur.weather_code),
+  };
+
+  if (ownTuple) {
+    const o = siToDisplay([[...ownTuple]])[0];
+    const own = (v) => (v == null ? undefined : v);
+    const overlay = {
+      air_temperature: own(o[OBS.temp]),
+      relative_humidity: own(o[OBS.rh]),
+      wind_avg: own(o[OBS.windAvg]),
+      wind_gust: own(o[OBS.windGust]),
+      wind_direction: own(o[OBS.windDir]),
+      uv: own(o[OBS.uv]),
+      solar_radiation: own(o[OBS.solar]),
+      precip_accum_local_day: own(o[OBS.dayRain]),
+      station_pressure: own(o[OBS.press]),
+    };
+    for (const k in overlay) if (overlay[k] !== undefined) c[k] = overlay[k];
+  }
+
+  return { current_conditions: c, forecast: { daily, hourly } };
+}
+
+export async function omForecast(lat = coords().lat, lon = coords().lon) {
+  const imperial = settings().units !== 'metric';
+  const j = await getJSON(`https://api.open-meteo.com/v1/forecast?${qs({
+    latitude: lat, longitude: lon,
+    current: 'temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,is_day,'
+      + 'weather_code,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+    hourly: 'temperature_2m,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,'
+      + 'wind_direction_10m,uv_index,shortwave_radiation,wet_bulb_temperature_2m',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,'
+      + 'precipitation_probability_max,precipitation_sum',
+    forecast_days: 10, timezone: 'auto', timeformat: 'unixtime',
+    ...(imperial ? { temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch' } : {}),
+  })}`);
+  return shapeOm(j, lastTuple);
 }
 
 // --- NWS ---
@@ -343,6 +501,37 @@ if (location.search.includes('selftest')) {
   console.assert(band[0].lo === 1 && band[0].hi === 9, 'api: ensemble band spans the members');
 
   console.assert(normalFor({ '03-04': { hi: 60, lo: 40 } }, new Date(2020, 2, 4)).hi === 60, 'api: normals key is month-day');
+
+  // The open-meteo forecast adapter: every non-Tempest station's hero, day cards and ticker
+  // read this payload as if WeatherFlow had sent it, so a mislabelled field here is a
+  // plausible-looking wrong dashboard rather than an error.
+  const om = shapeOm({
+    current: { time: 4000, temperature_2m: 70, relative_humidity_2m: 50, dew_point_2m: 50,
+      apparent_temperature: 72, is_day: 0, weather_code: 95, pressure_msl: 1013.2,
+      wind_speed_10m: 8, wind_direction_10m: 180, wind_gusts_10m: 15 },
+    hourly: { time: [0, 3600], temperature_2m: [68, 70], precipitation_probability: [10, 40],
+      weather_code: [0, 95], wind_speed_10m: [5, 8], wind_gusts_10m: [9, 15],
+      wind_direction_10m: [170, 180], uv_index: [0, 3], shortwave_radiation: [0, 200],
+      wet_bulb_temperature_2m: [60, 62] },
+    daily: { time: [0], weather_code: [95], temperature_2m_max: [80], temperature_2m_min: [60],
+      sunrise: [21600], sunset: [64800], precipitation_probability_max: [40], precipitation_sum: [0.2] },
+  });
+  console.assert(om.current_conditions.air_temperature === 70, 'api: shapeOm keeps the current temperature');
+  console.assert(typeof om.forecast.daily[0].sunrise === 'number', 'api: day cards need a numeric sunrise');
+  console.assert(om.forecast.daily[0].air_temp_high === 80, 'api: day card high');
+  console.assert(om.forecast.hourly[1].precip_probability === 40, 'api: hourly precip probability');
+  console.assert(om.current_conditions.icon === 'thunderstorm', 'api: WMO 95 is a thunderstorm');
+  console.assert(omIcon(0, false) === 'clear-night', 'api: clear after sunset is the night icon');
+  console.assert(omIcon(0, true) === 'clear-day' && omIcon(45, false) === 'foggy', 'api: fog has no night variant');
+  // The hour it picks is the one we are standing in, not hour zero of the run.
+  console.assert(om.current_conditions.uv === 3, 'api: current UV comes from the current hour');
+
+  // A sensor in the garden beats a model every time — but only where a sensor reported.
+  const own = []; own[OBS.temp] = 20; own[OBS.rh] = 88;
+  const over = shapeOm({ current: { time: 1000, temperature_2m: 70, relative_humidity_2m: 50, dew_point_2m: 50 },
+    hourly: { time: [0, 3600] }, daily: { time: [0] } }, own);
+  console.assert(over.current_conditions.relative_humidity === 88, 'api: own humidity wins over the model');
+  console.assert(over.current_conditions.dew_point === 50, 'api: the model keeps what no station measures');
 }
 
 // --- Diagnostics: ping each source, return [{name, ok, detail}] ---

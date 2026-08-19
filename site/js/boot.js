@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
+import { settings, saveSettings, configured, hasSource, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -55,7 +55,7 @@ async function pullConfig() {
 // tablet whose pull failed kept its blank defaults and then pushed them — and the host's token
 // and station were gone, replaced by the empty strings of a browser that had just been opened.
 export function mayPush(pulled = rev !== null) {
-  return pulled || configured();
+  return pulled || configured() || !!settings().stationSource;
 }
 
 function pushConfig() {
@@ -91,6 +91,27 @@ export function shouldPull(evRev) {
 window.addEventListener('wd:config-rev', (e) => { if (shouldPull(e.detail?.rev)) pullConfig(); });
 
 
+// Where a console is told to report. Same origin as this page, because a console on the LAN
+// reaches this server the same way the browser just did — and an ingest key, if one is set, has
+// to ride in the path: a Wittboy can be given a path and nothing else.
+export function ingestUrl(key = settings().ingestKey) {
+  // The app window runs on tauri://localhost, which nothing on the LAN can reach; the desktop
+  // build injects the real server URL, and a browser install is already on it.
+  return `${window.__WD_SRV || location.origin}/ingest${key ? `/${key}` : ''}`;
+}
+
+// Only the fields the chosen brand needs. The push brands need none at all, which is the point
+// of showing them the address instead.
+function showSourceFields() {
+  const v = $('set-source').value;
+  const push = ['ecowitt', 'ambient', 'wu', 'rtl433'].includes(v);
+  $('src-push').hidden = !push;
+  $('src-wll').hidden = v !== 'wll';
+  $('src-awn').hidden = v !== 'awn';
+  $('src-lax').hidden = v !== 'lacrosse';
+  if (push) $('src-url').value = ingestUrl($('set-ingest-key').value.trim());
+}
+
 function fillDrawer() {
   const s = settings();
   $('set-token').value = s.token;
@@ -116,6 +137,14 @@ function fillDrawer() {
   $('set-quiet-end').value = s.quietEnd || '';
   $('set-http-port').value = s.httpPort || '';
   $('set-cwop').value = s.cwopId || '';
+  $('set-source').value = s.stationSource || '';
+  $('set-wll').value = s.wllHost || '';
+  $('set-awn-api').value = s.awnApiKey || '';
+  $('set-awn-app').value = s.awnAppKey || '';
+  $('set-lax-email').value = s.lacrosseEmail || '';
+  $('set-lax-pass').value = s.lacrossePass || '';
+  $('set-ingest-key').value = s.ingestKey || '';
+  showSourceFields();
   $('set-ntfy-topic').value = s.ntfyTopic || '';
   $('set-ntfy-url').value = s.ntfyUrl || '';
   $('set-webhook').value = s.webhookUrl || '';
@@ -201,6 +230,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('btn-settings').onclick = () => { fillDrawer(); openDrawer(true); };
+$('set-source').onchange = showSourceFields;
+$('set-ingest-key').oninput = showSourceFields;
 $('btn-close').onclick = () => { openDrawer(false); loadDeskRadar(); };
 $('btn-full').onclick = fullscreen;
 $('btn-refresh').onclick = refreshAll;
@@ -235,6 +266,13 @@ $('btn-save').onclick = async () => {
     quietEnd: $('set-quiet-end').value,
     httpPort: $('set-http-port').value.trim(),
     cwopId: $('set-cwop').value.trim().toUpperCase(),
+    stationSource: $('set-source').value,
+    wllHost: $('set-wll').value.trim(),
+    awnApiKey: $('set-awn-api').value.trim(),
+    awnAppKey: $('set-awn-app').value.trim(),
+    lacrosseEmail: $('set-lax-email').value.trim(),
+    lacrossePass: $('set-lax-pass').value,
+    ingestKey: $('set-ingest-key').value.trim(),
     ntfyTopic: $('set-ntfy-topic').value.trim(),
     ntfyUrl: $('set-ntfy-url').value.trim() || 'https://ntfy.sh',
     webhookUrl: $('set-webhook').value.trim(),
@@ -252,10 +290,11 @@ $('btn-save').onclick = async () => {
   });
   applyTabs();
   initKiosk();
-  if (!configured()) {
+  if (!hasSource()) {
     notify({
       title: 'Setup incomplete',
-      body: 'Token + station ID are needed for forecasts. Desktop with a Tempest hub on the LAN still shows live local data.',
+      body: 'A Tempest token + station ID, or another brand of station reporting to this server. '
+        + 'Desktop with a hub on the LAN still shows live local data.',
     });
   }
   await hydrateStation();
@@ -337,13 +376,57 @@ async function wizardFind() {
         refreshAll();
         for (const el of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
           const node = $(el);
-          if (node && node.textContent.includes('Needs a Tempest token')) node.innerHTML = '<div class="muted">loading…</div>';
+          if (node && node.textContent.includes('Needs a station')) node.innerHTML = '<div class="muted">loading…</div>';
         }
       };
     });
   } catch (e) {
     $('wiz-list').innerHTML = `<div class="fail">${e.message}</div>`;
   }
+}
+
+// The other-brand route through the wizard: a brand and a place is everything a non-Tempest
+// install needs — no token, no account, and the forecast comes from open-meteo.
+{
+  const sel = $('wiz-source');
+  sel.innerHTML = $('set-source').innerHTML;
+  const target = () => {
+    const v = sel.value;
+    $('wiz-target').textContent = ['ecowitt', 'ambient', 'wu', 'rtl433'].includes(v)
+      ? `Point the console at ${ingestUrl()}`
+      : v ? 'Fill in the address or keys under ⚙ Settings once this is closed.' : '';
+  };
+  sel.onchange = target;
+  const find = async () => {
+    const q = $('wiz-place').value.trim();
+    if (!q) return;
+    $('wiz-place-list').innerHTML = '<div class="muted">looking…</div>';
+    try {
+      const hits = (await api.geocode(q)).features || [];
+      $('wiz-place-list').innerHTML = hits
+        .map((h, i) => `<button class="place-hit" data-hit="${i}">${[h.properties.name, h.properties.state, h.properties.country].filter(Boolean).join(', ')}</button>`)
+        .join('') || '<div class="muted">no matches</div>';
+      $('wiz-place-list').querySelectorAll('[data-hit]').forEach((b) => {
+        b.onclick = () => {
+          const h = hits[+b.dataset.hit];
+          const [lon, lat] = h.geometry.coordinates;
+          saveSettings({ stationSource: sel.value || 'ecowitt', lat, lon, stationName: h.properties.name || q });
+          $('wizard').hidden = true;
+          fillDrawer();
+          refreshAll();
+          for (const el of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
+            const node = $(el);
+            if (node && node.textContent.includes('Needs a station')) node.innerHTML = '<div class="muted">loading…</div>';
+          }
+        };
+      });
+    } catch (e) {
+      $('wiz-place-list').innerHTML = `<div class="fail">${e.message}</div>`;
+    }
+  };
+  $('btn-wiz-place').onclick = find;
+  $('wiz-place').onkeydown = (e) => { if (e.key === 'Enter') find(); };
+  target();
 }
 
 $('btn-wiz-find').onclick = () => wizardFind();
@@ -761,7 +844,7 @@ renderLayouts();
 
 changelog();
 
-if (!configured() && !PUBLIC) {
+if (!hasSource() && !PUBLIC) {
   $('wizard').hidden = false;
   $('wiz-token').focus();
   // UDP-only mode: a desktop install with a hub on the LAN has real local data with no token at
@@ -795,7 +878,8 @@ if (location.search.includes('selftest')) {
   // The push guard. A blank screen that has heard nothing from the host must stay quiet, or it
   // overwrites what the host knew with its own empty defaults.
   console.assert(mayPush(true), 'config: a screen that has pulled may push');
-  console.assert(mayPush(false) === configured(), 'config: without a pull, only a configured screen pushes');
+  console.assert(mayPush(false) === (configured() || !!settings().stationSource),
+    'config: without a pull, only a screen that knows its station pushes');
 
   // The fetch deadline every screen depends on, on the browsers that have no AbortSignal.timeout.
   const sig = expires(50);

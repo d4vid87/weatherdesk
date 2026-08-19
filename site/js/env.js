@@ -243,15 +243,21 @@ function renderHealth(st) {
   if (st?.rssi != null) rows.push(['Sensor signal', `${num(st.rssi)} dBm`]);
   if (st?.hub_rssi != null) rows.push(['Hub signal', `${num(st.hub_rssi)} dBm`]);
   if (st?.uptime != null) rows.push(['Uptime', `${num(st.uptime / 86400, 1)} days`]);
-  const bad = faults(st?.sensor_status || 0);
-  rows.push(['Sensors', bad.length ? `<span class="fail">${bad.join(', ')}</span>` : '<span class="ok">all reporting</span>']);
+  // Sensor faults are a Tempest hub's status word. Without one there is nothing to report on,
+  // and an "all reporting" row derived from a default zero would be a reassurance nobody earned.
+  if (st) {
+    const bad = faults(st.sensor_status || 0);
+    rows.push(['Sensors', bad.length ? `<span class="fail">${bad.join(', ')}</span>` : '<span class="ok">all reporting</span>']);
+  }
   if (lastObsAt) {
     const mins = (Date.now() - lastObsAt) / 60000;
     rows.push(['Last report', mins > 30 ? `<span class="fail">${num(mins)} min ago</span>` : `${num(mins)} min ago`]);
   }
   $('health').innerHTML = rows.length
     ? rows.map(([k, val]) => `<div><span>${k}</span><span>${val}</span></div>`).join('')
-    : '<div class="muted">Needs the desktop app and a hub on the same network.</div>';
+    : `<div class="muted">${settings().stationSource
+        ? 'No reports yet — check the station is uploading to this server.'
+        : 'Needs the desktop app and a hub on the same network.'}</div>`;
   stamp('health', 300);
 }
 
