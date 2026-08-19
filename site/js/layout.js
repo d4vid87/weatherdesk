@@ -22,8 +22,30 @@
 const KEY = 'wd.layout';
 const $ = (id) => document.getElementById(id);
 
+// The font-size setting is `html { zoom }` (see app.js applySize), and zoom is the one thing that
+// splits the two coordinate systems apart: `getBoundingClientRect()` and pointer coordinates come
+// back in painted pixels, while `style.height`, `offsetHeight` and every length in the stylesheet
+// are in layout pixels. Measuring a panel with a rect and writing that number back as a style
+// therefore multiplied it by the zoom — on every drag, and again on every reload, until a panel
+// was taller than the window it lived in and whatever sat at its bottom (the radar's play
+// controls) could not be reached at all. Sizes are read with `offsetWidth`/`offsetHeight` from
+// here on, and pointer deltas are divided back into layout pixels.
+const zoom = () => +getComputedStyle(document.documentElement).zoom || 1;
+
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
-let state = load();
+
+// A height taller than the window can only have come from the bug above — a drag that grew a
+// panel past the bottom of the screen would have had to leave the window to do it. Dropping those
+// lets a dashboard that already has one heal itself instead of needing a per-panel reset, and it
+// runs on whatever arrives from the server too, not just on what this browser saved.
+function dropImpossibleHeights(st) {
+  for (const s of Object.values(st || {})) {
+    if (s && s.h > window.innerHeight) delete s.h;
+  }
+  return st;
+}
+
+let state = dropImpossibleHeights(load());
 const save = () => {
   localStorage.setItem(KEY, JSON.stringify(state));
   // boot.js debounces this into a config-server push; a drag fires save() per frame batch.
@@ -95,8 +117,7 @@ function setWidth(el, px) {
   }
 }
 
-const widthOf = (el) => (el.style.width || el.style.gridColumn
-  ? Math.round(el.getBoundingClientRect().width) : null);
+const widthOf = (el) => (el.style.width || el.style.gridColumn ? el.offsetWidth : null);
 
 function applySaved(el) {
   const s = state[el.dataset.panel];
@@ -174,8 +195,7 @@ function resizeHandle(el, dir) {
   h.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const r = el.getBoundingClientRect();
-    [startX, startY, startW, startH] = [e.clientX, e.clientY, r.width, r.height];
+    [startX, startY, startW, startH] = [e.clientX, e.clientY, el.offsetWidth, el.offsetHeight];
     h.setPointerCapture(e.pointerId);
     el.classList.add('resizing');
     // Pointer capture doesn't cross into an iframe's document, so a drag over the radar would
@@ -185,8 +205,9 @@ function resizeHandle(el, dir) {
 
   h.addEventListener('pointermove', (e) => {
     if (!h.hasPointerCapture(e.pointerId)) return;
-    if (dir !== 's') setWidth(el, Math.max(160, startW + e.clientX - startX));
-    if (dir !== 'e') el.style.height = `${Math.max(60, startH + e.clientY - startY)}px`;
+    const k = zoom();
+    if (dir !== 's') setWidth(el, Math.max(160, startW + (e.clientX - startX) / k));
+    if (dir !== 'e') el.style.height = `${Math.max(60, startH + (e.clientY - startY) / k)}px`;
   });
 
   const end = (e) => {
@@ -199,7 +220,7 @@ function resizeHandle(el, dir) {
     // must stay fluid, or the first window resize leaves it stranded at a stale pixel width.
     const w = widthOf(el);
     if (w) s.w = w;
-    if (el.style.height) s.h = Math.round(el.getBoundingClientRect().height);
+    if (el.style.height) s.h = el.offsetHeight;
     save();
   };
   h.addEventListener('pointerup', end);
@@ -236,18 +257,21 @@ function wire(container) {
       const r = el.getBoundingClientRect();
       offX = e.clientX - r.left;
       offY = e.clientY - r.top;
+      const k = zoom();
 
       // The placeholder inherits the panel's footprint so the grid doesn't collapse the moment
       // the panel leaves the flow.
       ph = document.createElement('div');
       ph.className = 'ph';
-      ph.style.height = `${r.height}px`;
+      ph.style.height = `${el.offsetHeight}px`;
       ph.style.gridColumn = getComputedStyle(el).gridColumn;
       container.insertBefore(ph, el);
 
+      // The dragged panel is `position: fixed`, so its left/top are layout pixels while the rect
+      // it came from is painted ones.
       Object.assign(el.style, {
-        width: `${r.width}px`, height: `${r.height}px`,
-        left: `${r.left}px`, top: `${r.top}px`,
+        width: `${el.offsetWidth}px`, height: `${el.offsetHeight}px`,
+        left: `${r.left / k}px`, top: `${r.top / k}px`,
       });
       el.classList.add('dragging');
       document.body.classList.add('resizing'); // same iframe/selection guard as a resize
@@ -257,8 +281,9 @@ function wire(container) {
 
     grip.addEventListener('pointermove', (e) => {
       if (!grip.hasPointerCapture(e.pointerId) || dragged !== el) return;
-      el.style.left = `${e.clientX - offX}px`;
-      el.style.top = `${e.clientY - offY}px`;
+      const k = zoom();
+      el.style.left = `${(e.clientX - offX) / k}px`;
+      el.style.top = `${(e.clientY - offY) / k}px`;
       const before = insertPoint(container, e.clientX, e.clientY);
       if (before !== ph) container.insertBefore(ph, before);
     });
@@ -317,7 +342,7 @@ export function unhide(id) {
 // Swap the whole arrangement at once. Inline styles have to be stripped first: a panel the new
 // state says nothing about would otherwise keep the old one's pixel height.
 export function restore(next) {
-  state = structuredClone(next) || {};
+  state = dropImpossibleHeights(structuredClone(next) || {});
   save();
   document.querySelectorAll('[data-panel]').forEach((el) => {
     setWidth(el, null); el.style.height = '';
@@ -389,6 +414,20 @@ if (location.search.includes('selftest')) {
   console.assert(tabOf('anything') === 'desk', 'layout: a panel with no tab lives on the Desk');
   state = { hero: { tab: 'data' } };
   console.assert(tabOf('hero') === 'data', 'layout: the catalog records the tab');
+
+  // Painted pixels against layout pixels — the assumption the whole resize path now rests on.
+  // Under `html { zoom }` a rect is scaled and `offsetHeight` is not, and reading the wrong one
+  // is what grew panels by the zoom factor on every drag until their contents were unreachable.
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;left:-9999px;width:200px;height:100px';
+  document.body.appendChild(probe);
+  const was = document.documentElement.style.zoom;
+  document.documentElement.style.zoom = '1.5';
+  console.assert(probe.offsetHeight === 100, 'layout: offsetHeight is the layout pixel, whatever the zoom');
+  console.assert(Math.round(probe.getBoundingClientRect().height) === 150, 'layout: a rect is painted pixels');
+  console.assert(Math.abs(zoom() - 1.5) < 1e-6, 'layout: zoom() reads the root zoom');
+  document.documentElement.style.zoom = was;
+  probe.remove();
 
   state = JSON.parse(before);
   save(); // the hide/unhide asserts wrote through to storage — put the real layout back
