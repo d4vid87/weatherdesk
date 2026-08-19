@@ -72,14 +72,18 @@
     display: flex; flex-direction: column; overflow: hidden;
   }
   header {
-    display: flex; align-items: center; gap: var(--gap); padding: 8px 12px;
+    display: flex; align-items: center; gap: var(--gap);
+    /* The Android window is edge to edge, so the status bar sits on top of this row unless the
+       inset is paid here. Every other platform reports 0 and nothing moves. */
+    padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+      8px calc(12px + env(safe-area-inset-left));
     background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
   }
   header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: .04em; }
   /* The cloud-and-bolt mark out of the logo, at header height. The full illustration is mush
      below about 100px, and the wordmark next to it is live text for the same reason. */
   #brand { height: 26px; width: 26px; flex: none; border-radius: 6px; }
-  nav { display: flex; gap: 4px; flex: 1; }
+  nav { display: flex; gap: 4px; flex: 1; min-width: 0; }
   .tab {
     background: none; border: 1px solid transparent; color: var(--muted); padding: 6px 14px;
     border-radius: 8px; cursor: pointer; font: inherit;
@@ -88,7 +92,8 @@
   .iconbtn { background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
     border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
   main { flex: 1; overflow: hidden; position: relative; }
-  section.page { display: none; height: 100%; overflow: auto; padding: var(--gap); }
+  section.page { display: none; height: 100%; overflow: auto;
+    padding: var(--gap) var(--gap) calc(var(--gap) + env(safe-area-inset-bottom)); }
   section.page.active { display: block; }
 
   /* cap columns so an ultrawide doesn't smear 8 cards into one thin row */
@@ -173,6 +178,9 @@
   /* Every panel carries a drag grip and three resize handles. Overflow stays hidden so a resized
      panel clips instead of spilling over its neighbour. */
   [data-panel] { position: relative; overflow: hidden; min-width: 160px; min-height: 60px; }
+  /* Panels are switched off with the hidden property, and every one of them sets its own display,
+     which quietly wins: a radar turned off left a 420px hole in the Desk. */
+  [data-panel][hidden] { display: none !important; }
   [data-panel].dragging { position: fixed; z-index: 40; pointer-events: none; opacity: .9;
     box-shadow: 0 18px 40px #000a; outline: 2px solid var(--accent); }
   .ph { border: 2px dashed var(--accent); border-radius: 12px; background: #4fb8ff14; }
@@ -362,15 +370,59 @@
      desktop screen is unreadable on a handset, and the layout is per-install, not per-device. */
   @media (max-width: 720px) {
     #desk-stack, #desk-stack > *, #desk-radar, #trends, #c48 { grid-column: span 12 !important; }
-    #desk-radar { grid-row: span 1; }
+    #desk-radar { grid-row: span 1; height: 340px !important; min-height: 0; }
     .grid { grid-template-columns: 1fr; }
     .grid > .card { grid-column: span 1 !important; }
     .now-temp { font-size: 56px; }
     nav { overflow-x: auto; flex-wrap: nowrap; }
+    /* the wordmark, the fullscreen toggle and the layout lock ate the whole bar and left the
+       tabs at zero width. The mark still says which app this is; fullscreen and lock are
+       desktop affordances (a phone app is already fullscreen, and nothing here resizes). */
+    header h1, #btn-full, #btn-lock { display: none; }
+    nav { scrollbar-width: none; }
+    nav::-webkit-scrollbar { display: none; }
+    /* the gauge readout is sized for a 300px card, and ran over the ring in half of one */
+    .ginner b { font-size: 21px; }
+    .ginner { font-size: 12px; }
+    .dc-head { gap: 6px; }
     .tab { padding: 8px 12px; white-space: nowrap; }
     /* thumbs, not mouse pointers */
     .iconbtn, button { min-height: 40px; }
     #drawer { width: 100%; }
+    /* A phone is where the dashboard is read, not where it is rearranged: the grips and resize
+       handles only covered the panel titles and swallowed taps. Layout editing stays on the
+       desktop, and a panel that cannot be resized has nothing to clip. */
+    .grip, .grip-hide, .rz { display: none; }
+    /* min-width is a resize floor, and it is 160px of content plus padding — two of them in a
+       360px row is wider than the screen. Nothing resizes here, so the floor goes. */
+    [data-panel] { overflow: visible; min-width: 0; }
+    /* Saved widths and heights are desktop pixels — five 210px day cards landed on top of each
+       other in a 360px row. The layout is per-install, not per-device, so the phone ignores it. */
+    [data-panel] { width: auto !important; height: auto !important; }
+    /* same for a saved column span: three of twelve desktop columns inside a two-column phone
+       grid is three cards stacked on one */
+    #daycards > *, #gauges > * { grid-column: auto !important; }
+    /* except the ticker: its track is a marquee twice the strip's width by design */
+    #ticker { overflow: hidden; }
+    /* three trend columns in 360px is three words a line, and the third one clipped */
+    #trends { grid-template-columns: 1fr; }
+    #trends > div { border-left: 0; border-top: 1px solid var(--line); }
+    #trends > div:first-child { border-top: 0; }
+    /* one card a row wastes the screen; two fit at 360px */
+    #daycards, #gauges { grid-template-columns: 1fr 1fr; }
+    /* the hero stacked left against right and wrapped both into columns of one word */
+    .hero-top { flex-direction: column; gap: 2px; }
+    .hero-right { text-align: left; }
+    #hero { padding: 12px 14px 16px; }
+    #clock-time { font-size: 40px; }
+    #hero-icon { right: 10px; }
+    #hero-temp { font-size: 64px; }
+    #hero-cond { font-size: 22px; }
+    .hero-now { gap: 12px; }
+    /* the station table drops the two deltas — the values they compare are both still on the row */
+    .sig-row { grid-template-columns: 1.5fr .8fr 1fr .9fr 20px; font-size: 12px; }
+    .sig-row > span:nth-child(3), .sig-row > span:nth-child(5) { display: none; }
+    .sig-row .fail { grid-column: 2 / -2 !important; }
   }
   .live-wind-wrap { display: flex; align-items: center; gap: 16px; }
   .compass { width: 74px; height: 74px; border: 2px solid var(--line); border-radius: 50%;
@@ -386,7 +438,7 @@
   #add-station-id { flex: 1; padding: 8px; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 8px; font: inherit; }
   #lab-frame { width: 100%; height: 100%; border: 0; display: block; }
-  #notif-stack { position: absolute; top: 8px; right: 8px; width: min(340px, 90vw); z-index: 30; }
+  #notif-stack { position: absolute; top: 8px; right: 8px; width: min(340px, calc(100% - 16px)); z-index: 30; }
   .notif { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
     border-radius: 8px; padding: 8px 28px 8px 10px; margin-bottom: 6px; position: relative; }
   .notif-severe { border-left-color: var(--bad); }
