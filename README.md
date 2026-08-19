@@ -13,7 +13,7 @@ embedded here and centered on the station.
 
 ![A ten second walkthrough: pasting a Tempest token into the first-run wizard and picking a station,
 the Desk filling in with live temperature, seven day cards and dial gauges, an NWS warning polygon
-with its full text, the national radar mosaic, then Hook Echo-WX zoomed on a storm cell](docs/hero.gif)
+with its full text, the national radar mosaic, then Hook Echo-WX zoomed on a storm cell](docs/hero-3.0.5.gif)
 
 ![The Desk, rearranged: Hook Echo-WX radar dragged to the top, sky hero, seven day cards, a row of
 gauges (wind, rain, humidity, pressure, dew point, UV, lightning, wet bulb) and the 48h forecast
