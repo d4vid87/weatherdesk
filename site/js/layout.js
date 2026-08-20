@@ -79,12 +79,17 @@ export function applyPlacement() {
     const id = el.dataset.panel;
     if (!home.has(id)) home.set(id, el.parentElement);
     const want = state[id]?.tab;
-    const target = want && want !== 'desk' ? $(TABS[want]) : home.get(id);
+    const target = want && want !== 'desk'
+      ? $(TABS[want])
+      : ($(state[id]?.box) || home.get(id));
     if (target && el.parentElement !== target) target.appendChild(el);
   }
 }
 
 export function setTab(id, tab) {
+  // A tab move overrides a container move: the panel is going to that tab's grid, and coming back
+  // sends it to its markup home rather than to whichever Desk container it was last dropped in.
+  delete entry(id).box;
   if (tab === 'desk') delete entry(id).tab;
   else entry(id).tab = tab;
   save();
@@ -182,6 +187,32 @@ function insertPoint(container, x, y) {
   return after ? best.nextElementSibling : best;
 }
 
+// Which container a drop lands in. Panels used to be trapped in the container they were wired in
+// — a card in the Desk grid could reorder among its neighbours but could never be lifted above the
+// gauges or up next to the hero, because both the closure and `insertPoint` only ever saw one
+// container's children. Every wired container is a candidate on every pointermove instead.
+//
+// Deepest-first: the containers nest (the gauges block is itself a panel sitting in the stack), so
+// a pointer inside the gauges is inside the stack too, and the innermost hit is the one the user is
+// actually pointing at. Pointing at a panel that is not a container (the hero) finds the stack,
+// which is how a panel reaches the top of the Desk.
+function containerAt(x, y) {
+  let best = null, bestDepth = -1;
+  for (const c of CONTAINERS.map($)) {
+    // A container on a hidden tab measures 0x0; dragging on the Data tab must not fling the panel
+    // into an invisible Desk container.
+    if (!c || !c.offsetWidth || !c.offsetHeight) continue;
+    // Dropping a group inside itself would detach the very node being dragged.
+    if (dragged && dragged.contains(c)) continue;
+    const r = c.getBoundingClientRect();
+    if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+    let depth = 0;
+    for (let n = c.parentElement; n; n = n.parentElement) depth++;
+    if (depth > bestDepth) { bestDepth = depth; best = c; }
+  }
+  return best;
+}
+
 // One handle per edge the panel can grow along. `e` widens, `s` heightens, `se` does both.
 // Pointer capture means the drag survives the pointer leaving the handle — without it, a fast
 // drag detaches after a few pixels, which is most of what made the old corner feel broken.
@@ -242,18 +273,30 @@ function wire(container) {
     applySaved(el);
     if (el.querySelector(':scope > .grip')) return;
 
+    // A panel that holds other panels (the gauges block, the Desk grid, the day cards) is dragged
+    // as a unit by its own grip — but that grip sat at the top right, exactly where the last panel
+    // in the group's first row puts its own, and the child's won every time. The group's furniture
+    // goes on the left instead, where nothing else lands.
+    const group = !!el.querySelector('[data-panel]');
+
     const grip = document.createElement('div');
-    grip.className = 'grip';
-    grip.title = 'Drag to move · edges to resize · double-click to reset this panel';
+    grip.className = group ? 'grip grip-group' : 'grip';
+    grip.title = group
+      ? 'Drag to move this whole group · edges to resize'
+      : 'Drag to move · edges to resize · double-click to reset this panel';
     grip.innerHTML = '<span>⠿</span>';
 
     // Pointer events rather than HTML5 drag-and-drop: DnD never fires for touch, and this
     // dashboard's home is a tablet. Only the grip starts a move — dragging from the panel body
     // would fight text selection and the radar iframe.
-    let ph = null, offX = 0, offY = 0;
+    // `from` is read at pointerdown, not closed over: a panel keeps its handlers when it moves to
+    // another container, so the container it was wired in goes stale after the first cross-container
+    // drop.
+    let ph = null, offX = 0, offY = 0, from = null;
 
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      from = el.parentElement;
       const r = el.getBoundingClientRect();
       offX = e.clientX - r.left;
       offY = e.clientY - r.top;
@@ -265,7 +308,7 @@ function wire(container) {
       ph.className = 'ph';
       ph.style.height = `${el.offsetHeight}px`;
       ph.style.gridColumn = getComputedStyle(el).gridColumn;
-      container.insertBefore(ph, el);
+      from.insertBefore(ph, el);
 
       // The dragged panel is `position: fixed`, so its left/top are layout pixels while the rect
       // it came from is painted ones.
@@ -284,8 +327,10 @@ function wire(container) {
       const k = zoom();
       el.style.left = `${(e.clientX - offX) / k}px`;
       el.style.top = `${(e.clientY - offY) / k}px`;
-      const before = insertPoint(container, e.clientX, e.clientY);
-      if (before !== ph) container.insertBefore(ph, before);
+      const box = containerAt(e.clientX, e.clientY) || ph.parentElement;
+      if (box !== ph.parentElement) ph.style.gridColumn = ''; // the old span means nothing in a new grid
+      const before = insertPoint(box, e.clientX, e.clientY);
+      if (before !== ph || box !== ph.parentElement) box.insertBefore(ph, before);
     });
 
     const drop = (e) => {
@@ -293,14 +338,24 @@ function wire(container) {
       grip.releasePointerCapture(e.pointerId);
       el.classList.remove('dragging');
       document.body.classList.remove('resizing');
-      container.insertBefore(el, ph);
+      const to = ph.parentElement;
+      to.insertBefore(el, ph);
       ph.remove();
       ph = null;
       // Restore whatever the panel's own rules say; a saved size is reapplied on top.
       el.style.left = el.style.top = el.style.width = el.style.height = '';
+      if (to !== from) {
+        const s = entry(el.dataset.panel);
+        // A width is a column span, and a span drawn against a 12-column Desk grid overflows a
+        // two-column gauge block. The panel goes back to its natural size in its new home.
+        delete s.w;
+        setWidth(el, null);
+        if (to === home.get(el.dataset.panel)) delete s.box; else s.box = to.id;
+      }
       applySaved(el);
       dragged = null;
-      recordOrder(container);
+      if (to !== from) recordOrder(from);
+      recordOrder(to);
     };
     grip.addEventListener('pointerup', drop);
     grip.addEventListener('pointercancel', drop);
@@ -317,7 +372,7 @@ function wire(container) {
     // Hide sits on the grip rather than in a drawer checklist: 29 panels make an unreadable list,
     // and `.layout-locked .grip` already puts it out of reach when the layout is locked.
     const hide = document.createElement('button');
-    hide.className = 'grip grip-hide';
+    hide.className = group ? 'grip grip-hide grip-group' : 'grip grip-hide';
     hide.textContent = '×';
     hide.title = 'Hide this panel — restore it under Settings';
     hide.onclick = () => {
@@ -414,6 +469,20 @@ if (location.search.includes('selftest')) {
   console.assert(tabOf('anything') === 'desk', 'layout: a panel with no tab lives on the Desk');
   state = { hero: { tab: 'data' } };
   console.assert(tabOf('hero') === 'data', 'layout: the catalog records the tab');
+
+  // Cross-container drops, against the real Desk: the gauges block is inside the stack, so a
+  // pointer in the gauges must find the gauges (the inner one), while a pointer over a panel that
+  // is not a container must find the stack — that is the path a card takes to the top of the Desk.
+  const gaugesBox = $('gauges'), stackBox = $('desk-stack'), heroBox = $('hero');
+  if (gaugesBox?.offsetWidth && stackBox?.offsetWidth && heroBox?.offsetWidth) {
+    const mid = (el) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+    console.assert(containerAt(...mid(gaugesBox)) === gaugesBox, 'layout: the innermost container wins');
+    console.assert(containerAt(...mid(heroBox)) === stackBox, 'layout: a plain panel drops into its stack');
+    // A group cannot be dropped inside itself.
+    dragged = gaugesBox;
+    console.assert(containerAt(...mid(gaugesBox)) === stackBox, 'layout: a group skips its own inside');
+    dragged = null;
+  }
 
   // Painted pixels against layout pixels — the assumption the whole resize path now rests on.
   // Under `html { zoom }` a rect is scaled and `offsetHeight` is not, and reading the wrong one

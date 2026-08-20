@@ -8,6 +8,21 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.0.8] — 2026-08-20
+
+### Fixed
+
+- **A group of panels can be moved as a group.** The gauges block, the day cards and the Desk grid
+  are panels in their own right, but their drag grip sat at the top right — exactly where the last
+  panel in the group's first row puts its own, which covered it. A group's grip and × now sit at
+  the top left, where nothing else lands.
+- **Any panel can be dragged to any part of the Desk, including the top.** A panel used to be
+  trapped in the container it started in, so a card in the Desk grid could be reordered among its
+  neighbours but could never be lifted above the gauges or up beside the hero. A drag now lands in
+  whichever container the pointer is over, innermost first, and the new home is saved with the
+  layout. Dropping a panel into a different grid clears a width that was measured against the old
+  one.
+
 ## [3.0.7] — 2026-08-20
 
 ### Fixed
@@ -213,7 +228,8 @@ tablet on the LAN — vanilla JS, no build step, no framework, no chart library.
 - Radar from [Hook Echo-WX](https://github.com/d4vid87/hookecho)
 - MIT license
 
-[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.7...HEAD
+[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.8...HEAD
+[3.0.8]: https://github.com/d4vid87/weatherdesk/compare/v3.0.7...v3.0.8
 [3.0.7]: https://github.com/d4vid87/weatherdesk/compare/v3.0.6...v3.0.7
 [3.0.6]: https://github.com/d4vid87/weatherdesk/compare/v3.0.5...v3.0.6
 [3.0.5]: https://github.com/d4vid87/weatherdesk/compare/v3.0.4...v3.0.5

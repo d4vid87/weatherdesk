@@ -192,6 +192,11 @@
   .grip:active { cursor: grabbing; }
   /* Hide sits beside the grip and inherits its show/hide rules, including the locked-layout one. */
   .grip-hide { right: 40px; cursor: pointer; font-size: 18px; padding: 0; }
+  /* A group's own furniture goes top left. Top right is where the last panel in the group's first
+     row puts its grip, and the child's sits above the group's — which is why a group could only be
+     taken apart panel by panel and never moved as a unit. */
+  .grip-group { left: 5px; right: auto; }
+  .grip-hide.grip-group { left: 40px; right: auto; }
   .panel-hidden { display: none; }
   /* controls that only mean something at phone width; the phone media query switches them on,
      so this has to sit above it — same specificity, and the later rule wins. */
