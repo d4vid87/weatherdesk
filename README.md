@@ -419,7 +419,7 @@ The same binary runs with no window and no Tauri in it:
 
 ```sh
 docker run -d --name weatherdesk --restart unless-stopped \
-  --network host -v ./data:/data ghcr.io/d4vid87/weatherdesk:latest
+  --network host -v "$PWD/data:/data" ghcr.io/d4vid87/weatherdesk:latest
 ```
 
 or the `docker-compose.yml` in this repo. Then open `http://<host>:8088`.

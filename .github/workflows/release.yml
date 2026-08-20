@@ -16,21 +16,29 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create.outputs.id }}
+      notes: ${{ steps.create.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
       - id: create
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # The tag's section of the changelog becomes the release body and, via the
+          # notes output, the updater feed's notes — otherwise latest.json ships "".
+          v=${GITHUB_REF_NAME#v}
+          notes=$(awk -v v="$v" '/^## \[/{f=($2=="["v"]")} f' CHANGELOG.md | tail -n +2)
+          body="Download the installer for your OS below. See the README for first-run notes (the apps are unsigned).
+
+          $notes"
           # Create it through the API so the new release's id comes straight back —
           # a draft has no git tag yet, so it can't be looked up by tag afterwards.
           id=$(gh api repos/${{ github.repository }}/releases \
             -f tag_name='${{ github.ref_name }}' \
             -f name='WeatherDesk ${{ github.ref_name }}' \
-            -f body='Download the installer for your OS below. See the README for first-run notes (the apps are unsigned).' \
+            -f body="$body" \
             -F draft=true -q .id)
           test -n "$id"
-          echo "id=$id" >> "$GITHUB_OUTPUT"
+          { echo "id=$id"; echo 'notes<<WD_EOF'; echo "$notes"; echo WD_EOF; } >> "$GITHUB_OUTPUT"
 
   build:
     needs: create-release
@@ -110,6 +118,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          # Only this input — not the release's own body — feeds latest.json's notes.
+          releaseBody: ${{ needs.create-release.outputs.notes }}
           args: ${{ matrix.args }}
           includeUpdaterJson: true
 
