@@ -4744,7 +4744,7 @@ dependencies = [
 
 [[package]]
 name = "weatherdesk"
-version = "3.0.6"
+version = "3.0.7"
 dependencies = [
  "include_dir",
  "rusqlite",
