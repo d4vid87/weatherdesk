@@ -138,6 +138,13 @@ every grip and handle, so a mounted tablet can't be rearranged by a passing slee
 Both gestures are pointer events, so they work the same with a mouse, a pen or a finger — the
 tablet case is the one that matters, and HTML5 drag-and-drop never fires for touch.
 
+On a phone-sized screen — the Android app on a handset, or a phone browser — the grips are off
+until you ask for them: left on, they sit over the panel titles and swallow taps meant for the
+panel underneath. Settings → **Rearrange panels** turns them on, and the button turns them off
+again. Moving and hiding work there; resizing does not, because a phone gives every panel the full
+width and its natural height anyway. That mode is per-device and lasts until the app is closed —
+the layout it writes is the shared one, so a panel moved on the phone moves on the wall tablet too.
+
 ## Data sources
 
 | Feature | Endpoint |
