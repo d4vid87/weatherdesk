@@ -8,6 +8,14 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.0.7] — 2026-08-20
+
+### Fixed
+
+- Rearrange mode now actually shows the grips in the Android app. The rules that reveal them were
+  scoped inside the phone media query in 3.0.6; they are keyed on the mode alone now, so nothing
+  about how a given webview reports its width can swallow them.
+
 ## [3.0.6] — 2026-08-20
 
 ### Fixed
@@ -205,7 +213,8 @@ tablet on the LAN — vanilla JS, no build step, no framework, no chart library.
 - Radar from [Hook Echo-WX](https://github.com/d4vid87/hookecho)
 - MIT license
 
-[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.6...HEAD
+[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.7...HEAD
+[3.0.7]: https://github.com/d4vid87/weatherdesk/compare/v3.0.6...v3.0.7
 [3.0.6]: https://github.com/d4vid87/weatherdesk/compare/v3.0.5...v3.0.6
 [3.0.5]: https://github.com/d4vid87/weatherdesk/compare/v3.0.4...v3.0.5
 [3.0.4]: https://github.com/d4vid87/weatherdesk/compare/v3.0.3...v3.0.4

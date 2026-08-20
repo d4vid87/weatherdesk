@@ -196,6 +196,12 @@
   /* controls that only mean something at phone width; the phone media query switches them on,
      so this has to sit above it — same specificity, and the later rule wins. */
   .phone-only { display: none; }
+  /* Rearrange mode, for a phone. Keyed on the class alone and marked !important on purpose: the
+     phone block below hides the grips, and this has to beat it wherever the two meet — the button
+     that sets the class only exists at phone width, so there is nothing else to guard against.
+     The headroom keeps the panel's own title readable under the grip while the mode is on. */
+  body.editing .grip, body.editing .grip-hide { display: flex !important; opacity: 1; }
+  body.editing [data-panel] { padding-top: 34px; }
 
   /* Fat, visible, touch-sized targets. `touch-action: none` is what lets a finger drag them
      instead of scrolling the page. */
@@ -399,10 +405,6 @@
        forced to the full column here, and its height comes back auto, so a resize handle on a
        phone would drag against a rule it cannot win. */
     .grip, .grip-hide, .rz { display: none; }
-    body.editing .grip, body.editing .grip-hide { display: flex; }
-    /* the grip sits over the panel's own title while the mode is on; a little headroom keeps the
-       title readable instead of making the user guess which panel they are holding */
-    body.editing [data-panel] { padding-top: 34px; }
     /* min-width is a resize floor, and it is 160px of content plus padding — two of them in a
        360px row is wider than the screen. Nothing resizes here, so the floor goes. */
     [data-panel] { overflow: visible; min-width: 0; }
