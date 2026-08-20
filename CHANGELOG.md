@@ -8,6 +8,16 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.0.6] — 2026-08-20
+
+### Fixed
+
+- **Panels can be rearranged on a phone again.** At phone width the grips and the × were hidden
+  outright, which left the Android app on a handset with no way to move or hide a panel at all.
+  Settings → **Rearrange panels** now turns them on for that device until the app is closed.
+  Resizing stays off there: a phone gives every panel the full width and its natural height, so a
+  resize handle would drag against a rule it cannot win.
+
 ### Documentation
 
 - New hero GIF walking through first-run setup, the Desk, warnings and radar, and the intro no
@@ -195,7 +205,8 @@ tablet on the LAN — vanilla JS, no build step, no framework, no chart library.
 - Radar from [Hook Echo-WX](https://github.com/d4vid87/hookecho)
 - MIT license
 
-[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.5...HEAD
+[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.6...HEAD
+[3.0.6]: https://github.com/d4vid87/weatherdesk/compare/v3.0.5...v3.0.6
 [3.0.5]: https://github.com/d4vid87/weatherdesk/compare/v3.0.4...v3.0.5
 [3.0.4]: https://github.com/d4vid87/weatherdesk/compare/v3.0.3...v3.0.4
 [3.0.3]: https://github.com/d4vid87/weatherdesk/compare/v3.0.2...v3.0.3

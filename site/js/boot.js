@@ -523,6 +523,25 @@ function applyLock() {
 
 $('btn-lock').onclick = () => { saveSettings({ layoutLocked: !settings().layoutLocked }); applyLock(); };
 
+// Phone rearrange mode. At phone width the grips and the × are hidden, because left on they cover
+// the panel titles and eat taps meant for the panel — so the Android app and a phone browser had
+// no way to move or hide a panel at all. This turns them on for one device: the layout itself is
+// synced house-wide, but "I am rearranging right now" is not, and it should not survive being
+// picked up tomorrow either, which is why it is sessionStorage.
+const editing = () => sessionStorage.getItem('wd.edit') === '1';
+function applyEdit() {
+  document.body.classList.toggle('editing', editing());
+  $('btn-edit').textContent = editing() ? 'Done rearranging' : 'Rearrange panels';
+}
+$('btn-edit').onclick = () => {
+  sessionStorage.setItem('wd.edit', editing() ? '0' : '1');
+  applyEdit();
+  // The grips are in the panels behind the drawer, so leaving it open would hide the thing the
+  // button just turned on.
+  if (editing()) { openDrawer(false); loadDeskRadar(); }
+};
+applyEdit();
+
 const layouts = () => load('wd.layouts', {});
 
 function renderLayouts() {

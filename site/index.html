@@ -193,6 +193,9 @@
   /* Hide sits beside the grip and inherits its show/hide rules, including the locked-layout one. */
   .grip-hide { right: 40px; cursor: pointer; font-size: 18px; padding: 0; }
   .panel-hidden { display: none; }
+  /* controls that only mean something at phone width; the phone media query switches them on,
+     so this has to sit above it — same specificity, and the later rule wins. */
+  .phone-only { display: none; }
 
   /* Fat, visible, touch-sized targets. `touch-action: none` is what lets a finger drag them
      instead of scrolling the page. */
@@ -388,11 +391,18 @@
     .tab { padding: 8px 12px; white-space: nowrap; }
     /* thumbs, not mouse pointers */
     .iconbtn, button { min-height: 40px; }
+    .phone-only { display: inline-flex; }
     #drawer { width: 100%; }
-    /* A phone is where the dashboard is read, not where it is rearranged: the grips and resize
-       handles only covered the panel titles and swallowed taps. Layout editing stays on the
-       desktop, and a panel that cannot be resized has nothing to clip. */
+    /* A phone is where the dashboard is read, not where it is rearranged: left on, the grips and
+       resize handles cover the panel titles and swallow taps. So they are off until Settings →
+       Rearrange panels asks for them, and then only the grip and the × — the width of a panel is
+       forced to the full column here, and its height comes back auto, so a resize handle on a
+       phone would drag against a rule it cannot win. */
     .grip, .grip-hide, .rz { display: none; }
+    body.editing .grip, body.editing .grip-hide { display: flex; }
+    /* the grip sits over the panel's own title while the mode is on; a little headroom keeps the
+       title readable instead of making the user guess which panel they are holding */
+    body.editing [data-panel] { padding-top: 34px; }
     /* min-width is a resize floor, and it is 160px of content plus padding — two of them in a
        360px row is wider than the screen. Nothing resizes here, so the floor goes. */
     [data-panel] { overflow: visible; min-width: 0; }
@@ -831,6 +841,10 @@
     </div>
     <div class="row">
       <button id="btn-layout-reset">Reset panel layout</button>
+      <!-- Phone-only: on anything wider the grips are always there, so the button would toggle
+           nothing. It is per-device, not a setting — the config server syncs one layout to the
+           whole house, and "I am rearranging right now" is not something to sync. -->
+      <button id="btn-edit" class="phone-only">Rearrange panels</button>
     </div>
     <div class="row">
       <input id="layout-name" placeholder="layout name (e.g. tablet)">
@@ -845,7 +859,9 @@
     <div class="muted" style="font-size:12px;margin-top:6px">
       Hover a panel for its grip: drag the grip to move it, drag the bottom-right corner to resize,
       double-click the grip to restore that panel's size. The × beside the grip hides a panel;
-      hidden panels come back from the list above.
+      hidden panels come back from the list above. On a phone the grips would sit over the panel
+      titles, so they wait for <b>Rearrange panels</b> above — move and hide only, since a phone
+      gives every panel the full width anyway.
     </div>
 
     <h2 style="font-size:13px;margin-top:18px">Tabs</h2>
