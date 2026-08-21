@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Setup help
+    url: https://github.com/d4vid87/weatherdesk#other-weather-stations
+    about: Per-brand station setup, Docker, and the read-only dashboard — also in the app under Settings → Help.

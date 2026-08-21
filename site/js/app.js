@@ -51,6 +51,9 @@ const DEFAULTS = {
   // CWOP callsign to report to (empty = off). Not a secret: callsigns are public and the
   // network's passcode for stations like ours is the constant -1.
   cwopId: '',
+  // Relay the station on to the two networks a console usually uploads to — pointing it at this
+  // app takes it away from them, and most consoles only hold one address.
+  wuId: '', wuKey: '', pwsId: '', pwsKey: '',
   // Broker topics to read back and show on the Home card. [{ topic, label, unit }]
   mqttSubs: [],
   // --- Other brands of station. Empty means a Tempest (or nothing yet). ---
@@ -99,6 +102,10 @@ export const configured = () => !!(_settings.token && _settings.stationId);
 // brand reporting into the LAN server. `configured()` still means "Tempest REST is usable" and
 // still gates everything that talks to WeatherFlow; this gates what any station can drive.
 export const hasSource = () => configured() || !!(_settings.stationSource && _settings.lat != null);
+
+// Forecasts only need a point on the earth: open-meteo and the NWS are free and worldwide. An
+// install with no station at all still gets a ten-day and a story out of a saved place.
+export const hasLocation = () => coords().lat != null;
 
 // Coordinates the non-Tempest panels point at: the active saved place, else the station.
 export function coords() {

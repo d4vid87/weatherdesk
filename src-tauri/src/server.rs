@@ -127,7 +127,7 @@ fn json(body: String) -> ResponseBox {
 ///
 /// `cwopId` is deliberately absent: a CWOP callsign is public by design (the network's passcode
 /// for receive-only stations is the constant -1), and redacting it would only break the badge.
-const SECRET_KEYS: [&str; 11] = [
+const SECRET_KEYS: [&str; 13] = [
     "token",
     "mqttUser",
     "mqttPass",
@@ -141,6 +141,10 @@ const SECRET_KEYS: [&str; 11] = [
     "lacrosseEmail",
     "lacrossePass",
     "ingestKey",
+    // Upload keys for the relay. The station ids are public (they name your station on both
+    // sites); the keys are what stop anyone else from posting as you.
+    "wuKey",
+    "pwsKey",
 ];
 
 fn redact(config_json: &str) -> String {
@@ -615,9 +619,10 @@ mod tests {
         let out = redact(
             r#"{"settings":{"token":"abc123","mqttPass":"hunter2","ntfyTopic":"secret-topic",
                 "awnApiKey":"awn-key","awnAppKey":"awn-app","lacrossePass":"lax-pw","ingestKey":"pushpin",
+                "wuKey":"wu-pw","pwsKey":"pws-pw",
                 "stationId":"1234","lat":33.1,"units":"imperial"}}"#,
         );
-        for needle in ["abc123", "hunter2", "secret-topic", "awn-key", "awn-app", "lax-pw", "pushpin"] {
+        for needle in ["abc123", "hunter2", "secret-topic", "awn-key", "awn-app", "lax-pw", "pushpin", "wu-pw", "pws-pw"] {
             assert!(!out.contains(needle), "{needle} leaked into the public config: {out}");
         }
         assert!(out.contains("1234") && out.contains("imperial"), "public config lost the station");

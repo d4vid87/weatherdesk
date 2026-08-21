@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -137,6 +137,10 @@ function fillDrawer() {
   $('set-quiet-end').value = s.quietEnd || '';
   $('set-http-port').value = s.httpPort || '';
   $('set-cwop').value = s.cwopId || '';
+  $('set-wu-id').value = s.wuId || '';
+  $('set-wu-key').value = s.wuKey || '';
+  $('set-pws-id').value = s.pwsId || '';
+  $('set-pws-key').value = s.pwsKey || '';
   $('set-source').value = s.stationSource || '';
   $('set-wll').value = s.wllHost || '';
   $('set-awn-api').value = s.awnApiKey || '';
@@ -163,23 +167,48 @@ function fillDrawer() {
   renderCatalog();
   renderStations();
   fillSites();
+  $('app-version').textContent = APP_VERSION ? `v${APP_VERSION}` : '';
+  renderDiag();
 }
 
-// Panels are hidden from their own grip; this is the only way back, so it lists them by id —
-// short enough to recognise, and no second name to keep in sync with the markup.
+// What each station source last did. A snapshot each time the drawer opens is enough — this is
+// read by someone who is already looking at it, or screenshotting it into a bug report.
+function renderDiag() {
+  const el = $('ingest-diag');
+  if (!el) return;
+  fetch(`${SRV}/diag`)
+    .then((r) => r.json())
+    .then((d) => {
+      const rows = Object.entries(d).map(([src, v]) => {
+        const ago = Math.max(0, Math.round(Date.now() / 1000 - v.at));
+        return `<div>${src} · ${v.rows} rows · ${v.ok ? '' : 'error: '}${v.what} · ${ago}s ago</div>`;
+      });
+      el.innerHTML = rows.join('') || 'No station has reported here yet.';
+    })
+    .catch(() => { el.innerHTML = ''; });
+}
+
+// A panel's own heading, so the lists read the way the page does. Falls back to the id for a
+// panel that has no heading — better than a blank button.
+function panelTitle(id) {
+  const el = document.querySelector(`[data-panel="${id}"]`);
+  return el?.querySelector('h1,h2,h3')?.textContent.trim() || id;
+}
+
+// Panels are hidden from their own grip, and this is the only way back — people who close one by
+// accident have to be able to find it, so it lives under its own heading and names the panel.
 function renderHiddenPanels() {
   const ids = hiddenPanels();
   $('hidden-list').innerHTML = ids.length
     ? ids.map((id, i) => `<button class="place-hit" data-hidden="${i}" style="flex:0 0 auto"></button>`).join('')
     : '<div class="muted" style="font-size:12px">No hidden panels</div>';
   $('hidden-list').querySelectorAll('[data-hidden]').forEach((b) => {
-    b.textContent = `${ids[+b.dataset.hidden]} ×`;
+    b.textContent = `${panelTitle(ids[+b.dataset.hidden])} ×`;
     b.onclick = () => { unhide(ids[+b.dataset.hidden]); renderHiddenPanels(); };
   });
 }
 
-// One row per panel: its id (short enough to recognise, and no second name to keep in step with
-// the markup) and the tab it lives on.
+// One row per panel: its heading and the tab it lives on.
 function renderCatalog() {
   const el = $('panel-catalog');
   if (!el) return;
@@ -188,7 +217,7 @@ function renderCatalog() {
       <span class="place-hit" style="flex:1" data-name="${id}"></span>
       <select data-panel-tab="${id}" style="flex:0 0 110px">${opts}</select>
     </div>`).join('');
-  el.querySelectorAll('[data-name]').forEach((s) => { s.textContent = s.dataset.name; });
+  el.querySelectorAll('[data-name]').forEach((s) => { s.textContent = panelTitle(s.dataset.name); });
   el.querySelectorAll('[data-panel-tab]').forEach((sel) => {
     sel.value = tabOf(sel.dataset.panelTab);
     sel.onchange = () => setTab(sel.dataset.panelTab, sel.value);
@@ -266,6 +295,10 @@ $('btn-save').onclick = async () => {
     quietEnd: $('set-quiet-end').value,
     httpPort: $('set-http-port').value.trim(),
     cwopId: $('set-cwop').value.trim().toUpperCase(),
+    wuId: $('set-wu-id').value.trim(),
+    wuKey: $('set-wu-key').value.trim(),
+    pwsId: $('set-pws-id').value.trim(),
+    pwsKey: $('set-pws-key').value.trim(),
     stationSource: $('set-source').value,
     wllHost: $('set-wll').value.trim(),
     awnApiKey: $('set-awn-api').value.trim(),
@@ -446,8 +479,11 @@ $('btn-wiz-demo').onclick = () => {
 // --- what's new ---
 //
 // A dashboard that gains a feature nobody notices has not gained a feature.
-const APP_VERSION = '2.0.1';
+// The binary injects this (`server::ver_script`, and `gui.rs` for the desktop window) so there is
+// one version in the build, not a literal here that goes stale the first release nobody edits it.
+const APP_VERSION = window.__WD_VER || '';
 function changelog() {
+  if (!APP_VERSION) return; // served from a static host: no version to be honest about
   // Raw string, not store(): this is compared to a literal, and a JSON-quoted one never matches.
   const seen = localStorage.getItem('wd.lastVersion');
   if (seen === APP_VERSION) return;
@@ -869,9 +905,16 @@ if (!hasSource() && !PUBLIC) {
   // UDP-only mode: a desktop install with a hub on the LAN has real local data with no token at
   // all, so the modules start either way. Every refresh job early-returns without a token, so an
   // unconfigured init is a handful of no-ops.
-  for (const id of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
-    const el = $(id);
-    if (el) el.innerHTML = '<div class="muted">Needs a Tempest token — open ⚙ Settings</div>';
+  // Only blank them when there is nowhere to point a forecast at. A Tempest token is one way in,
+  // not the only one — saying otherwise sent people off to open accounts they never needed.
+  if (!hasLocation()) {
+    const body = settings().stationSource
+      ? 'Needs a station location — open ⚙ Settings and search a city under Places'
+      : 'Needs a station — open ⚙ Settings';
+    for (const id of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
+      const el = $(id);
+      if (el) el.innerHTML = `<div class="muted">${body}</div>`;
+    }
   }
 }
 // lat/lon must land before the open-meteo/NWS jobs start (resolves immediately when unconfigured)

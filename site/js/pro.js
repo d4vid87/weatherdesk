@@ -342,6 +342,13 @@ function renderGauges(fc) {
   const wb = c.wet_bulb_temperature;
   $('g-wet').innerHTML = gauge(icon.thermometer((wb - (metric ? 0 : 32)) / (metric ? 35 : 60)),
     `<b>${num(wb)}°</b><span>Air ${num(c.air_temperature)}°</span>`);
+
+  const taC = metric ? c.air_temperature : (c.air_temperature - 32) / 1.8;
+  const windMps = c.wind_avg / (metric ? 3.6 : 2.23694);
+  const wbgt = wbgtC(taC, c.relative_humidity, c.solar_radiation || 0, windMps);
+  const shown = wbgt == null ? null : metric ? wbgt : wbgt * 1.8 + 32;
+  $('g-wbgt').innerHTML = gauge(icon.thermometer(((shown ?? 0) - (metric ? 0 : 32)) / (metric ? 35 : 60)),
+    `<b>${shown == null ? '--' : num(shown)}°</b><span>${shown == null ? 'no humidity' : `estimated · ${wbgtWord(metric ? shown * 1.8 + 32 : shown)}`}</span>`);
 }
 
 const uvWord = (v) => (v >= 11 ? 'Extreme' : v >= 8 ? 'Very high' : v >= 6 ? 'High' : v >= 3 ? 'Moderate' : 'Low');
@@ -412,6 +419,36 @@ function dewPointC(c, rh) {
   const g = (17.625 * c) / (243.04 + c) + Math.log(rh / 100);
   return (243.04 * g) / (17.625 - g);
 }
+
+// Wet-bulb temperature from air temperature and humidity, Stull (2011). Within a few tenths of
+// a degree over the range a weather station sees.
+function wetBulbC(c, rh) {
+  if (c == null || !(rh > 0)) return null;
+  return c * Math.atan(0.151977 * Math.sqrt(rh + 8.313659))
+    + Math.atan(c + rh) - Math.atan(rh - 1.676331)
+    + 0.00391838 * rh ** 1.5 * Math.atan(0.023101 * rh) - 4.686035;
+}
+
+// Wet Bulb Globe Temperature — the heat-stress number the military, athletics and OSHA use,
+// because it accounts for sun and wind where the heat index doesn't.
+//
+// ponytail: an estimate, because the real instrument is a 15 cm black globe nobody has in their
+// garden. The ISO weighting is exact; what is estimated is the globe temperature, from solar and
+// wind (Hunter & Minyard) — sun heats the globe, wind carries it away, which is the whole reason
+// WBGT says something the heat index doesn't. Out of the sun the globe reads air temperature and
+// the weighting collapses to the indoor form. Swap in Liljegren if somebody turns up with a real
+// globe to compare against.
+export function wbgtC(taC, rh, solar = 0, windMps = 1) {
+  if (taC == null || !(rh > 0)) return null;
+  const tw = wetBulbC(taC, rh);
+  if (tw == null) return null;
+  if (!(solar >= 100)) return 0.7 * tw + 0.3 * taC;
+  const tg = taC + 0.021 * solar - 0.42 * Math.max(windMps, 0) + 3.6;
+  return 0.7 * tw + 0.2 * tg + 0.1 * taC;
+}
+
+// The NWS flag categories, in °F.
+const wbgtWord = (f) => (f >= 90 ? 'Extreme' : f >= 88 ? 'Very high' : f >= 85 ? 'High' : f >= 80 ? 'Moderate' : 'Low');
 
 function renderLocal(o) {
   const metric = settings().units === 'metric';
@@ -490,4 +527,10 @@ if (location.search.includes('selftest')) {
   console.assert(Math.abs(dewPointC(20, 100) - 20) < 0.1, 'pro: saturated air dews at the air temperature');
   console.assert(Math.abs(dewPointC(20, 50) - 9.3) < 0.3, 'pro: 20°C at 50% dews near 9.3°C');
   console.assert(dewPointC(20, 0) === null, 'pro: no humidity, no dew point');
+  console.assert(Math.abs(wetBulbC(20, 50) - 13.7) < 0.5, 'pro: 20°C at 50% wet-bulbs near 13.7°C');
+  const sun = wbgtC(35, 50, 800, 1);
+  console.assert(sun > 31 && sun < 35, 'pro: 35°C/50% in full sun is an extreme WBGT', sun);
+  console.assert(wbgtC(35, 50, 0, 1) < sun, 'pro: shade must read cooler than sun');
+  console.assert(wbgtC(35, 50, 800, 8) < sun, 'pro: wind must carry heat off the globe');
+  console.assert(wbgtC(20, 0, 500, 1) === null, 'pro: no humidity, no WBGT');
 }
