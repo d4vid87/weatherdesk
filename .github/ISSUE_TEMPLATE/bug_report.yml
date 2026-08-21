@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in WeatherDesk isn't working
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: WeatherDesk version
+      description: Settings → beside "Check for updates".
+      placeholder: "3.0.8"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it installed?
+      options:
+        - Windows (.msi)
+        - macOS (.dmg)
+        - Linux (.deb / .AppImage)
+        - Raspberry Pi
+        - Docker / headless
+        - Android (.apk)
+        - A browser pointed at another machine
+    validations:
+      required: true
+  - type: input
+    id: station
+    attributes:
+      label: Which weather station?
+      description: Brand and model, or "none — location only".
+      placeholder: "Ambient WS-2902B"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, what you got, and what you had just done.
+    validations:
+      required: true
+  - type: textarea
+    id: diag
+    attributes:
+      label: Station reporting
+      description: >
+        If this is about a station that isn't reporting, paste or screenshot the
+        "Station reporting" lines from Settings — they say what arrived and when.

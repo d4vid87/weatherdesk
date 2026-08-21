@@ -176,9 +176,13 @@ slower. Nothing else to fill in here.
 then the awnet app → *Custom server*, same address and path. Ambient's consoles speak their own
 query-string format; the server recognises it.
 
-**Weather Underground protocol.** Many other consoles can only be told a WU server. Point them at
-the app's IP and port and leave the path alone — `/weatherstation/updateweatherstation.php` is
-answered too, with the `success` body those clients look for.
+**Weather Underground protocol.** Many other consoles can only be told a WU server — Vevor,
+Sainlogic, Fine Offset and most of the rest. Point them at the app's IP and port and leave the path
+alone; every spelling those firmwares use is answered (`/weatherstation/updateweatherstation.php`,
+the bare `/updateweatherstation.php`, `/data/report`), with the `success` body they look for. Two
+things catch people out: the console must be allowed plain **HTTP**, not HTTPS, and it must accept
+a port other than 80. Firmware that insists on either needs a router rule forwarding port 80 to
+8088 on this machine.
 
 **Davis — Vantage Pro2, Vantage Pro2 Plus, Vantage Vue.** Needs a WeatherLink Live (or a Console
 6313) on the network. Put its IP in *WeatherLink Live address*; the app polls its local API every
@@ -309,6 +313,10 @@ forecasts, the 10-day list, history charts, model agreement, alerts. The pressur
 
 - **Windows** — run the `.msi`. The app is unsigned, so SmartScreen shows a warning: **More info →
   Run anyway**. Allow the Windows Firewall prompt on first launch, or the tablet can't connect.
+  Defender occasionally quarantines a new unsigned installer outright — a false positive, reported
+  to Microsoft for each release. Windows Security → Protection history → the item → **Restore**,
+  then **Allow on device**. Every release ships a `SHA256SUMS.txt` to check the download against
+  first: `certutil -hashfile WeatherDesk_*.msi SHA256`.
 - **macOS** — open the `.dmg`, drag WeatherDesk to Applications. Unsigned, so on first launch macOS
   refuses it: **System Settings → Privacy & Security → Open Anyway**, or in a terminal
   `xattr -dr com.apple.quarantine /Applications/WeatherDesk.app`.
@@ -410,8 +418,17 @@ reaches the others without a reload. A browser that can't reach the stream falls
 exactly as before.
 
 **Updates.** `Settings → Check for updates` downloads and installs a signed release in place on
-Windows, macOS and Linux packages. Flatpak installs update through Flatpak, and Android stays a
-sideload.
+Windows, macOS and Linux packages. The version you are running is printed beside that button.
+Flatpak installs update through Flatpak, and Android stays a sideload. Builds older than the
+updater have to be reinstalled once from the releases page; settings and history survive.
+
+**Re-uploading to Weather Underground or PWSWeather.** Most consoles hold one upload address, so
+pointing yours at WeatherDesk takes it off whichever network it was on. Put the station ID and key
+for either service under `Settings → This computer` and the app re-sends each reading once a
+minute.
+
+**Panels.** The × beside a panel's grip hides it; `Settings → Hidden panels` lists what is hidden
+and puts it back. `Reset panel layout` restores everything at once.
 
 ### Docker / no desktop at all
 
