@@ -8,6 +8,56 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+Everything here came out of what people reported after 3.0.8.
+
+### Fixed
+
+- **A station no longer stops reporting after the first reading.** One throttle was shared by every
+  source, and it compared the timestamp inside the report rather than the clock on this machine. A
+  console set even slightly ahead of real time — a WeatherLink Live is the one people hit — parked
+  that throttle in the future, and every later reading was dropped until the app was restarted. The
+  gate is now per source and runs on our own clock, so a wrong console clock can't stall it, and a
+  push station and a polled one no longer starve each other. Report timestamps are clamped to
+  within ten minutes of now, so a badly set console can't scatter rows across the archive either.
+- **Consoles that upload on a different path are answered.** Weather Underground clones — Vevor,
+  Sainlogic, Fine Offset and the rest — vary in where they post: with and without the
+  `/weatherstation/` prefix, with and without a trailing slash on `/data/report`. All of them reach
+  the ingest route now instead of a 404.
+- **Placeholders stop claiming a Tempest token is required.** Panels that only need a location said
+  "Needs a Tempest token", which sent people off to open accounts they never needed. They now say
+  what is actually missing, and an install with only a saved place gets its forecast, ten-day and
+  story — those come from open-meteo, free and worldwide.
+- Failed station polls say what went wrong. A timeout or a refused connection was silent; it now
+  logs the failure kind (never the URL — these carry API keys).
+
+### Added
+
+- **The running version is on screen**, beside Settings → Check for updates, and comes from the
+  build rather than a string in the page that went stale two releases ago.
+- **Station reporting**, under Settings: what each source last did, how many rows it has stored and
+  how long ago. Answers "is my console actually getting through?" without a log file, and a
+  screenshot of it answers most of a bug report.
+- **Re-upload to Weather Underground and PWSWeather.** A console holds one upload address, so
+  pointing it at WeatherDesk takes it off whichever network it was on. Put the station ID and key
+  for either service under Settings → This computer and each reading is sent on once a minute.
+- **A WBGT gauge** — the heat-stress number that accounts for sun and wind, which the heat index
+  doesn't. Estimated from temperature, humidity, solar and wind, and labelled as an estimate: the
+  real instrument is a black globe on a stand.
+- **Airports can be added by code.** Type an ICAO like `KBDL` under Nearby stations for anywhere the
+  radius scan doesn't reach, and it survives later scans. **Reset dismissed** brings back an airport
+  that was closed with its ×.
+- **A Help section in Settings**: per-brand setup, what version you're on and how to update, how to
+  restore a panel you closed, where the forecasts come from, reading the dashboard on an iPad or
+  phone, Docker, and what to do when Defender quarantines the installer.
+
+### Changed
+
+- The hidden-panel list has its own heading and names panels the way the page does, instead of
+  sitting unlabelled below the saved layouts showing raw ids.
+- Every release now publishes `SHA256SUMS.txt`, so an installer can be checked against it — and
+  each Windows build is reported to Microsoft as a false detection.
+- Bug reports have a template that asks for the version, install type and station brand up front.
+
 ## [3.0.8] — 2026-08-20
 
 ### Fixed
