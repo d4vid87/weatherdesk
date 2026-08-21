@@ -8,6 +8,8 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.0.9] — 2026-08-21
+
 Everything here came out of what people reported after 3.0.8.
 
 ### Fixed
@@ -278,7 +280,8 @@ tablet on the LAN — vanilla JS, no build step, no framework, no chart library.
 - Radar from [Hook Echo-WX](https://github.com/d4vid87/hookecho)
 - MIT license
 
-[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.8...HEAD
+[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.9...HEAD
+[3.0.9]: https://github.com/d4vid87/weatherdesk/compare/v3.0.8...v3.0.9
 [3.0.8]: https://github.com/d4vid87/weatherdesk/compare/v3.0.7...v3.0.8
 [3.0.7]: https://github.com/d4vid87/weatherdesk/compare/v3.0.6...v3.0.7
 [3.0.6]: https://github.com/d4vid87/weatherdesk/compare/v3.0.5...v3.0.6
