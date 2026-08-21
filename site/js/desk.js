@@ -1,6 +1,6 @@
 // 01 Desk — current conditions, near-term forecast, alerts, AQI.
 import * as api from './api.js';
-import { settings, coords, configured, hasSource, U, num, timeStr, dayStr, notify, every, stamp, store, load, setStorm } from './app.js';
+import { settings, coords, configured, hasSource, hasLocation, U, num, timeStr, dayStr, notify, every, stamp, store, load, setStorm } from './app.js';
 
 // Last-good copies of the two payloads the Desk can't render without. An outage that spans a
 // reload would otherwise leave the whole page at `--`; in-session failures already keep the DOM.
@@ -38,8 +38,9 @@ export const icon = (k) => ICON[k] || '·';
 
 export async function refreshDesk() {
   // Not `configured()`: an Ecowitt or a Davis has no Tempest forecast, and `api.betterForecast`
-  // hands those installs the open-meteo payload in the same shape.
-  if (!hasSource()) return;
+  // hands those installs the open-meteo payload in the same shape — which needs a location and
+  // nothing else, so an install with only a saved place gets a forecast too.
+  if (!hasSource() && !hasLocation()) return;
   let res;
   try {
     res = await cached('wd.cache.fc', api.betterForecast);

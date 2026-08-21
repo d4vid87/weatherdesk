@@ -20,9 +20,12 @@ const MPS = { imperial: 2.23694, metric: 3.6 }; // rapid_wind is always m/s
 async function scanNearby() {
   const s = settings();
   const r = s.nearbyRadius;
+  // An airport typed in by hand is not something a scan gets to take away — radius 0 is the
+  // default, so a wholesale clear used to lose it on the next save.
+  const manual = s.nearbyMetar.filter((m) => m.manual);
   if (!r || s.lat == null) {
-    if (s.nearbyMetar.length) {
-      saveSettings({ nearbyMetar: [] });
+    if (s.nearbyMetar.length !== manual.length) {
+      saveSettings({ nearbyMetar: manual });
       refreshSignals();
     }
     return;
@@ -36,9 +39,9 @@ async function scanNearby() {
     // same air mass, half an hour late.
     const metar = (list.features || [])
       .map((f) => ({ id: f.properties.stationIdentifier, name: f.properties.name, c: f.geometry.coordinates }))
-      .filter((x) => !s.nearbyExclude.includes(x.id) && near(x.c[1], x.c[0]))
+      .filter((x) => !s.nearbyExclude.includes(x.id) && !manual.some((m) => m.id === x.id) && near(x.c[1], x.c[0]))
       .slice(0, 3);
-    saveSettings({ nearbyMetar: metar.map(({ id, name }) => ({ id, name })) });
+    saveSettings({ nearbyMetar: [...manual, ...metar.map(({ id, name }) => ({ id, name }))] });
   } catch (e) { console.warn('nearby METAR scan:', e.message); }
   refreshSignals();
 }
@@ -235,14 +238,34 @@ export function initSignals() {
   renderStrikes();
   renderNotifLog();
   $('btn-add-station').onclick = () => {
+    const raw = $('add-station-id').value.trim();
+    // An airport code, for the parts of the country the radius scan reaches past — the NWS
+    // station list is nearest-first and capped, so a neighbouring state's airport never appears
+    // on its own. `api.metarObs()` reads any ICAO the NWS publishes.
+    const icao = (raw.toUpperCase().match(/^[A-Z]{4}$/) || [])[0];
+    if (icao) {
+      const s = settings();
+      saveSettings({
+        nearbyMetar: [...s.nearbyMetar.filter((m) => m.id !== icao), { id: icao, name: icao, manual: true }],
+        nearbyExclude: s.nearbyExclude.filter((x) => x !== icao),
+      });
+      $('add-station-id').value = '';
+      refreshSignals();
+      return;
+    }
     // Pasting the map/station URL is what people actually have in hand. Station ids run 4+
     // digits, so the first such run is the id in every form of the link.
-    const id = ($('add-station-id').value.match(/\d{4,}/) || [])[0];
+    const id = (raw.match(/\d{4,}/) || [])[0];
     if (!id) return;
     const list = settings().nearbyStations;
     if (!list.includes(id)) saveSettings({ nearbyStations: [...list, id] });
     $('add-station-id').value = '';
     refreshSignals();
+  };
+  // The × on a row is remembered forever, which is right until somebody wants one back.
+  $('btn-nearby-reset').onclick = () => {
+    saveSettings({ nearbyExclude: [] });
+    scanNearby();
   };
   // connectWs() self-guards on the token, so a non-Tempest station gets the neighbour scan and
   // the comparison rows without one.
