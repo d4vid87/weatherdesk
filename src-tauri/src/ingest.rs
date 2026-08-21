@@ -186,6 +186,11 @@ struct Mem {
     rain: Option<f64>,
     strikes: Option<f64>,
     last_ts: Option<f64>,
+    /// When we heard the last kept report, by our clock.
+    last_wall: Option<u64>,
+    /// The payload's own stamp on that report, unclamped — a poll that returns the same
+    /// reading twice is a duplicate, not a new interval.
+    last_raw: Option<f64>,
 }
 
 /// Difference a running total against the last stored one. A drop means the console rolled its
@@ -204,9 +209,71 @@ fn delta(prev: &mut Option<f64>, cur: f64) -> f64 {
     }
 }
 
-fn mem() -> &'static Mutex<Mem> {
-    static M: OnceLock<Mutex<Mem>> = OnceLock::new();
-    M.get_or_init(|| Mutex::new(Mem::default()))
+/// Counters and throttle state, per source. One shared set used to serve every brand at once,
+/// which meant a Davis poll and an Ecowitt push starved each other, and one console's wrong
+/// clock stopped the lot.
+fn mem() -> &'static Mutex<HashMap<&'static str, Mem>> {
+    static M: OnceLock<Mutex<HashMap<&'static str, Mem>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Is this report far enough from the last one we kept to be worth a row?
+///
+/// Gated on our own clock, not the payload's. A WeatherLink Live console set a day ahead used to
+/// park `last_ts` in the future and every later report was dropped for good — "grabs data
+/// initially then stops". The payload stamp is only used to spot a poll that returned the same
+/// reading twice.
+fn keep(now: u64, m: &Mem, raw_ts: f64) -> bool {
+    if m.last_raw == Some(raw_ts) {
+        return false;
+    }
+    m.last_wall.map(|w| now.saturating_sub(w) >= MIN_GAP).unwrap_or(true)
+}
+
+// --- Diagnostics ---
+
+/// The last thing each source did, for the drawer. Fixed phrases and status codes only — these
+/// go over HTTP to any LAN client, and the payloads they describe carry keys and passwords.
+struct Diag {
+    at: u64,
+    ok: bool,
+    what: String,
+    rows: u64,
+}
+
+fn diags() -> &'static Mutex<HashMap<&'static str, Diag>> {
+    static D: OnceLock<Mutex<HashMap<&'static str, Diag>>> = OnceLock::new();
+    D.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn note(origin: &'static str, ok: bool, what: &str, stored: bool) {
+    let Ok(mut d) = diags().lock() else { return };
+    let e = d.entry(origin).or_insert(Diag { at: 0, ok: true, what: String::new(), rows: 0 });
+    e.at = epoch();
+    e.ok = ok;
+    e.what = what.into();
+    if stored {
+        e.rows += 1;
+    }
+}
+
+/// `{"push":{"at":...,"ok":true,"what":"stored","rows":42}, ...}`
+pub fn diag_json() -> String {
+    let Ok(d) = diags().lock() else { return "{}".into() };
+    let body = d
+        .iter()
+        .map(|(k, v)| {
+            format!(
+                "\"{k}\":{{\"at\":{},\"ok\":{},\"what\":\"{}\",\"rows\":{}}}",
+                v.at,
+                v.ok,
+                v.what.replace('"', ""),
+                v.rows
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{{body}}}")
 }
 
 // --- Publishing ---
@@ -234,8 +301,11 @@ fn n(v: Option<f64>) -> String {
 ///
 /// The counters are only advanced on a report we keep — a differenced total against a report we
 /// threw away would drop that interval's rain on the floor.
-fn take(state: &Arc<State>, f: &Fields, ts: f64, src: i64) -> bool {
+fn take(state: &Arc<State>, f: &Fields, raw_ts: f64, src: i64, origin: &'static str) -> bool {
     let at = epoch();
+    // A console clock that is out by a day would otherwise scatter rows across the archive and
+    // defeat CWOP's staleness guard. Ten minutes of slack is more than any real drift.
+    let ts = raw_ts.clamp(at as f64 - 600.0, at as f64 + 600.0);
     let wind = num(f, &["windspeedmph"]).map(|v| v * MPS_PER_MPH).or_else(|| num(f, &["wind_avg_m_s"]));
     if let (Some(sp), Some(dir)) = (wind, num(f, &["winddir", "wind_dir_deg"])) {
         publish(
@@ -245,13 +315,19 @@ fn take(state: &Arc<State>, f: &Fields, ts: f64, src: i64) -> bool {
         );
     }
 
-    let mut m = mem().lock().unwrap();
-    if m.last_ts.map(|prev| ts - prev < MIN_GAP as f64).unwrap_or(false) {
+    let mut all = mem().lock().unwrap();
+    let m = all.entry(origin).or_default();
+    if !keep(at, m, raw_ts) {
+        drop(all);
+        note(origin, true, "throttled", false);
         return false;
     }
-    let t = tuple(f, ts, &mut m);
+    let t = tuple(f, ts, m);
     m.last_ts = Some(ts);
-    drop(m);
+    m.last_wall = Some(at);
+    m.last_raw = Some(raw_ts);
+    drop(all);
+    note(origin, true, "stored", true);
 
     if let Some(conn) = state.db() {
         store::insert(&conn, &t, src);
@@ -290,6 +366,7 @@ pub fn accept(state: &Arc<State>, url: &str, body: &str) -> u16 {
         let path = url.split('?').next().unwrap_or("");
         let given = crate::server::query(url, "key").unwrap_or_default();
         if given != want && !path.ends_with(&format!("/{want}")) {
+            note("push", false, "wrong ingest key", false);
             return 401;
         }
     }
@@ -297,26 +374,32 @@ pub fn accept(state: &Arc<State>, url: &str, body: &str) -> u16 {
     // Anything with no temperature and no wind in it is not a weather report — a console
     // probing the path, or a browser that wandered in.
     if num(&f, &["tempf", "temperature_c", "temp_c", "temp"]).is_none() && num(&f, &["windspeedmph", "wind_avg_m_s"]).is_none() {
+        note("push", false, "no temperature or wind in report", false);
         return 400;
     }
     // Console clocks are wrong often enough that trusting `dateutc` would scatter rows across
     // the archive. What matters is when we heard it.
-    take(state, &f, epoch() as f64, SRC_INGEST);
+    take(state, &f, epoch() as f64, SRC_INGEST, "push");
     200
 }
 
 // --- Pollers ---
 
-fn get(url: &str) -> Option<serde_json::Value> {
-    // Status code only, never the error's Display: these URLs carry API keys in their query
-    // strings and this string goes to a log.
+fn get(url: &str, origin: &'static str) -> Option<serde_json::Value> {
+    // Status code or transport kind only, never the error's Display: these URLs carry API keys in
+    // their query strings and this string goes to a log.
     match ureq::get(url).timeout(Duration::from_secs(20)).call() {
         Ok(r) => r.into_string().ok().and_then(|b| serde_json::from_str(&b).ok()),
         Err(ureq::Error::Status(code, _)) => {
             eprintln!("weatherdesk: station poll refused ({code})");
+            note(origin, false, &format!("HTTP {code}"), false);
             None
         }
-        Err(_) => None,
+        Err(ureq::Error::Transport(t)) => {
+            eprintln!("weatherdesk: station poll failed ({:?})", t.kind());
+            note(origin, false, &format!("{:?}", t.kind()), false);
+            None
+        }
     }
 }
 
@@ -327,7 +410,7 @@ fn get(url: &str) -> Option<serde_json::Value> {
 /// 10-second poll is the same data at a resolution the gauge can't show; arm the UDP stream if
 /// somebody wants the fast needle.
 fn poll_wll(state: &Arc<State>, host: &str) {
-    let Some(v) = get(&format!("http://{host}/v1/current_conditions")) else { return };
+    let Some(v) = get(&format!("http://{host}/v1/current_conditions"), "wll") else { return };
     let Some(conds) = v.pointer("/data/conditions").and_then(|c| c.as_array()) else { return };
     let ts = v.pointer("/data/ts").and_then(|t| t.as_f64()).unwrap_or(epoch() as f64);
 
@@ -364,7 +447,7 @@ fn poll_wll(state: &Arc<State>, host: &str) {
         }
     }
     if !f.is_empty() {
-        take(state, &f, ts, SRC_INGEST);
+        take(state, &f, ts, SRC_INGEST, "wll");
     }
 }
 
@@ -384,13 +467,13 @@ fn rain_bucket_mm(c: &serde_json::Value) -> f64 {
 /// not point it away from Ambient's own servers.
 fn poll_awn(state: &Arc<State>, api_key: &str, app_key: &str) {
     let url = format!("https://rt.ambientweather.net/v1/devices?applicationKey={app_key}&apiKey={api_key}");
-    let Some(v) = get(&url) else { return };
+    let Some(v) = get(&url, "awn") else { return };
     let Some(last) = v.get(0).and_then(|d| d.get("lastData")) else { return };
     let mut f = Fields::new();
     parse_json(last, &mut f);
     // `dateutc` is milliseconds here, unlike everywhere else in this file.
     let ts = last.get("dateutc").and_then(|t| t.as_f64()).map(|ms| ms / 1000.0).unwrap_or(epoch() as f64);
-    take(state, &f, ts, SRC_CLOUD);
+    take(state, &f, ts, SRC_CLOUD, "awn");
 }
 
 /// La Crosse. Unofficial: there is no published API, and this is the app's own — a Google
@@ -424,9 +507,14 @@ fn bearer(url: &str, token: &str) -> Option<serde_json::Value> {
         Ok(r) => r.into_string().ok().and_then(|b| serde_json::from_str(&b).ok()),
         Err(ureq::Error::Status(code, _)) => {
             eprintln!("weatherdesk: La Crosse read refused ({code})");
+            note("lacrosse", false, &format!("HTTP {code}"), false);
             None
         }
-        Err(_) => None,
+        Err(ureq::Error::Transport(t)) => {
+            eprintln!("weatherdesk: La Crosse read failed ({:?})", t.kind());
+            note("lacrosse", false, &format!("{:?}", t.kind()), false);
+            None
+        }
     }
 }
 
@@ -467,7 +555,7 @@ fn poll_lacrosse(state: &Arc<State>, token: &str) {
         }
     }
     if !f.is_empty() {
-        take(state, &f, ts, SRC_CLOUD);
+        take(state, &f, ts, SRC_CLOUD, "lacrosse");
     }
 }
 
@@ -648,6 +736,36 @@ mod tests {
         assert!((rain_bucket_mm(&serde_json::json!({"rain_size": 4})) - 0.0254).abs() < 1e-9);
         // An absent field is the North American gauge, not zero millimetres a tip.
         assert!((rain_bucket_mm(&serde_json::json!({})) - 0.254).abs() < 1e-9);
+    }
+
+    /// The Davis regression: a console stamping its reports a day into the future used to freeze
+    /// the throttle forever, because the gate compared payload stamps.
+    #[test]
+    fn a_console_clock_in_the_future_cannot_stall_the_gate() {
+        let now = 1_000_000u64;
+        let ahead = now as f64 + 86_400.0;
+        let mut m = Mem::default();
+        assert!(keep(now, &m, ahead), "first report always keeps");
+        m.last_wall = Some(now);
+        m.last_raw = Some(ahead);
+        assert!(!keep(now + 10, &m, ahead + 10.0), "ten seconds later is still the same minute");
+        assert!(keep(now + MIN_GAP, &m, ahead + 60.0), "a minute of our time must let a row through");
+    }
+
+    #[test]
+    fn a_repeated_poll_result_is_not_a_new_interval() {
+        let m = Mem { last_wall: Some(0), last_raw: Some(500.0), ..Mem::default() };
+        assert!(!keep(1_000, &m, 500.0), "same payload stamp is the same reading");
+        assert!(keep(1_000, &m, 501.0));
+    }
+
+    #[test]
+    fn sources_do_not_throttle_each_other() {
+        // Two entries in the map, so a push and a poll each get their own minute.
+        let mut map: HashMap<&'static str, Mem> = HashMap::new();
+        map.insert("push", Mem { last_wall: Some(1_000), ..Mem::default() });
+        assert!(keep(1_010, map.entry("wll").or_default(), 1_010.0));
+        assert!(!keep(1_010, &map["push"], 1_010.0));
     }
 
     #[test]
