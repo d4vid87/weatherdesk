@@ -144,6 +144,33 @@ jobs:
             "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ needs.create-release.outputs.release_id }}/assets?name=WeatherDesk_${{ github.ref_name }}.apk" \
             --input "$apk"
 
+  # Windows Defender false-positives new unsigned installers, and the only honest answer to "is
+  # this safe?" is a checksum published beside the download. Runs after every build job so the
+  # list covers all of them.
+  #
+  # Manual step for each Windows release, and the reason we don't buy a certificate: submit the
+  # .msi at microsoft.com/wdsi/filesubmission as "Software developer" → "Incorrectly detected as
+  # malware". Turnaround is usually a day, and it clears the detection for everyone.
+  checksums:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          mkdir assets && cd assets
+          # The release is still a draft, so its assets are fetched by id rather than by tag.
+          gh api --paginate "repos/${{ github.repository }}/releases/$RELEASE_ID/assets" \
+            -q '.[] | "\(.id) \(.name)"' | while read -r id name; do
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/${{ github.repository }}/releases/assets/$id" > "$name"
+          done
+          sha256sum ./* > ../SHA256SUMS.txt
+          gh api --method POST -H "Content-Type: text/plain" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=SHA256SUMS.txt" \
+            --input ../SHA256SUMS.txt
+
   # The headless image, for a house whose always-on machine has no desktop. Two native runners
   # rather than qemu: an emulated arm64 Rust build takes the better part of an hour.
   docker:
