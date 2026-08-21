@@ -137,6 +137,10 @@ function fillDrawer() {
   $('set-quiet-end').value = s.quietEnd || '';
   $('set-http-port').value = s.httpPort || '';
   $('set-cwop').value = s.cwopId || '';
+  $('set-wu-id').value = s.wuId || '';
+  $('set-wu-key').value = s.wuKey || '';
+  $('set-pws-id').value = s.pwsId || '';
+  $('set-pws-key').value = s.pwsKey || '';
   $('set-source').value = s.stationSource || '';
   $('set-wll').value = s.wllHost || '';
   $('set-awn-api').value = s.awnApiKey || '';
@@ -291,6 +295,10 @@ $('btn-save').onclick = async () => {
     quietEnd: $('set-quiet-end').value,
     httpPort: $('set-http-port').value.trim(),
     cwopId: $('set-cwop').value.trim().toUpperCase(),
+    wuId: $('set-wu-id').value.trim(),
+    wuKey: $('set-wu-key').value.trim(),
+    pwsId: $('set-pws-id').value.trim(),
+    pwsKey: $('set-pws-key').value.trim(),
     stationSource: $('set-source').value,
     wllHost: $('set-wll').value.trim(),
     awnApiKey: $('set-awn-api').value.trim(),
