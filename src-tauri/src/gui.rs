@@ -130,7 +130,8 @@ pub fn run() {
                     .maximized(cfg!(target_os = "linux"))
                     // the window isn't same-origin with the LAN server, so it needs the port told to it
                     .initialization_script(format!(
-                        "window.__WD_UDP='http://localhost:{port}/udp';window.__WD_SRV='http://localhost:{port}'"
+                        "window.__WD_UDP='http://localhost:{port}/udp';window.__WD_SRV='http://localhost:{port}';{}",
+                        crate::server::ver_script()
                     ));
             }
 

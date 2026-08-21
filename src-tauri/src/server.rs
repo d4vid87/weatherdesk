@@ -84,16 +84,25 @@ pub fn epoch() -> u64 {
 /// SQLite — CWOP timestamps its reports this way. Howard Hinnant's civil-from-days, because std
 /// has no calendar and a date crate for six lines would be a dependency to keep updated forever.
 pub fn utc_dhm(epoch: i64) -> (u32, u32, u32) {
+    let (_, _, d, h, mi, _) = utc_ymdhms(epoch);
+    (d, h, mi)
+}
+
+/// The same civil-from-days, with the year and month the Weather Underground protocol wants in
+/// its `dateutc` (`YYYY-MM-DD HH:MM:SS`).
+pub fn utc_ymdhms(epoch: i64) -> (i64, u32, u32, u32, u32, u32) {
     let days = epoch.div_euclid(86_400);
     let secs = epoch.rem_euclid(86_400);
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = (z - era * 146_097) as u64;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    (d, (secs / 3600) as u32, ((secs % 3600) / 60) as u32)
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d, (secs / 3600) as u32, ((secs % 3600) / 60) as u32, (secs % 60) as u32)
 }
 
 fn header(k: &str, v: &str) -> Header {
@@ -274,6 +283,26 @@ fn asset(path: &str) -> Option<(Vec<u8>, &'static str)> {
     Some((bytes, mime))
 }
 
+/// The one place the running version comes from. Injected into every page we serve, and into
+/// the desktop window separately (`gui.rs`) — that window loads the site over Tauri's asset
+/// protocol and never touches this server.
+pub fn ver_script() -> String {
+    format!("window.__WD_VER='{}'", env!("CARGO_PKG_VERSION"))
+}
+
+/// Every spelling a console might report on. Firmware varies more than the protocols do: some
+/// Weather Underground clones post to `/updateweatherstation.php` with no prefix, some to
+/// `/weatherstation/updateweatherstation.php?...`, and Ecowitt's `/data/report/` shows up with
+/// and without its trailing slash. Answering all of them is free — `ingest::accept` rejects
+/// anything that isn't a weather report, and `ingestKey` still applies.
+fn is_ingest_path(path: &str) -> bool {
+    path == "/ingest"
+        || path.starts_with("/ingest/")
+        || path.trim_end_matches('/') == "/data/report"
+        || path.starts_with("/weatherstation/")
+        || path == "/updateweatherstation.php"
+}
+
 fn handle(state: &Arc<State>, mut req: Request) {
     let url = req.url().to_string();
     let path = url.split('?').next().unwrap_or("/").to_string();
@@ -283,14 +312,10 @@ fn handle(state: &Arc<State>, mut req: Request) {
         return;
     }
 
-    // Where every other brand of station reports. `/ingest` is ours; the other three are the
-    // paths consoles default to and can't always be talked out of, so we answer on those too.
+    // Where every other brand of station reports. `/ingest` is ours; the rest are the paths
+    // consoles default to and can't always be talked out of, so we answer on those too.
     // A Weather Underground client checks the body for the literal `success`.
-    if path == "/ingest"
-        || path.starts_with("/ingest/")
-        || path == "/data/report/"
-        || path == "/weatherstation/updateweatherstation.php"
-    {
+    if is_ingest_path(&path) {
         let mut body = String::new();
         // A station report is a few hundred bytes. The cap is what stops a stray POST of
         // something else from being read into memory in full.
@@ -320,9 +345,12 @@ fn handle(state: &Arc<State>, mut req: Request) {
             let page = asset("/index.html")
                 .map(|(b, _)| String::from_utf8_lossy(&b).into_owned())
                 .unwrap_or_default()
-                .replace("<head>", "<head><script>window.__WD_PUBLIC=1</script>");
+                .replace("<head>", &format!("<head><script>window.__WD_PUBLIC=1;{}</script>", ver_script()));
             Response::from_string(page).with_header(header("Content-Type", "text/html")).boxed()
         }
+        // What each station source last did, for the drawer and for a screenshot in a bug
+        // report. Fixed phrases and status codes only, so there is nothing here to gate.
+        "/diag" => json(ingest::diag_json()),
         // The National Hurricane Center serves its storm list without CORS headers, so no page
         // can read it. One fixed URL, fetched here and handed on — not a general proxy.
         "/proxy/nhc" => {
@@ -430,6 +458,13 @@ fn handle(state: &Arc<State>, mut req: Request) {
             _ => Response::empty(405).boxed(),
         },
         _ => match asset(&path) {
+            // The page has no other way to know what it is: the site is baked in and the
+            // version lives in the binary.
+            Some((bytes, "text/html")) => {
+                let page = String::from_utf8_lossy(&bytes)
+                    .replace("<head>", &format!("<head><script>{}</script>", ver_script()));
+                Response::from_string(page).with_header(header("Content-Type", "text/html")).boxed()
+            }
             Some((bytes, mime)) => Response::from_data(bytes).with_header(header("Content-Type", mime)).boxed(),
             None => Response::empty(404).boxed(),
         },
@@ -551,6 +586,28 @@ mod tests {
         assert_eq!(utc_dhm(1_700_000_000), (14, 22, 13));
         assert_eq!(utc_dhm(0), (1, 0, 0));
         assert_eq!(utc_dhm(951_782_400), (29, 0, 0)); // leap day
+        assert_eq!(utc_ymdhms(1_700_000_000), (2023, 11, 14, 22, 13, 20));
+        assert_eq!(utc_ymdhms(0), (1970, 1, 1, 0, 0, 0));
+        assert_eq!(utc_ymdhms(951_782_400), (2000, 2, 29, 0, 0, 0));
+    }
+
+    /// Ray's Vevor 60234 reports on a path we used not to answer. Every spelling in this list
+    /// came off a real console; the negatives are the routes the app itself owns.
+    #[test]
+    fn every_console_spelling_reaches_ingest() {
+        for p in [
+            "/ingest",
+            "/ingest/pushpin",
+            "/data/report",
+            "/data/report/",
+            "/weatherstation/updateweatherstation.php",
+            "/updateweatherstation.php",
+        ] {
+            assert!(is_ingest_path(p), "{p} should reach ingest");
+        }
+        for p in ["/config", "/public", "/", "/history/daily", "/diag"] {
+            assert!(!is_ingest_path(p), "{p} must not be swallowed by ingest");
+        }
     }
 
     #[test]
