@@ -836,6 +836,13 @@
     <input id="set-cwop" placeholder="e.g. EW1234">
     <p class="muted" style="font-size:12px">Sends your readings to the Citizen Weather Observer
       Program every ten minutes, where forecast models can use them. Callsigns are public.</p>
+    <label>Weather Underground station ID</label><input id="set-wu-id" placeholder="e.g. KCTHARTF12">
+    <label>Weather Underground station key</label><input id="set-wu-key" type="password">
+    <label>PWSWeather station ID</label><input id="set-pws-id">
+    <label>PWSWeather API key</label><input id="set-pws-key" type="password">
+    <p class="muted" style="font-size:12px">Re-uploads whatever your station reports here, once a
+      minute. Consoles hold one upload address, so pointing yours at WeatherDesk takes it off
+      these networks — this puts it back.</p>
 
     <div class="row">
       <button id="btn-export">Export settings</button>

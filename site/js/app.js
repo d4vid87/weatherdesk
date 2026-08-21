@@ -51,6 +51,9 @@ const DEFAULTS = {
   // CWOP callsign to report to (empty = off). Not a secret: callsigns are public and the
   // network's passcode for stations like ours is the constant -1.
   cwopId: '',
+  // Relay the station on to the two networks a console usually uploads to — pointing it at this
+  // app takes it away from them, and most consoles only hold one address.
+  wuId: '', wuKey: '', pwsId: '', pwsKey: '',
   // Broker topics to read back and show on the Home card. [{ topic, label, unit }]
   mqttSubs: [],
   // --- Other brands of station. Empty means a Tempest (or nothing yet). ---
