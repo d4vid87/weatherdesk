@@ -605,6 +605,7 @@
       <div class="gauge" data-panel="g-uv"><h3>UV / solar</h3><div id="g-uv"></div></div>
       <div class="gauge" data-panel="g-ltg"><h3>Lightning</h3><div id="g-ltg"></div></div>
       <div class="gauge" data-panel="g-wet"><h3>Wet bulb</h3><div id="g-wet"></div></div>
+      <div class="gauge" data-panel="g-wbgt"><h3 title="Estimated from temperature, humidity and solar — not a measured WBGT">WBGT</h3><div id="g-wbgt"></div></div>
     </div>
 
     <div class="grid" id="desk-grid" data-panel="desk-grid">
@@ -687,8 +688,9 @@
       <div class="card" style="grid-column: span 2">
         <h2>Nearby stations</h2>
         <div class="row" style="margin:0 0 8px">
-          <input id="add-station-id" placeholder="public station ID (tempestwx.com/map)" inputmode="numeric">
+          <input id="add-station-id" placeholder="public station ID, or an airport code like KBDL">
           <button id="btn-add-station" style="flex:0 0 auto">Add</button>
+          <button id="btn-nearby-reset" style="flex:0 0 auto">Reset dismissed</button>
         </div>
         <div id="signals-table"></div>
       </div>
@@ -776,6 +778,8 @@
     </div>
     <label>Ingest key (optional — pins the upload path)</label>
     <input id="set-ingest-key" type="password" placeholder="blank = any device on the LAN">
+    <label>Station reporting</label>
+    <div id="ingest-diag" class="muted" style="font-size:12px"></div>
     <label>Units</label>
     <select id="set-units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
     <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">
@@ -839,6 +843,7 @@
       <button id="btn-csv">History CSV</button>
       <button id="btn-backup">Backup archive</button>
       <button id="btn-update">Check for updates</button>
+      <span id="app-version" class="muted" style="font-size:12px;align-self:center"></span>
     </div>
     <input id="import-file" type="file" accept="application/json,.json" hidden>
     <div class="row">
@@ -858,6 +863,8 @@
       <button id="btn-layout-save" style="flex:0 0 auto">Save layout</button>
     </div>
     <div id="layout-list"></div>
+    <h2 style="font-size:13px;margin-top:18px">Hidden panels</h2>
+    <p class="muted" style="font-size:12px">Closed a panel with its ×? Click it here to put it back.</p>
     <div id="hidden-list"></div>
     <h2 style="font-size:13px;margin-top:18px">Panel catalog</h2>
     <p class="muted" style="font-size:12px">Move any Desk panel to another tab. It keeps working
@@ -948,6 +955,76 @@
     <label>Home Assistant URL</label><input id="set-ha-url" placeholder="http://homeassistant.local:8123">
     <label>Home Assistant token</label><input id="set-ha-token" type="password" placeholder="long-lived access token">
     <label>Entities to show</label><input id="set-ha-entities" placeholder="light.porch, sensor.attic_temp">
+
+    <!-- Help. Plain <details> and no script: this is the manual people asked for, and it has to
+         still be readable on an install whose JavaScript is having a bad day. Keep in step with
+         the "Other weather stations" section of the README. -->
+    <h2 style="font-size:13px;margin-top:18px">Help</h2>
+    <details><summary>Set up my station</summary>
+      <div class="muted" style="font-size:12px">
+        <p>Pick your brand above under <b>Another brand of station</b>, then set the location
+          (Places, below). No Tempest and no account of any kind is needed.</p>
+        <p><b>Tempest.</b> tempestwx.com → Settings → Data Authorizations → create a personal use
+          token. The station ID is the number in your tempestwx.com station URL.</p>
+        <p><b>Ecowitt</b> (Wittboy, GW1100/1200/2000/3000). WSView Plus → your gateway →
+          <i>Customized</i> upload. Protocol Ecowitt, server this computer's IP, path
+          <code>/ingest</code>, port <code>8088</code>, interval 16 s or slower.</p>
+        <p><b>Ambient Weather</b> (WS-2902, WS-4000, WS-2000, WS-5000). Console firmware 4.2.8 or
+          newer, then the awnet app → <i>Custom server</i>, same address and path.</p>
+        <p><b>Weather Underground clones</b> (Vevor, Sainlogic, Fine Offset and friends). Point the
+          console's WU server at this computer's IP and port and leave the path alone. Two things
+          catch people out: the console must be allowed plain <b>HTTP</b>, not HTTPS, and it must
+          accept a port other than 80. Firmware that insists on HTTPS or port 80 needs a router
+          rule forwarding port 80 to 8088 on this machine.</p>
+        <p><b>Davis</b> (Vantage Pro2, Vantage Vue). Needs a WeatherLink Live or Console 6313 on
+          the network; put its IP in <i>WeatherLink Live address</i>. No cloud, no key.</p>
+        <p><b>KestrelMet 6000</b>, or an Ambient console you would rather leave on Ambient's
+          servers: both keys from ambientweather.net → My devices → API keys.</p>
+        <p><b>La Crosse.</b> Account email and password. Unofficial — it reads the API their app
+          uses and can stop working without notice.</p>
+        <p><b>AcuRite Iris</b> and anything else: an RTL-SDR dongle and
+          <code>rtl_433 -C si -F json</code> piped to <code>/ingest</code> — see the README.</p>
+        <p>Whatever the brand, <b>Station reporting</b> above shows what has arrived and when.</p>
+      </div>
+    </details>
+    <details><summary>What version am I on, and how do I update?</summary>
+      <div class="muted" style="font-size:12px">The version is beside <b>Check for updates</b>
+        above, which downloads and installs the latest release. Older builds that predate the
+        updater have to be reinstalled once from
+        <a href="https://github.com/d4vid87/weatherdesk/releases">the releases page</a>; settings
+        and history survive.</div>
+    </details>
+    <details><summary>I closed a panel and can't get it back</summary>
+      <div class="muted" style="font-size:12px">The <b>Hidden panels</b> list above — click the
+        panel's name to restore it. <b>Reset panel layout</b> puts everything back at once.</div>
+    </details>
+    <details><summary>Where do the forecasts come from?</summary>
+      <div class="muted" style="font-size:12px">A Tempest station gets WeatherFlow's own forecast.
+        Everything else gets open-meteo, which is free and worldwide — Brazil, Europe, anywhere.
+        Watches and warnings come from the NWS and so are US-only.</div>
+    </details>
+    <details><summary>Can I see this on an iPad, a phone or another computer?</summary>
+      <div class="muted" style="font-size:12px">Yes — open the address in this window's title bar
+        in any browser on the same network. Add <code>/public</code> to the end for a read-only
+        version with no settings drawer, which is the one to leave on a wall tablet.</div>
+    </details>
+    <details><summary>Docker / Raspberry Pi</summary>
+      <div class="muted" style="font-size:12px"><code>ghcr.io/d4vid87/weatherdesk:latest</code>,
+        run with <code>--network host</code> and a volume on <code>/data</code>. There is a
+        compose file in the repo. Headless: no window, same LAN dashboard.</div>
+    </details>
+    <details><summary>Windows Defender quarantined the installer</summary>
+      <div class="muted" style="font-size:12px">A false positive, and a common one for new
+        unsigned installers. Windows Security → Protection history → the item → Restore, then
+        Allow on device. Every release also ships a <code>SHA256SUMS.txt</code> you can check the
+        download against, and each Windows build is reported to Microsoft as a false detection.</div>
+    </details>
+    <details><summary>Something is wrong — where do I report it?</summary>
+      <div class="muted" style="font-size:12px">
+        <a href="https://github.com/d4vid87/weatherdesk/issues">github.com/d4vid87/weatherdesk/issues</a>.
+        For anything about a station not reporting, a screenshot of <b>Station reporting</b> above
+        answers most of the questions first.</div>
+    </details>
 
     <div id="diag" style="margin-top:12px"></div>
     <p class="muted" style="font-size:12px">Token: tempestwx.com → Settings → Data Authorizations → create personal use token.

@@ -100,6 +100,10 @@ export const configured = () => !!(_settings.token && _settings.stationId);
 // still gates everything that talks to WeatherFlow; this gates what any station can drive.
 export const hasSource = () => configured() || !!(_settings.stationSource && _settings.lat != null);
 
+// Forecasts only need a point on the earth: open-meteo and the NWS are free and worldwide. An
+// install with no station at all still gets a ten-day and a story out of a saved place.
+export const hasLocation = () => coords().lat != null;
+
 // Coordinates the non-Tempest panels point at: the active saved place, else the station.
 export function coords() {
   const p = _settings.places.find((x) => x.id === _settings.activePlace);
