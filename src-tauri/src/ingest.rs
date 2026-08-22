@@ -50,13 +50,15 @@ fn percent_decode(s: &str) -> String {
     while i < b.len() {
         match b[i] {
             b'+' => out.push(b' '),
+            // `.get` rather than `&s[..]`: a `%` in front of a multi-byte character lands the end
+            // of that slice mid-character, and indexing there panics on a request anyone can send.
             b'%' if i + 2 < b.len() => {
-                match u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                    Ok(v) => {
+                match s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                    Some(v) => {
                         out.push(v);
                         i += 2;
                     }
-                    Err(_) => out.push(b'%'),
+                    None => out.push(b'%'),
                 }
             }
             c => out.push(c),
@@ -773,5 +775,18 @@ mod tests {
         let f = collect("/ingest", "dateutc=2026-08-19+14%3A30%3A00&tempf=77.0");
         assert_eq!(f.get("dateutc").map(String::as_str), Some("2026-08-19 14:30:00"));
         assert_eq!(f.get("tempf").map(String::as_str), Some("77.0"));
+    }
+
+    /// A `%` in front of a multi-byte character used to put a str slice mid-character and panic.
+    /// `/ingest` takes no credentials and a panicked worker thread is never replaced, so a handful
+    /// of crafted requests was enough to leave the dashboard unanswered.
+    #[test]
+    fn a_stray_percent_before_a_wide_character_does_not_panic() {
+        assert_eq!(percent_decode("%41"), "A", "a real escape must still decode");
+        assert_eq!(percent_decode("%€"), "%€");
+        assert_eq!(percent_decode("a%€b"), "a%€b");
+        // And arriving the way it would off the wire: the rest of the body still parses.
+        let f = collect("/ingest", "tempf=%€&humidity=55");
+        assert_eq!(f.get("humidity").map(String::as_str), Some("55"));
     }
 }
