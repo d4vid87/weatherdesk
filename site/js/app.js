@@ -2,7 +2,10 @@
 
 const DEFAULTS = {
   token: '', stationId: '', deviceId: '', lat: null, lon: null, stationName: '',
-  units: 'imperial', refreshSec: 60, places: [], activePlace: null,
+  units: 'imperial', refreshSec: 60,
+  // 'auto' follows the browser locale; the other two are for the screen that lives in a country
+  // its OS wasn't set up for.
+  clock24: 'auto', places: [], activePlace: null,
   // nearbyStations stays bare id strings: an older client on the same /config reads it directly,
   // and anything object-shaped would land in its URLs as [object Object]. New keys are additive.
   nearbyStations: [],
@@ -35,6 +38,9 @@ const DEFAULTS = {
   theme: 'dark', accent: '', fontScale: 1, density: 'normal', bigNumbers: false,
   // Kiosk: seconds per tab when cycling (0 = off), and dimming through the night window.
   kioskCycleSec: 0, nightDim: false,
+  // Kiosk: header gone, layout locked, fullscreen, screen held awake. One switch because on a
+  // wall panel these four are never wanted apart.
+  kiosk: false,
   // 'auto' | 'on' | 'off' — see ecoOn(). Auto is the point of the setting: the tablet on the wall
   // should not need anyone to know it is the slow machine.
   eco: 'auto',
@@ -44,6 +50,9 @@ const DEFAULTS = {
   // Kiosk speech: read severe alerts aloud. Off by default — a dashboard that talks without
   // being asked is a dashboard someone unplugs.
   speakAlerts: false,
+  // Browser notifications, secure origins only. Off until asked for: the permission prompt is
+  // rude unprompted, and the desktop app already raises real ones through Tauri.
+  webNotif: false,
   // Palette pack on top of the theme: '', 'oled', 'solarized', 'contrast', 'eink'.
   palette: '',
   // The LAN server's port. Empty means 8088. Desktop only, and a restart applies it.
@@ -96,6 +105,12 @@ export function store(key, value) {
   catch (e) { console.warn('localStorage full', key, e); }
 }
 
+if (location.search.includes('selftest')) {
+  const noon = new Date(2020, 0, 1, 13, 5).getTime() / 1000;
+  console.assert(timeStr(noon, { clock24: '24' }).startsWith('13'), 'app: 24-hour clock reads 13:05');
+  console.assert(/1:05/.test(timeStr(noon, { clock24: '12' })), 'app: 12-hour clock reads 1:05');
+}
+
 export const configured = () => !!(_settings.token && _settings.stationId);
 
 // Whether there is a station behind this dashboard at all — a Tempest with a token, or any other
@@ -127,8 +142,11 @@ export function num(v, digits = 0) {
   return v == null || Number.isNaN(v) ? '--' : (+v).toFixed(digits);
 }
 
-export function timeStr(epochSec) {
-  return new Date(epochSec * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+export function timeStr(epochSec, s = _settings) {
+  return new Date(epochSec * 1000).toLocaleTimeString([], {
+    hour: 'numeric', minute: '2-digit',
+    ...(s.clock24 === 'auto' || !s.clock24 ? {} : { hour12: s.clock24 === '12' }),
+  });
 }
 
 export function dayStr(epochSec) {
@@ -177,6 +195,7 @@ export function notify({ id, category = 'info', title, body }) {
   const wrap = document.getElementById('notif-stack');
   const el = document.createElement('div');
   el.className = `notif notif-${category}`;
+  el.dataset.nid = id || '';
   el.innerHTML = `<div class="notif-title"></div><div class="notif-body"></div><button class="notif-x">×</button>`;
   el.querySelector('.notif-title').textContent = title;
   el.querySelector('.notif-body').textContent = body || '';
@@ -195,6 +214,20 @@ export function notify({ id, category = 'info', title, body }) {
   chime();
   speak(entry);
   native(entry);
+  webNative(entry);
+}
+
+// Severe banners are the one kind that never time out (see above), so something has to take them
+// down when the warning expires. desk.js calls this each alert poll with what is still out.
+export function dismissStale(category, liveIds) {
+  // Also forget them: the dedupe key is now the warning's identity, not a one-shot NWS id, so
+  // without this the same warning next month would be silently swallowed for the session's life.
+  for (const n of notifLog) if (n.category === category && n.id && !liveIds.has(n.id)) seen.delete(n.id);
+  const wrap = document.getElementById('notif-stack');
+  if (!wrap) return;
+  for (const el of [...wrap.children]) {
+    if (el.classList.contains(`notif-${category}`) && !liveIds.has(el.dataset.nid)) el.remove();
+  }
 }
 
 // A wall panel across the room can't be read, and the person it matters to isn't holding it.
@@ -214,6 +247,15 @@ function native({ category, title, body }) {
     .then((ok) => (ok ? true : api.requestPermission().then((p) => p === 'granted')))
     .then((ok) => ok && api.sendNotification({ title, body: body || '' }))
     .catch(() => {});
+}
+
+// The browser's own notification, for the installed PWA and any HTTPS tab. Same rule as native():
+// only when this window isn't the one being looked at. No Push API — the page has to be alive,
+// which is what the ntfy channel is for.
+function webNative({ category, title, body }) {
+  if (!_settings.webNotif || category === 'info' || !document.hidden) return;
+  if (!('Notification' in window) || Notification.permission !== 'granted' || window.__TAURI__) return;
+  try { new Notification(title, { body: body || '', tag: title }); } catch { /* not allowed here */ }
 }
 
 // Off the machine: a banner is no use to anyone who isn't looking at the dashboard.
@@ -535,6 +577,20 @@ if (location.search.includes('selftest')) {
   console.assert(webhookBody('https://example.com/hook', alert).category === 'severe',
     'webhook: anything else keeps the generic shape');
 }
+
+// A dashboard whose whole job is to be looked at should not go dark mid-thunderstorm. Only
+// exists on a secure origin (Tauri, localhost, HTTPS); plain-HTTP LAN silently does without.
+let wakeLock = null;
+export async function holdScreen(on) {
+  if (!on) { try { await wakeLock?.release(); } catch { /* already gone */ } wakeLock = null; return; }
+  if (!navigator.wakeLock || wakeLock) return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch { wakeLock = null; }
+}
+// The browser drops the lock whenever the tab is hidden — including every screen-off — so it has
+// to be taken again on the way back.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && _settings.kiosk) holdScreen(true);
+});
 
 export function fullscreen() {
   if (document.fullscreenElement) document.exitFullscreen();

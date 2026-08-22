@@ -1,6 +1,6 @@
 // 01 Desk — current conditions, near-term forecast, alerts, AQI.
 import * as api from './api.js';
-import { settings, coords, configured, hasSource, hasLocation, U, num, timeStr, dayStr, notify, every, stamp, store, load, setStorm } from './app.js';
+import { settings, coords, configured, hasSource, hasLocation, U, num, timeStr, dayStr, notify, dismissStale, every, stamp, store, load, setStorm } from './app.js';
 
 // Last-good copies of the two payloads the Desk can't render without. An outage that spans a
 // reload would otherwise leave the whole page at `--`; in-session failures already keep the DOM.
@@ -101,10 +101,15 @@ export async function refreshAlerts() {
   // Storm mode: while something serious is out, every panel goes back to full rate whatever eco
   // and the hour say. This is the one time the dashboard is being watched.
   setStorm(feats.some((f) => ['Severe', 'Extreme'].includes(f.properties?.severity)));
+  // NWS mints a fresh id for every continuation of the same warning, so keying the dedupe on it
+  // re-chimed the same tornado warning every 5 minutes. Key on what the warning IS instead — a
+  // severity change still gets through, which is the one update worth a second chime.
+  const key = (p) => `${p.event}|${p.areaDesc}|${p.severity}`;
   feats.forEach((f) => notify({
-    id: f.properties.id, category: 'severe',
+    id: key(f.properties), category: 'severe',
     title: f.properties.event, body: f.properties.headline || '',
   }));
+  dismissStale('severe', new Set(feats.map((f) => key(f.properties))));
 }
 
 export async function refreshAqi() {

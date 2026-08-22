@@ -32,6 +32,34 @@ function nowIndex() {
   return best;
 }
 
+// The three panels below this one already say everything; nobody reads three panels. This is the
+// same numbers as one sentence — assembled, not computed.
+function renderWhy({ worst, onsetMedian, onsetCount, edge }) {
+  const parts = [];
+  if (onsetMedian != null) {
+    parts.push(`Precip around ${new Date(onsetMedian).toLocaleString([], { weekday: 'short', hour: 'numeric' })}`
+      + ` in ${onsetCount} of ${MODEL_LIST.length} models`);
+  } else parts.push('No model has precip in the next 48h');
+  if (worst != null) {
+    parts.push(worst < 3 ? `models agree within ${num(worst, 1)}${U.temp()}`
+      : `models disagree by up to ${num(worst, 1)}${U.temp()}`);
+  }
+  if (edge != null && Math.abs(edge) >= 1) {
+    parts.push(`your station is running ${num(Math.abs(edge), 1)}${U.temp()} ${edge > 0 ? 'warmer' : 'cooler'} than guidance`);
+  }
+  $('why').textContent = `${parts.join(', ')}.`;
+
+  // How well this dashboard's own forecasts have actually verified — the only honest badge.
+  const a = accuracy();
+  const el = $('trust');
+  el.textContent = a.mae == null ? '' : `${trustWord(a.mae)} · MAE ${num(a.mae, 1)}${U.temp()}`;
+}
+
+export const trustWord = (mae) => (mae <= 3 ? 'Good' : mae <= 5 ? 'Fair' : 'Watch closely');
+
+// What the three renders below found, kept so the sentence can be written once from all of them.
+const why = { worst: null, onsetMedian: null, onsetCount: 0, edge: null };
+
 function renderAgreement() {
   const i0 = nowIndex();
   const rows = [];
@@ -47,6 +75,8 @@ function renderAgreement() {
     const rainSum = seriesFor('precipitation', m).slice(i0, i0 + 24).reduce((a, b) => a + (b || 0), 0);
     rows.push(`<div><span>${SHORT[m]}</span><span>${num(t, 1)}${U.temp()} · ${num(rainSum, 2)} ${U.precip()}/24h</span></div>`);
   }
+  why.worst = worst;
+  renderWhy(why);
   const verdict = worst < 3 ? 'tight' : worst < 7 ? 'moderate' : 'wide';
   $('agree-verdict').textContent = `${verdict} (max spread ${num(worst, 1)}${U.temp()}${worstHour ? ` at ${timeStr(new Date(worstHour).getTime() / 1000)}` : ''})`;
   $('agree-rows').innerHTML = rows.join('');
@@ -61,10 +91,15 @@ function renderTiming() {
       if ((p[i] || 0) > 0.01) { onsets.push(new Date(models.hourly.time[i]).getTime()); break; }
     }
   }
-  if (!onsets.length) { $('timing').textContent = 'No precip in any model, next 48h'; return; }
+  if (!onsets.length) {
+    why.onsetMedian = null; why.onsetCount = 0; renderWhy(why);
+    $('timing').textContent = 'No precip in any model, next 48h';
+    return;
+  }
   onsets.sort((a, b) => a - b);
   const median = onsets[Math.floor(onsets.length / 2)];
   const spreadH = (onsets[onsets.length - 1] - onsets[0]) / 3600e3;
+  why.onsetMedian = median; why.onsetCount = onsets.length; renderWhy(why);
   $('timing').innerHTML = `Consensus onset <b>${new Date(median).toLocaleString([], { weekday: 'short', hour: 'numeric' })}</b>`
     + ` · ${onsets.length}/${MODEL_LIST.length} models · spread ${num(spreadH, 1)}h`;
 }
@@ -76,6 +111,8 @@ function renderEdge() {
   const vals = MODEL_LIST.map((m) => seriesFor('temperature_2m', m)[i0]).filter((v) => v != null);
   const consensus = vals.reduce((a, b) => a + b, 0) / vals.length;
   const d = cc.air_temperature - consensus;
+  why.edge = d;
+  renderWhy(why);
   $('edge').innerHTML = `Station <b>${num(cc.air_temperature, 1)}${U.temp()}</b> vs model consensus `
     + `${num(consensus, 1)}${U.temp()} — running <b>${d >= 0 ? '+' : ''}${num(d, 1)}${U.temp()}</b>`;
 }
@@ -158,6 +195,11 @@ export function renderTrack() {
     ? `<div>24h-lead temp MAE <b>${num(a.mae, 1)}${U.temp()}</b> over ${a.n} checks</div>`
       + a.recent.map((v) => `<div class="muted" style="font-size:12px">${timeStr(v.targetHour)}: forecast ${num(v.fTemp)} / actual ${num(v.obsTemp)} (${(v.fTemp - v.obsTemp) >= 0 ? '+' : ''}${num(v.fTemp - v.obsTemp, 1)})</div>`).join('')
     : '<div class="muted">Collecting — first score lands 24h after setup.</div>';
+}
+
+if (location.search.includes('selftest')) {
+  console.assert(trustWord(2) === 'Good' && trustWord(4) === 'Fair' && trustWord(9) === 'Watch closely',
+    'intel: trust badge thresholds');
 }
 
 export function initIntel() {

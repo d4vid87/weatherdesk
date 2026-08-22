@@ -19,10 +19,20 @@ function qs(obj) {
 export function errHint(status, url) {
   if (!url.startsWith(SWD)) return '';
   if (status === 401 || status === 403) {
-    return ' — token rejected: create or check a personal use token at tempestwx.com → Settings → Data Authorizations';
+    // A token only reads its own account. A 401 for someone else's station ID means that station
+    // isn't shared with the public API, not that the token is bad — issue #38.
+    return foreignStation(url)
+      ? " — that station isn't readable with your token: WeatherFlow only shares a station's data with its owner unless the owner has made it public"
+      : ' — token rejected: create or check a personal use token at tempestwx.com → Settings → Data Authorizations';
   }
   if (status === 404) return ' — not found: check the station/device ID';
   return '';
+}
+
+// The station ID in an observations/stations URL, when it isn't the one this install is set up on.
+function foreignStation(url) {
+  const id = url.match(/\/(?:observations\/stn|stations)\/(\d+)/)?.[1];
+  return !!id && id !== String(settings().stationId);
 }
 
 // NWS answers every request with an ETag and honours If-None-Match, and the alert feed is polled
@@ -194,6 +204,22 @@ export const omWords = (code) => WORDS[WMO[code] ?? 'cloudy'] || '';
 // `ownTuple` is the station's own SI reading. Where a sensor measured something, the sensor
 // wins; the model keeps what no backyard station has (dew point, feels-like, sea-level
 // pressure, wet bulb) rather than this file growing a second psychrometry.
+// A backyard station measures the pressure where it stands; every console and every forecast
+// quotes it reduced to sea level. Reporting the raw reading against a model's MSL is why a Davis
+// on Long Island read 30.06 on the dashboard and 30.08 on its own display. Multiplicative, so it
+// works in whatever unit the reading is already in; `elev` is metres, `tempC` the outside air.
+export function toSeaLevel(p, elev, tempC = 15) {
+  // No elevation, no honest reduction — the caller falls back to the model's MSL rather than
+  // publishing a mountain station's raw reading as if it were sea level.
+  if (p == null || elev == null) return null;
+  if (!elev) return p;
+  return p * (1 - (0.0065 * elev) / (tempC + 0.0065 * elev + 273.15)) ** -5.257;
+}
+
+// 15 °C is the standard-atmosphere fallback: a station with no thermometer still gets a
+// reduction that is right to a hundredth of an inch at backyard elevations.
+const tempC = (t, metric) => (t == null ? 15 : metric ? t : (t - 32) / 1.8);
+
 export function shapeOm(j, ownTuple = null) {
   const metric = settings().units === 'metric';
   const cur = j.current || {};
@@ -251,6 +277,8 @@ export function shapeOm(j, ownTuple = null) {
     uv: at('uv_index'),
     solar_radiation: at('shortwave_radiation'),
     wet_bulb_temperature: at('wet_bulb_temperature_2m'),
+    // metres, whatever the unit params say — open-meteo doesn't convert this one. Hero converts.
+    visibility: at('visibility'),
     icon: omIcon(cur.weather_code, day),
     conditions: omWords(cur.weather_code),
   };
@@ -268,6 +296,9 @@ export function shapeOm(j, ownTuple = null) {
       solar_radiation: own(o[OBS.solar]),
       precip_accum_local_day: own(o[OBS.dayRain]),
       station_pressure: own(o[OBS.press]),
+      // The barometer gauge reads `sea_level_pressure`; without this line it showed the model's
+      // MSL forever and a real barometer sat unused two fields away.
+      sea_level_pressure: own(toSeaLevel(o[OBS.press], j.elevation, tempC(o[OBS.temp], metric))),
     };
     for (const k in overlay) if (overlay[k] !== undefined) c[k] = overlay[k];
   }
@@ -282,7 +313,7 @@ export async function omForecast(lat = coords().lat, lon = coords().lon) {
     current: 'temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,is_day,'
       + 'weather_code,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
     hourly: 'temperature_2m,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,'
-      + 'wind_direction_10m,uv_index,shortwave_radiation,wet_bulb_temperature_2m',
+      + 'wind_direction_10m,uv_index,shortwave_radiation,wet_bulb_temperature_2m,visibility',
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,'
       + 'precipitation_probability_max,precipitation_sum',
     forecast_days: 10, timezone: 'auto', timeformat: 'unixtime',
@@ -500,6 +531,12 @@ if (location.search.includes('selftest')) {
   const band = ensembleBand({ hourly: { time: ['1970-01-01T00:00'], temperature_2m_member01: [1], temperature_2m_member02: [9] } });
   console.assert(band[0].lo === 1 && band[0].hi === 9, 'api: ensemble band spans the members');
 
+  // 7 m of Long Island: the reduction is the ~0.02 inHg that made a Davis owner think the
+  // dashboard was reading his barometer wrong.
+  console.assert(Math.abs(toSeaLevel(30.06, 7, 19) - 30.085) < 0.005, 'api: pressure reduced to sea level');
+  console.assert(toSeaLevel(30.06, 0) === 30.06, 'api: a station at sea level is already reduced');
+  console.assert(toSeaLevel(null, 100) === null, 'api: no reading, no reduction');
+
   console.assert(normalFor({ '03-04': { hi: 60, lo: 40 } }, new Date(2020, 2, 4)).hi === 60, 'api: normals key is month-day');
 
   // The open-meteo forecast adapter: every non-Tempest station's hero, day cards and ticker
@@ -537,10 +574,23 @@ if (location.search.includes('selftest')) {
 // --- Diagnostics: ping each source, return [{name, ok, detail}] ---
 
 export async function diagnostics() {
+  // Issue #37: an Ambient or a Davis install has no Tempest account, so probing WeatherFlow
+  // painted two red rows on every self-check and people read them as the app being broken.
+  // Probe what this install actually uses — and name the forecast after where it comes from.
   const checks = [
-    ['Tempest station', () => station()],
-    ['Tempest obs', () => stationObs()],
-    ['Tempest forecast', () => betterForecast()],
+    ...(settings().token ? [
+      ['Tempest station', () => station()],
+      ['Tempest obs', () => stationObs()],
+      ['Tempest forecast', () => betterForecast()],
+    ] : [
+      ...(settings().stationSource ? [['Local station', async () => {
+        // A reachable archive with nothing in it is the failure people actually hit: the console
+        // was never pointed at /ingest. Green there would be a lie.
+        const j = await localObs(1);
+        if (!j.obs?.length) throw new Error('no reports in the last hour — check the console is uploading to this address');
+      }]] : []),
+      ['Open-Meteo forecast', () => betterForecast()],
+    ]),
     ['NWS alerts', () => alerts()],
     ['Open-Meteo models', () => multiModel()],
     ['Open-Meteo AQI', () => aqi()],

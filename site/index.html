@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b0f14">
-<!-- Installable from a phone's browser. No service worker on purpose: the LAN server is plain
-     http, which cannot register one, and an offline cache of a live dashboard would be a lie. -->
+<!-- Installable from a phone's browser. sw.js caches the shell only, and only on a secure
+     origin — see shouldRegisterSW() in js/boot.js. The weather itself is never cached there;
+     desk.js keeps the last good forecast and obs and marks them stale. -->
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -234,7 +235,13 @@
   }
   #hero .rz-e, #hero .rz-se { background-image: linear-gradient(135deg, transparent 42%, #ffffffcc 42%); }
 
+  /* kiosk: the panels and nothing else. Exit with f, Escape, or three taps on the clock. */
+  body.kiosk header { display: none; }
   /* hero */
+  #hero-fx { position: absolute; inset: 0; pointer-events: none; }
+  /* the canvas is positioned, so the content has to be too or it paints underneath */
+  #hero > *:not(#hero-fx):not(#hero-icon) { position: relative; z-index: 1; }
+  #hero > #hero-icon { z-index: 1; }
   #hero { padding: 16px 20px 20px; color: #fff; overflow: hidden; border-radius: 12px;
     background: linear-gradient(160deg, #1f6fb8, #7fb6e6); }
   #hero-clock { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px;
@@ -258,6 +265,10 @@
   .live.on { color: #7dffb0; }
 
   /* ticker */
+#src-health { display: flex; gap: 5px; align-items: center; }
+#src-health i { width: 8px; height: 8px; border-radius: 50%; background: #46c26a; }
+#src-health i.stale { background: #e2b23c; }
+#src-health i.bad { background: #e2553c; }
   #ticker { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 8px 10px; }
   #ticker-track { flex: 1; white-space: nowrap; overflow: hidden; display: flex; gap: 14px; align-items: center;
@@ -490,6 +501,7 @@
   <button class="iconbtn" id="btn-refresh">↻</button>
   <button class="iconbtn" id="btn-full">⛶</button>
   <button class="iconbtn" id="btn-lock" title="Lock panel layout">🔓</button>
+  <button class="iconbtn" id="btn-kiosk" title="Kiosk mode">🖥</button>
   <button class="iconbtn" id="btn-settings">⚙</button>
 </header>
 
@@ -499,8 +511,9 @@
   <div class="wizard-box">
     <img src="icon-512.png" alt="" style="display:block;width:180px;max-width:60%;margin:0 auto 10px">
     <h2 style="margin-top:0;text-align:center">Welcome to WeatherDesk</h2>
-    <p class="muted" style="font-size:13px">Paste a Tempest personal use token and pick your station.
-      Get one at tempestwx.com → Settings → Data Authorizations.</p>
+    <p class="muted" style="font-size:13px">Two ways in. <b>Tempest owners:</b> paste a personal
+      use token (tempestwx.com → Settings → Data Authorizations). <b>Every other brand</b> —
+      Ecowitt, Ambient, Davis, AcuRite, La Crosse — needs no token at all: open the second box.</p>
     <div class="row">
       <input id="wiz-token" type="password" placeholder="personal use token">
       <button class="primary" id="btn-wiz-find" style="flex:0 0 auto">Find stations</button>
@@ -512,7 +525,7 @@
     </div>
     <p class="muted" style="font-size:12px">No station? The desktop app also reads a Tempest hub
       directly off the network with no token at all.</p>
-    <details id="wiz-other" style="margin-top:10px">
+    <details id="wiz-other" style="margin-top:10px" open>
       <summary style="cursor:pointer;font-size:13px">Not a Tempest? Ecowitt, Ambient, Davis, AcuRite, La Crosse…</summary>
       <p class="muted" style="font-size:12px">Pick the brand, then say where the station is —
         the forecast comes from open-meteo, the readings come from your own sensors.</p>
@@ -534,6 +547,7 @@
     <div><span>r</span><span>refresh everything</span></div>
     <div><span>f</span><span>fullscreen</span></div>
     <div><span>s</span><span>settings</span></div>
+    <div><span>k</span><span>kiosk mode</span></div>
     <div><span>?</span><span>this list</span></div>
     <div><span>Esc</span><span>close</span></div>
   </div>
@@ -566,7 +580,7 @@
       </div>
     </div>
 
-    <div id="ticker" data-panel="ticker"><div id="ticker-track"></div><button id="ticker-pause">❚❚</button></div>
+    <div id="ticker" data-panel="ticker"><div id="ticker-track"></div><span id="src-health"></span><button id="ticker-pause">❚❚</button></div>
 
     <div id="ha-panel" data-panel="ha" style="display:none">
       <h2 id="ha-stamp">Home Assistant<span id="mqtt-state" class="muted" style="float:right;font-size:12px"></span></h2>
@@ -618,7 +632,8 @@
       </div>
 
       <div class="card" data-panel="agree">
-        <h2>Model agreement</h2>
+        <h2>Model agreement<span id="trust" class="muted" style="float:right;font-size:12px"></span></h2>
+        <div id="why" style="margin-bottom:6px"></div>
         <div id="agree-verdict" style="margin-bottom:6px"></div>
         <div id="agree-rows" class="kv-rows"></div>
         <div id="timing" class="muted" style="margin-top:8px;font-size:13px"></div>
@@ -692,6 +707,10 @@
           <button id="btn-add-station" style="flex:0 0 auto">Add</button>
           <button id="btn-nearby-reset" style="flex:0 0 auto">Reset dismissed</button>
         </div>
+        <p class="muted" style="font-size:12px;margin:0 0 8px">WeatherFlow publish no station
+          search, so Tempest neighbours have to be added by ID — find one on the public map at
+          tempestwx.com/map and paste its station number. A station whose owner hasn't shared it
+          publicly can't be read with your token; airport codes always work.</p>
         <div id="signals-table"></div>
       </div>
 
@@ -762,6 +781,12 @@
         Ecowitt, path <code>/ingest</code>. Ambient: awnet app → Custom server (firmware 4.2.8+).
         Upload interval 16 s or slower.</p>
     </div>
+    <div id="src-nopush" hidden>
+      <p class="muted" style="font-size:12px">This phone build has no address a console can upload
+        to — it isn't a server. Two ways round it: pick <b>Ambient Weather Network cloud</b> above
+        and paste your API keys (works anywhere), or run the desktop build / Docker image on a
+        machine that stays on, point the console at that, and open its address in this app.</p>
+    </div>
     <div id="src-wll" hidden>
       <label>WeatherLink Live address on the LAN</label>
       <input id="set-wll" placeholder="192.168.1.50">
@@ -780,8 +805,16 @@
     <input id="set-ingest-key" type="password" placeholder="blank = any device on the LAN">
     <label>Station reporting</label>
     <div id="ingest-diag" class="muted" style="font-size:12px"></div>
+    <label>Region preset</label>
+    <div class="row" id="region-presets">
+      <button data-region="US">US</button><button data-region="UK">UK</button>
+      <button data-region="EU">EU</button><button data-region="CA">CA</button>
+      <button data-region="AU">AU</button>
+    </div>
     <label>Units</label>
     <select id="set-units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
+    <label>Clock</label>
+    <select id="set-clock"><option value="auto">Follow this device</option><option value="12">12-hour</option><option value="24">24-hour</option></select>
     <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">
     <label>Wind gust alert threshold</label><input id="set-gust" type="number" min="0">
     <label>Nearby sensor radius (mi, 0 = manual only)</label><input id="set-nearby-radius" type="number" min="0">
@@ -822,6 +855,7 @@
     <label>Cycle tabs every (seconds, 0 = off)</label><input id="set-kiosk" type="number" min="0" step="5">
     <label><input id="set-night-dim" type="checkbox"> Dim the screen overnight</label>
     <label><input id="set-speak" type="checkbox"> Read severe alerts aloud</label>
+    <label><input id="set-web-notif" type="checkbox"> Browser notifications (https only)</label>
 
     <label style="margin-top:14px">Eco mode (slower polling, no animation)</label>
     <select id="set-eco">

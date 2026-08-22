@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -100,6 +100,11 @@ export function ingestUrl(key = settings().ingestKey) {
   return `${window.__WD_SRV || location.origin}/ingest${key ? `/${key}` : ''}`;
 }
 
+// The Android build has no LAN server behind it — `__TAURI__` without `__WD_SRV` — so there is
+// no address a WS-2902 console could ever upload to. Saying "point the console at
+// tauri://localhost" is how two people spent an evening trying.
+export const canIngest = (env = window) => !(env.__TAURI__ && env.__WD_SRV === undefined);
+
 // Only the fields the chosen brand needs. The push brands need none at all, which is the point
 // of showing them the address instead.
 function showSourceFields() {
@@ -109,7 +114,8 @@ function showSourceFields() {
   $('src-wll').hidden = v !== 'wll';
   $('src-awn').hidden = v !== 'awn';
   $('src-lax').hidden = v !== 'lacrosse';
-  if (push) $('src-url').value = ingestUrl($('set-ingest-key').value.trim());
+  $('src-nopush').hidden = !(push && !canIngest());
+  if (push) $('src-url').value = canIngest() ? ingestUrl($('set-ingest-key').value.trim()) : '';
 }
 
 function fillDrawer() {
@@ -118,6 +124,7 @@ function fillDrawer() {
   $('set-station').value = s.stationId;
   $('set-device').value = s.deviceId;
   $('set-units').value = s.units;
+  $('set-clock').value = s.clock24 || 'auto';
   $('set-refresh').value = s.refreshSec;
   $('set-gust').value = s.windGustAlert;
   $('set-nearby-radius').value = s.nearbyRadius ?? 0;
@@ -132,6 +139,7 @@ function fillDrawer() {
   $('set-kiosk').value = s.kioskCycleSec || 0;
   $('set-night-dim').checked = !!s.nightDim;
   $('set-speak').checked = !!s.speakAlerts;
+  $('set-web-notif').checked = !!s.webNotif;
   $('set-palette').value = s.palette || '';
   $('set-quiet-start').value = s.quietStart || '';
   $('set-quiet-end').value = s.quietEnd || '';
@@ -262,6 +270,23 @@ $('btn-settings').onclick = () => { fillDrawer(); openDrawer(true); };
 $('set-source').onchange = showSourceFields;
 $('set-ingest-key').oninput = showSourceFields;
 $('btn-close').onclick = () => { openDrawer(false); loadDeskRadar(); };
+// A preset is two dropdowns someone would otherwise have to know to change together. It only
+// fills the fields — Save is still Save.
+const REGIONS = {
+  US: ['imperial', '12'], UK: ['metric', '24'], EU: ['metric', '24'],
+  CA: ['metric', '12'], AU: ['metric', '12'],
+};
+$('region-presets').onclick = (e) => {
+  const r = REGIONS[e.target.dataset.region];
+  if (!r) return;
+  [$('set-units').value, $('set-clock').value] = r;
+};
+
+// The permission prompt has to come off a click, and Save is the only click there is.
+$('set-web-notif').onchange = (e) => {
+  if (e.target.checked && window.Notification?.permission === 'default') Notification.requestPermission().catch(() => {});
+};
+
 $('btn-full').onclick = fullscreen;
 $('btn-refresh').onclick = refreshAll;
 
@@ -275,6 +300,7 @@ $('btn-save').onclick = async () => {
     stationId: $('set-station').value.trim(),
     deviceId: $('set-device').value.trim(),
     units: $('set-units').value,
+    clock24: $('set-clock').value,
     refreshSec: +$('set-refresh').value || 60,
     windGustAlert: +$('set-gust').value || 30,
     nearbyRadius: +$('set-nearby-radius').value || 0,
@@ -290,6 +316,7 @@ $('btn-save').onclick = async () => {
     kioskCycleSec: +$('set-kiosk').value || 0,
     nightDim: $('set-night-dim').checked,
     speakAlerts: $('set-speak').checked,
+    webNotif: $('set-web-notif').checked,
     palette: $('set-palette').value,
     quietStart: $('set-quiet-start').value,
     quietEnd: $('set-quiet-end').value,
@@ -482,6 +509,29 @@ $('btn-wiz-demo').onclick = () => {
 // The binary injects this (`server::ver_script`, and `gui.rs` for the desktop window) so there is
 // one version in the build, not a literal here that goes stale the first release nobody edits it.
 const APP_VERSION = window.__WD_VER || '';
+
+// A dashboard on a wall is exactly the thing that should still draw its own shell when the wifi
+// drops — desk.js already keeps the last forecast and obs, so all that was missing was the files.
+// Not in the desktop or Android app (they ship their own assets), and not on a plain-http LAN
+// origin, which cannot register one at all.
+export function shouldRegisterSW(env = window) {
+  return 'serviceWorker' in navigator && env.isSecureContext
+    && !env.__TAURI__ && env.__WD_SRV === undefined;
+}
+if (location.search.includes('selftest')) {
+  const env = (o) => ({ isSecureContext: true, __WD_SRV: undefined, ...o });
+  console.assert(shouldRegisterSW(env({})), 'sw: https browser registers');
+  console.assert(!shouldRegisterSW(env({ isSecureContext: false })), 'sw: plain-http LAN does not');
+  console.assert(!shouldRegisterSW(env({ __TAURI__: {}, __WD_SRV: '' })), 'sw: desktop app does not');
+  console.assert(!shouldRegisterSW(env({ __TAURI__: {} })), 'sw: the Android app does not either');
+  console.assert(!shouldRegisterSW(env({ __WD_SRV: 'http://x' })), 'sw: a page served by the app does not');
+  console.assert(canIngest(env({})), 'ingest: a browser is already on a reachable address');
+  console.assert(canIngest(env({ __TAURI__: {}, __WD_SRV: 'http://x' })), 'ingest: the desktop app carries a LAN address');
+  console.assert(!canIngest(env({ __TAURI__: {} })), 'ingest: the phone app has nowhere for a console to report');
+}
+if (shouldRegisterSW()) {
+  navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {});
+}
 function changelog() {
   if (!APP_VERSION) return; // served from a static host: no version to be honest about
   // Raw string, not store(): this is compared to a literal, and a JSON-quoted one never matches.
@@ -558,6 +608,27 @@ function applyLock() {
 }
 
 $('btn-lock').onclick = () => { saveSettings({ layoutLocked: !settings().layoutLocked }); applyLock(); };
+
+// --- kiosk mode: fullscreen + locked + no chrome + screen held awake, as one switch ---
+function applyKiosk() {
+  const on = !!settings().kiosk;
+  document.body.classList.toggle('kiosk', on);
+  holdScreen(on);
+}
+function setKiosk(on) {
+  saveSettings({ kiosk: on, layoutLocked: on || settings().layoutLocked });
+  applyKiosk();
+  applyLock();
+  if (on !== !!document.fullscreenElement) fullscreen();
+}
+$('btn-kiosk').onclick = () => setKiosk(!settings().kiosk);
+// With the header hidden there is no button left, and a wall tablet has no Escape key.
+let taps = [];
+$('hero-clock').addEventListener('click', () => {
+  taps = [...taps, Date.now()].filter((t) => Date.now() - t < 1500);
+  if (taps.length >= 3) { taps = []; if (settings().kiosk) setKiosk(false); }
+});
+applyKiosk();
 
 // Phone rearrange mode. At phone width the grips and the × are hidden, because left on they cover
 // the panel titles and eat taps meant for the panel — so the Android app and a phone browser had
@@ -884,9 +955,13 @@ document.addEventListener('keydown', (e) => {
     tabs[+e.key - 1]?.click();
     return;
   }
-  if (e.key === 'Escape') { openDrawer(false); $('shortcuts').hidden = true; loadDeskRadar(); return; }
+  if (e.key === 'Escape') {
+    if (settings().kiosk) setKiosk(false);
+    openDrawer(false); $('shortcuts').hidden = true; loadDeskRadar(); return;
+  }
   if (e.key === '?') { $('shortcuts').hidden = !$('shortcuts').hidden; return; }
   if (e.key === 'f') fullscreen();
+  else if (e.key === 'k') setKiosk(!settings().kiosk);
   else if (e.key === 'r') refreshAll();
   else if (e.key === 's' && !PUBLIC) { fillDrawer(); openDrawer(true); }
 });
@@ -901,7 +976,8 @@ changelog();
 
 if (!hasSource() && !PUBLIC) {
   $('wizard').hidden = false;
-  $('wiz-token').focus();
+  // No autofocus on the token field: it put a cursor in a Tempest-only box for people who own
+  // an Ambient, and they reported the app as demanding an account they can't have.
   // UDP-only mode: a desktop install with a hub on the LAN has real local data with no token at
   // all, so the modules start either way. Every refresh job early-returns without a token, so an
   // unconfigured init is a handful of no-ops.
