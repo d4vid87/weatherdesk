@@ -6,7 +6,7 @@ and the format loosely follows [Keep a Changelog](https://keepachangelog.com/en/
 Every release ships desktop installers (Linux `.deb`, Windows, macOS), an arm64 `.deb` for the
 Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container image.
 
-## [Unreleased]
+## [3.1.0] — 2026-08-22
 
 ### Added
 - Animated hero: rain, snow, drifting cloud and lightning drawn behind the numbers, keyed to the
@@ -39,6 +39,19 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
   start and the other-brand section opens by default; nothing autofocuses the token field.
 - **The phone app now says a console can't upload to it** instead of showing an address on
   `tauri://localhost` that nothing on the network can reach, and points at the cloud sources.
+
+### Security
+- **A crafted `/ingest` body no longer takes the server down.** A `%` in front of a multi-byte
+  character put a string slice mid-character and panicked the worker thread that was handling it;
+  four such requests left nothing answering on 8088 while the container stayed up and the archive
+  kept filling, so it read as a network fault rather than a crash. `/ingest` takes no credentials
+  by default, so anyone on the LAN could send them. Thanks to @parallaxintelligencepartnership
+  (#48).
+- **The container no longer runs as root.** Both ports are above 1024 and `/data` is the only path
+  written, so the image runs as uid 1000. **Upgrading an install that bind-mounts a host directory
+  needs a one-time `sudo chown -R 1000:1000 ./data`** — a root-owned data directory otherwise
+  leaves the dashboard serving normally while storing nothing. Thanks to
+  @parallaxintelligencepartnership (#49).
 
 ### Documentation
 - WeeWX connects with no plugin: point its Weather Underground uploader at `/ingest` (#47).

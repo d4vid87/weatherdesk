@@ -455,6 +455,14 @@ or the `docker-compose.yml` in this repo. Then open `http://<host>:8088`.
 broadcast does not cross a bridged Docker network no matter how many ports you publish — without
 host networking the container serves the dashboard but never hears the hub.
 
+**Upgrading from 3.0.9 or older takes one `chown`.** The container runs as uid 1000 now instead of
+root, and a `./data` directory left by an earlier image is owned by root. The server does not
+complain about that — it starts, serves the dashboard and stores nothing. Once, before you pull:
+
+```sh
+sudo chown -R 1000:1000 ./data
+```
+
 Everything lands in `/data`: `config.json` and `weatherdesk.db`. The image is built with
 `--no-default-features`, so there is no GTK, no WebKit and no Tauri anywhere in it.
 
