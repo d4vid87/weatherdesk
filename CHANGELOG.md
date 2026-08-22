@@ -8,6 +8,41 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+### Added
+- Animated hero: rain, snow, drifting cloud and lightning drawn behind the numbers, keyed to the
+  current conditions icon. Off entirely in eco mode and while the tab is hidden.
+- Countdown to the next solar event on the hero ("Sunset in 1h 14m"), and visibility beside
+  feels-like when the forecast source reports it.
+- Source health dots at the end of the ticker — one per station source the LAN server holds,
+  hover for its `/diag` line. Hidden where there is no server.
+- Region presets (US/UK/EU/CA/AU) and a 12/24-hour clock setting, honoured by every time on the
+  page including the big clock.
+- "Why this forecast" — model timing, spread and station edge as one sentence above the model
+  agreement rows — plus a trust badge from this install's own verification record.
+- Kiosk mode: one switch for fullscreen, locked layout, hidden header and a screen wake lock.
+  `k` toggles it; Escape, `f` or three taps on the clock leave it.
+
+### Fixed
+- A severe-weather banner now comes down when the warning expires, and a continued NWS warning
+  no longer re-chimes every five minutes — the dedupe key is the warning, not its id (#38 sibling).
+- A 401 on someone else's Tempest station now says the station isn't shared publicly instead of
+  blaming your token (#38).
+- **The barometer shows your barometer.** A station's own pressure reading is measured where it
+  stands; every console quotes it reduced to sea level, and the gauge was quietly falling back to
+  the model's sea-level pressure instead. Non-Tempest readings are now reduced using the station's
+  elevation, which is the two-hundredths of an inch that made the dashboard look wrong next to a
+  Davis or an Ecowitt console.
+- **Self-check no longer probes WeatherFlow on installs that have no Tempest** — an Ambient or a
+  Davis owner saw two red rows and reasonably read them as a broken app. It now checks the local
+  station instead, and says so when nothing has reported in the last hour (#37).
+- **The first-run wizard stops leading with a Tempest token.** Both routes are visible from the
+  start and the other-brand section opens by default; nothing autofocuses the token field.
+- **The phone app now says a console can't upload to it** instead of showing an address on
+  `tauri://localhost` that nothing on the network can reach, and points at the cloud sources.
+
+### Documentation
+- WeeWX connects with no plugin: point its Weather Underground uploader at `/ingest` (#47).
+
 ## [3.0.9] — 2026-08-21
 
 Everything here came out of what people reported after 3.0.8.

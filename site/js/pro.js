@@ -6,6 +6,7 @@ import { forecast as deskForecast } from './desk.js';
 import * as icon from './icons.js';
 import { initLayout } from './layout.js';
 import { normalToday } from './almanac.js';
+import { setScene } from './fx.js';
 
 const $ = (id) => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -60,6 +61,13 @@ function moonGlyph(age, size = 13) {
   </svg>`;
 }
 
+// "Sunset 8:14 PM" is a fact; "Sunset in 1h 14m" is the one people read across a room.
+export function until(epochSec, now = Date.now() / 1000) {
+  const m = Math.round((epochSec - now) / 60);
+  if (m < 0 || m > 24 * 60) return '';
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 function renderHero(fc) {
   const c = fc.current_conditions, d = fc.forecast.daily[0];
   const [a, b] = skyFor(Date.now() / 1000, d.sunrise, d.sunset);
@@ -69,12 +77,20 @@ function renderHero(fc) {
   $('hero-cond').textContent = c.conditions || '';
   $('hero-hilo').textContent = `High ${num(d.air_temp_high)}° / Low ${num(d.air_temp_low)}°`;
   const muggy = c.dew_point >= 70 ? 'Very muggy' : c.dew_point >= 65 ? 'Muggy' : c.dew_point >= 55 ? 'Comfortable' : 'Dry';
-  $('hero-feels').textContent = `Now · Feels like ${num(c.feels_like)}° · ${muggy}`;
-  $('hero-sun').textContent = `Sunset ${timeStr(d.sunset)} · Sunrise ${timeStr(fc.forecast.daily[1]?.sunrise || d.sunrise)}`;
+  // Visibility only comes from open-meteo (Tempest has no such field), so it stays optional.
+  const vis = c.visibility == null ? ''
+    : ` · ${num(settings().units === 'metric' ? c.visibility / 1000 : c.visibility / 1609.34, 1)} ${U.dist()} vis`;
+  $('hero-feels').textContent = `Now · Feels like ${num(c.feels_like)}° · ${muggy}${vis}`;
+  const nextSunrise = fc.forecast.daily[1]?.sunrise || d.sunrise;
+  const [nextName, nextAt] = Date.now() / 1000 < d.sunset ? ['Sunset', d.sunset] : ['Sunrise', nextSunrise];
+  const soon = until(nextAt);
+  $('hero-sun').textContent = (soon ? `${nextName} in ${soon} · ` : '')
+    + `Sunset ${timeStr(d.sunset)} · Sunrise ${timeStr(nextSunrise)}`;
   const m = moon();
   $('hero-moon').innerHTML = `${moonGlyph(m.age)} ${m.name} · ${m.illum}%`;
   $('hero-moonset').textContent = `${m.nextName} ${m.nextDate.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric' })}`;
   $('hero-icon').innerHTML = icon.wxHero(c.icon, 150);
+  setScene(c.icon);
   renderNormal(d);
 }
 
@@ -497,7 +513,22 @@ function renderLocal(o) {
 window.addEventListener('wd:ws-obs', (e) => { if (!deskForecast()) renderLocal(e.detail); });
 window.addEventListener('wd:forecast', (e) => renderPro(e.detail));
 
+// One dot per station source the LAN server is holding, hover for the /diag line itself. Nothing
+// at all on a static host or a desktop with no server — there is no source to be healthy.
+async function renderHealth() {
+  const el = $('src-health');
+  try {
+    const d = await (await fetch(`${window.__WD_SRV || ''}/diag`)).json();
+    el.innerHTML = Object.entries(d).map(([src, v]) => {
+      const ago = Math.max(0, Math.round(Date.now() / 1000 - v.at));
+      const cls = !v.ok ? 'bad' : ago > 600 ? 'stale' : '';
+      return `<i class="${cls}" title="${src} · ${v.rows} rows · ${v.what} · ${ago}s ago"></i>`;
+    }).join('');
+  } catch { el.innerHTML = ''; }
+}
+
 export function initPro() {
+  every('pro-health', 300, renderHealth);
   every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
   every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
   every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
@@ -507,9 +538,10 @@ export function initPro() {
   const eco = ecoOn();
   every('clock', eco ? 30 : 1, () => {
     const d = new Date();
+    const h12 = settings().clock24 === 'auto' || !settings().clock24 ? {} : { hour12: settings().clock24 === '12' };
     $('clock-time').textContent = d.toLocaleTimeString([], eco
-      ? { hour: 'numeric', minute: '2-digit' }
-      : { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+      ? { hour: 'numeric', minute: '2-digit', ...h12 }
+      : { hour: 'numeric', minute: '2-digit', second: '2-digit', ...h12 });
     $('clock-date').textContent = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   });
   every('pro-clock', 60, () => { if (deskForecast()) renderHero(deskForecast()); });
@@ -524,6 +556,8 @@ export function initPro() {
 
 // ponytail-lite self-check: the only arithmetic here that isn't a straight unit multiply.
 if (location.search.includes('selftest')) {
+  console.assert(until(Date.now() / 1000 + 5400) === '1h 30m', 'pro: 90 minutes reads as 1h 30m');
+  console.assert(until(Date.now() / 1000 - 60) === '', 'pro: a past event has no countdown');
   console.assert(Math.abs(dewPointC(20, 100) - 20) < 0.1, 'pro: saturated air dews at the air temperature');
   console.assert(Math.abs(dewPointC(20, 50) - 9.3) < 0.3, 'pro: 20°C at 50% dews near 9.3°C');
   console.assert(dewPointC(20, 0) === null, 'pro: no humidity, no dew point');

@@ -184,6 +184,11 @@ things catch people out: the console must be allowed plain **HTTP**, not HTTPS, 
 a port other than 80. Firmware that insists on either needs a router rule forwarding port 80 to
 8088 on this machine.
 
+**WeeWX.** WeeWX already speaks the WU protocol, so it needs no plugin — in `weewx.conf`, under
+`[StdRESTful] [[Wunderground]]`, set `server_url = http://<host>:8088/ingest`, any `station` and
+`password`, and `enable = true`. Pick *Weather Underground protocol* as the brand here. That also
+covers every driver WeeWX has, which is most hardware that exists (issue #47).
+
 **Davis — Vantage Pro2, Vantage Pro2 Plus, Vantage Vue.** Needs a WeatherLink Live (or a Console
 6313) on the network. Put its IP in *WeatherLink Live address*; the app polls its local API every
 ten seconds. No cloud, no key.
@@ -203,6 +208,11 @@ done
 
 Anything `rtl_433` decodes lands the same way, so this is also the escape hatch for a station no
 other section covers.
+
+**On the phone app.** The Android build is a dashboard, not a server: it has no address a console
+can upload to. Cloud sources (*Ambient Weather Network*, *La Crosse*) work there directly; for a
+push brand, run the desktop build or the Docker image on a machine that stays on and point the
+phone at that address.
 
 **La Crosse Technology (C85845 and friends).** Account email and password. This one is unofficial —
 it reads the API their own app uses, and it can stop working without notice. Those readings are
@@ -478,9 +488,31 @@ behind a proxy.
 ## Installing on a phone
 
 The dashboard ships a web manifest, so any phone browser pointed at the LAN URL can add it to the
-home screen and run it full-screen. There is no service worker and there won't be: the LAN server
-is plain http, which cannot register one, and a cached copy of a live dashboard would be showing
-yesterday's weather with today's confidence.
+home screen and run it full-screen.
+
+Put it behind https and it also installs as a proper PWA: `site/sw.js` caches the shell — the page,
+the modules, the icons — so the dashboard still draws when the wifi is down, with the last good
+forecast and observation marked stale. The weather itself is never cached by the worker, and the
+network wins whenever it answers, so an update can't be pinned by a stale cache. Over plain http
+nothing registers, and behaviour is exactly what it was.
+
+The simplest LAN https is Caddy with its own CA:
+
+```
+weather.home.arpa {
+  tls internal
+  reverse_proxy 127.0.0.1:8088
+}
+```
+
+**That address is the whole dashboard, and `GET /config` serves the station token to anyone who
+asks it** — put it in front of screens you trust, not the internet. What goes on the internet is
+`/public` and nothing else (see the section above). On nginx, add `proxy_buffering off;` and a
+long `proxy_read_timeout` or the `/events` stream dies after a minute.
+
+With https there is also a **Browser notifications** checkbox in Settings: alerts become real
+notifications while the tab is in the background. There is no push server, so the page has to be
+open — for a phone that is asleep, use the ntfy channel.
 
 ## Other devices
 
@@ -519,10 +551,11 @@ MIT. See [LICENSE](LICENSE).
 
 ## Notes
 
-No service worker and no PWA install: the app is useless offline because every source is a cloud
-API, and the LAN origin is insecure anyway, so the Notification API is unavailable. Alerts render
-as an in-page banner queue with a WebAudio chime instead. The desktop build does raise real OS
-notifications, through Tauri rather than the browser API, and only when its window is hidden.
+The service worker caches the shell only, and only on a secure origin — the plain-http LAN origin
+can't register one, and every weather source is a cloud API, so offline means "the page still
+draws, with the last reading marked stale". Alerts render as an in-page banner queue with a
+WebAudio chime; on https they can also raise browser notifications, and the desktop build raises
+real OS ones through Tauri. All three only fire when the window is hidden.
 
 Releasing: the desktop updater needs `TAURI_SIGNING_PRIVATE_KEY` and
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the repo secrets, matching the public key in
