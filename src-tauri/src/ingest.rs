@@ -248,7 +248,7 @@ fn diags() -> &'static Mutex<HashMap<&'static str, Diag>> {
     D.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn note(origin: &'static str, ok: bool, what: &str, stored: bool) {
+pub fn note(origin: &'static str, ok: bool, what: &str, stored: bool) {
     let Ok(mut d) = diags().lock() else { return };
     let e = d.entry(origin).or_insert(Diag { at: 0, ok: true, what: String::new(), rows: 0 });
     e.at = epoch();

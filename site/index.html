@@ -996,12 +996,17 @@
       An ntfy.sh topic is public to anyone who guesses it, so make it long.</p>
 
     <h2 style="font-size:13px;margin-top:18px">Smart home</h2>
-    <label>MQTT WebSocket URL</label><input id="set-mqtt-url" placeholder="ws://homeassistant.local:9001">
+    <label>MQTT broker</label><input id="set-mqtt-url" placeholder="mqtt://homeassistant.local:1883">
+    <p class="muted" style="font-size:12px">The desktop and Docker builds speak plain MQTT
+      (<code>mqtt://</code> or <code>mqtts://</code>) and keep publishing with every tab closed,
+      which is what Home Assistant needs. A <code>ws://</code> address is published by this page
+      instead, and only while it is open.</p>
     <label>MQTT username</label><input id="set-mqtt-user" autocomplete="off">
     <label>MQTT password</label><input id="set-mqtt-pass" type="password" autocomplete="off">
     <label>Broker topics to show (one per line: topic | label | unit)</label>
     <textarea id="set-mqtt-subs" rows="3" placeholder="home/greenhouse/temp | Greenhouse | °F"
       style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
+    <label>Discovery prefix</label><input id="set-ha-prefix" placeholder="homeassistant">
     <label>Home Assistant URL</label><input id="set-ha-url" placeholder="http://homeassistant.local:8123">
     <label>Home Assistant token</label><input id="set-ha-token" type="password" placeholder="long-lived access token">
     <label>Entities to show</label><input id="set-ha-entities" placeholder="light.porch, sensor.attic_temp">

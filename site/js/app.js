@@ -37,6 +37,9 @@ const DEFAULTS = {
   // Smart home: an MQTT broker to publish to, and a Home Assistant to read back from. Both dark
   // until filled in.
   mqttUrl: '', mqttUser: '', mqttPass: '', haUrl: '', haToken: '', haEntities: '',
+  // Home Assistant's discovery topic root. Only ever changed by someone who changed it in Home
+  // Assistant first, but that someone has no other way to be found.
+  haDiscoveryPrefix: '',
   // Look and feel. 'auto' theme follows the station's own sunrise/sunset, not the OS — a wall
   // panel in a dark hallway wants the room's light, not the laptop's setting.
   theme: 'dark', accent: '', fontScale: 1, density: 'normal', bigNumbers: false,
