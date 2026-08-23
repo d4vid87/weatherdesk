@@ -61,6 +61,15 @@ export async function refreshDesk() {
   window.dispatchEvent(new CustomEvent('wd:forecast', { detail: fc }));
 }
 
+// A forecast is fetched every few minutes; the station reports every few seconds. Repaint the
+// cached payload with the new reading so the gauges show the garden, not the model.
+window.addEventListener('wd:ws-obs', (e) => {
+  if (!latestForecast) return;
+  api.overlayStation(latestForecast.current_conditions, e.detail, latestForecast.elevation);
+  renderCurrent(latestForecast.current_conditions);
+  window.dispatchEvent(new CustomEvent('wd:forecast', { detail: latestForecast }));
+});
+
 function renderCurrent(c) {
   if (!c) return;
   document.title = `${num(c.air_temperature)}${U.temp()} · WeatherDesk`;

@@ -118,6 +118,15 @@ function showSourceFields() {
   if (push) $('src-url').value = canIngest() ? ingestUrl($('set-ingest-key').value.trim()) : '';
 }
 
+// Blank means "no override" — a null, not a zero. Zero is a real elevation at the coast.
+function elevMetres() {
+  const raw = $('set-elev').value.trim();
+  if (!raw) return null;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return null;
+  return settings().units === 'metric' ? v : v * 0.3048;
+}
+
 function fillDrawer() {
   const s = settings();
   $('set-token').value = s.token;
@@ -149,6 +158,11 @@ function fillDrawer() {
   $('set-wu-key').value = s.wuKey || '';
   $('set-pws-id').value = s.pwsId || '';
   $('set-pws-key').value = s.pwsKey || '';
+  // Stored in metres; shown in whatever the rest of the app is speaking.
+  const feet = s.units !== 'metric';
+  $('set-elev-unit').textContent = feet ? '(ft)' : '(m)';
+  $('set-elev').value = s.elevationM == null ? ''
+    : String(Math.round(feet ? s.elevationM / 0.3048 : s.elevationM));
   $('set-source').value = s.stationSource || '';
   $('set-wll').value = s.wllHost || '';
   $('set-awn-api').value = s.awnApiKey || '';
@@ -191,6 +205,11 @@ function renderDiag() {
         const ago = Math.max(0, Math.round(Date.now() / 1000 - v.at));
         return `<div>${src} · ${v.rows} rows · ${v.ok ? '' : 'error: '}${v.what} · ${ago}s ago</div>`;
       });
+      // One archive, one timeline: two consoles reporting without an ingest key interleave
+      // their rows and the trends read as noise. The real fix is per-station rows (3.3.0).
+      const writing = Object.values(d).filter((v) => v.rows > 0).length;
+      if (writing > 1) rows.push('<div class="warn">two stations are reporting here — their rows '
+        + 'interleave into one archive. Set an ingest key so only yours is stored.</div>');
       el.innerHTML = rows.join('') || 'No station has reported here yet.';
     })
     .catch(() => { el.innerHTML = ''; });
@@ -326,7 +345,11 @@ $('btn-save').onclick = async () => {
     wuKey: $('set-wu-key').value.trim(),
     pwsId: $('set-pws-id').value.trim(),
     pwsKey: $('set-pws-key').value.trim(),
+    elevationM: elevMetres(),
     stationSource: $('set-source').value,
+    // Switching to a non-Tempest brand: the old WeatherFlow device id has to go with it, or
+    // history and the age chip keep asking WeatherFlow about a station that isn't there.
+    ...($('set-source').value ? { deviceId: '' } : {}),
     wllHost: $('set-wll').value.trim(),
     awnApiKey: $('set-awn-api').value.trim(),
     awnAppKey: $('set-awn-app').value.trim(),
@@ -464,13 +487,15 @@ async function wizardFind() {
     try {
       const hits = (await api.geocode(q)).features || [];
       $('wiz-place-list').innerHTML = hits
-        .map((h, i) => `<button class="place-hit" data-hit="${i}">${[h.properties.name, h.properties.state, h.properties.country].filter(Boolean).join(', ')}</button>`)
+        .map((h, i) => `<button class="place-hit" data-hit="${i}">${api.placeLabel(h.properties)}</button>`)
         .join('') || '<div class="muted">no matches</div>';
+      // The wizard box scrolls; results land below the fold and read as "the button did nothing".
+      $('wiz-place-list').scrollIntoView({ block: 'nearest' });
       $('wiz-place-list').querySelectorAll('[data-hit]').forEach((b) => {
         b.onclick = () => {
           const h = hits[+b.dataset.hit];
           const [lon, lat] = h.geometry.coordinates;
-          saveSettings({ stationSource: sel.value || 'ecowitt', lat, lon, stationName: h.properties.name || q });
+          saveSettings({ stationSource: sel.value || 'ecowitt', lat, lon, stationName: h.properties.city || h.properties.name || q });
           $('wizard').hidden = true;
           fillDrawer();
           refreshAll();
@@ -1018,6 +1043,13 @@ if (location.search.includes('selftest')) {
   console.assert(mayPush(true), 'config: a screen that has pulled may push');
   console.assert(mayPush(false) === (configured() || !!settings().stationSource),
     'config: without a pull, only a screen that knows its station pushes');
+
+  // The bug that read as "the Find button does nothing": a ZIP match's town is in `city`, so
+  // without it the list showed five bare numbers and none of them looked like home.
+  console.assert(api.placeLabel({ name: '06092', city: 'Simsbury', state: 'Connecticut', country: 'United States' })
+    === '06092, Simsbury, Connecticut, United States', 'geocode label keeps the town');
+  console.assert(api.placeLabel({ name: 'Simsbury', city: 'Simsbury', state: 'Connecticut' })
+    === 'Simsbury, Connecticut', 'geocode label does not repeat the town');
 
   // The fetch deadline every screen depends on, on the browsers that have no AbortSignal.timeout.
   const sig = expires(50);

@@ -6,6 +6,40 @@ and the format loosely follows [Keep a Changelog](https://keepachangelog.com/en/
 Every release ships desktop installers (Linux `.deb`, Windows, macOS), an arm64 `.deb` for the
 Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container image.
 
+## [3.1.1] — 2026-08-23
+
+Three things testers wrote in about, and the elevation setting the barometer always wanted.
+
+### Fixed
+- E-ink palette: the hero (and with it the clock) was white text on a white card, because the
+  palette strips background images and the hero's colour lived only in a gradient. It now paints
+  in the palette's own ink with a border, like every other e-ink panel.
+- Eco mode's clock pace and seconds format were read once at load, so the toggle did nothing
+  until a reload. The clock job re-registers on every settings change.
+- Place search in the setup wizard looked dead: the results rendered below the fold of the
+  wizard's scroll box, and a ZIP match was labelled "06092, Connecticut, United States" with the
+  town nowhere in sight. Results scroll into view, labels carry the town, and the search is
+  biased to your language and the location already on file.
+- Polled stations (Davis WeatherLink Live and friends) showed the forecast model's wind on the
+  gauges between forecast fetches — five minutes of somebody else's weather. Every observation
+  now repaints the cached forecast with the station's own reading.
+- A leftover Tempest device ID from an earlier setup beat the current brand when loading three
+  hours of history, which is what left the hero reading "999m old". Brand wins, and switching
+  brands clears the stale ID.
+- `/diag` called the healthy state "throttled" — the WeatherLink poll runs faster than the
+  archive's write gate by design. It now says so in words that don't look like a fault.
+
+### Added
+- Station elevation in Settings, in feet or metres to match your units. Only the barometer uses
+  it: a station reading is reduced to sea level before it is shown, and doing that with the
+  forecast model's elevation for the grid square instead of yours is why the dashboard and the
+  console disagreed by a few hundredths of an inch.
+- The live wind card says "1-min avg · polled" for brands that are polled. Only a Tempest hub
+  broadcasts true three-second wind; resending a one-minute average every ten seconds is not a
+  fast needle and shouldn't look like one.
+- Settings warns when two consoles are writing into one archive with no ingest key set — their
+  rows interleave and the trends read as noise.
+
 ## [3.1.0] — 2026-08-22
 
 ### Added

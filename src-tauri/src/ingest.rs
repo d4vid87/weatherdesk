@@ -321,7 +321,8 @@ fn take(state: &Arc<State>, f: &Fields, raw_ts: f64, src: i64, origin: &'static 
     let m = all.entry(origin).or_default();
     if !keep(at, m, raw_ts) {
         drop(all);
-        note(origin, true, "throttled", false);
+        // Healthy: the poll is faster than the archive write gate. "throttled" read as a fault.
+        note(origin, true, "ok · waiting for next write slot", false);
         return false;
     }
     let t = tuple(f, ts, m);
@@ -413,10 +414,17 @@ fn get(url: &str, origin: &'static str) -> Option<serde_json::Value> {
 /// somebody wants the fast needle.
 fn poll_wll(state: &Arc<State>, host: &str) {
     let Some(v) = get(&format!("http://{host}/v1/current_conditions"), "wll") else { return };
-    let Some(conds) = v.pointer("/data/conditions").and_then(|c| c.as_array()) else { return };
     let ts = v.pointer("/data/ts").and_then(|t| t.as_f64()).unwrap_or(epoch() as f64);
+    let f = wll_fields(&v);
+    if !f.is_empty() {
+        take(state, &f, ts, SRC_INGEST, "wll");
+    }
+}
 
+/// The payload-to-fields half of the WLL poll, split out so it can be tested without a console.
+fn wll_fields(v: &serde_json::Value) -> Fields {
     let mut f = Fields::new();
+    let Some(conds) = v.pointer("/data/conditions").and_then(|c| c.as_array()) else { return f };
     for c in conds {
         let g = |k: &str| c.get(k).and_then(|x| x.as_f64());
         // Structure type 1 is the ISS — the outdoor sensor suite. The others are the barometer
@@ -448,9 +456,7 @@ fn poll_wll(state: &Arc<State>, host: &str) {
             _ => {}
         }
     }
-    if !f.is_empty() {
-        take(state, &f, ts, SRC_INGEST, "wll");
-    }
+    f
 }
 
 /// Millimetres per tip, from the gauge Davis says is installed. Default is the 0.01 in gauge
@@ -729,6 +735,32 @@ mod tests {
         assert!(close(t[2], 4.4704));
         assert!(close(t[4], 180.0));
         assert!(close(t[18], 10.0));
+    }
+
+    /// A real /v1/current_conditions body, trimmed to the fields we read. Solar and UV come off
+    /// the ISS record and used to be dropped on the floor.
+    #[test]
+    fn a_wll_payload_becomes_the_fields_the_tuple_wants() {
+        let v = serde_json::json!({"data": {"ts": 1_700_000_000i64, "conditions": [
+            {"data_structure_type": 1, "temp": 71.6, "hum": 54.0,
+             "wind_speed_avg_last_1_min": 4.0, "wind_speed_hi_last_2_min": 11.0,
+             "wind_dir_scalar_avg_last_1_min": 190.0, "solar_rad": 812.0, "uv_index": 6.5,
+             "rainfall_daily": 14.0, "rain_size": 1},
+            {"data_structure_type": 3, "bar_absolute": 29.61, "bar_sea_level": 29.86},
+            {"data_structure_type": 4, "temp_in": 70.0}]}});
+        let f = wll_fields(&v);
+        assert_eq!(f.get("tempf").map(String::as_str), Some("71.6"));
+        assert_eq!(f.get("windspeedmph").map(String::as_str), Some("4"));
+        assert_eq!(f.get("winddir").map(String::as_str), Some("190"));
+        assert_eq!(f.get("uv").map(String::as_str), Some("6.5"));
+        assert_eq!(f.get("solarradiation").map(String::as_str), Some("812"));
+        // 14 tips of the 0.01 in gauge is 3.556 mm, not 14 of anything.
+        let rain: f64 = f.get("dailyrainmm").unwrap().parse().unwrap();
+        assert!((rain - 3.556).abs() < 1e-6, "rain was {rain}");
+        // The archive holds station pressure; sea level is derived from altitude downstream.
+        assert_eq!(f.get("baromabsin").map(String::as_str), Some("29.61"));
+        // The indoor record is not the outdoor temperature.
+        assert!(!f.contains_key("temp_in"));
     }
 
     #[test]

@@ -184,6 +184,9 @@ export function renderRapid(mps, dir) {
   $('live-wind').textContent = num(v, 1);
   $('live-wind-unit').textContent = U.wind();
   $('live-dir').textContent = `${deg2compass(dir)} ${num(dir)}°`;
+  // Only a Tempest hub sends true 3-second wind. A polled brand's "rapid" packet is the
+  // station's own 1-minute average resent every 10s; saying so beats implying a fast needle.
+  $('live-rate').textContent = settings().stationSource ? '1-min avg · polled' : '3-second';
   const needle = $('live-needle');
   if (needle) needle.style.transform = `rotate(${dir}deg)`;
 }

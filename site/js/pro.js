@@ -379,8 +379,10 @@ async function loadHistory() {
     // out of this server's archive, which is where its reports were stored on the way in. Same
     // tuples either way, so the trends, the arrows and the ticker don't know the difference.
     let j = null;
-    if (s.deviceId && /^\d+$/.test(s.deviceId)) j = await api.deviceObs(s.deviceId, end - 3 * 3600, end);
-    else if (s.stationSource) j = await api.localObs(3);
+    // stationSource first: a leftover Tempest deviceId from an earlier setup would otherwise
+    // send a Davis owner to WeatherFlow for history and every row would come back empty.
+    if (s.stationSource) j = await api.localObs(3);
+    else if (s.deviceId && /^\d+$/.test(s.deviceId)) j = await api.deviceObs(s.deviceId, end - 3 * 3600, end);
     if (!j) return;
     history = j.obs || [];
     renderStatus();
@@ -527,14 +529,9 @@ async function renderHealth() {
   } catch { el.innerHTML = ''; }
 }
 
-export function initPro() {
-  every('pro-health', 300, renderHealth);
-  every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
-  every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
-  every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
-  every('pro-ensemble', 1800, loadEnsemble);
-  // A second hand is a repaint a second, forever — the single most expensive idle thing on the
-  // page. In eco the seconds go and so does 29 of every 30 repaints.
+// Re-registered on every settings change: `every` keys by name, so the eco pace and the seconds
+// format both follow the toggle without a reload.
+export function registerClock() {
   const eco = ecoOn();
   every('clock', eco ? 30 : 1, () => {
     const d = new Date();
@@ -544,6 +541,19 @@ export function initPro() {
       : { hour: 'numeric', minute: '2-digit', second: '2-digit', ...h12 });
     $('clock-date').textContent = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   });
+}
+
+export function initPro() {
+  every('pro-health', 300, renderHealth);
+  every('pro-history', 300, async () => { await loadHistory(); renderPro(); });
+  every('pro-consensus', 900, async () => { await loadConsensus(); renderPro(); });
+  every('pro-qpf', 1800, async () => { await loadQpf(); renderPro(); });
+  every('pro-ensemble', 1800, loadEnsemble);
+  // A second hand is a repaint a second, forever — the single most expensive idle thing on the
+  // page. In eco the seconds go and so does 29 of every 30 repaints.
+  registerClock();
+  // The eco toggle changes both the pace and the seconds format; re-register instead of reloading.
+  window.addEventListener('wd:settings', registerClock);
   every('pro-clock', 60, () => { if (deskForecast()) renderHero(deskForecast()); });
 
   // A class, not an inline style: inline would outrank the rule that stops the animation whenever

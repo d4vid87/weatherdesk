@@ -2,6 +2,10 @@
 
 const DEFAULTS = {
   token: '', stationId: '', deviceId: '', lat: null, lon: null, stationName: '',
+  // Metres above sea level, always — the drawer converts for whoever types feet. Null means
+  // "use the forecast model's elevation for this grid square", which is right to a few metres
+  // in flat country and tens of metres in a valley, which is a barometer's worth of error.
+  elevationM: null,
   units: 'imperial', refreshSec: 60,
   // 'auto' follows the browser locale; the other two are for the screen that lives in a country
   // its OS wasn't set up for.

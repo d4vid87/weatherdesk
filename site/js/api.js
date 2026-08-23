@@ -283,27 +283,35 @@ export function shapeOm(j, ownTuple = null) {
     conditions: omWords(cur.weather_code),
   };
 
-  if (ownTuple) {
-    const o = siToDisplay([[...ownTuple]])[0];
-    const own = (v) => (v == null ? undefined : v);
-    const overlay = {
-      air_temperature: own(o[OBS.temp]),
-      relative_humidity: own(o[OBS.rh]),
-      wind_avg: own(o[OBS.windAvg]),
-      wind_gust: own(o[OBS.windGust]),
-      wind_direction: own(o[OBS.windDir]),
-      uv: own(o[OBS.uv]),
-      solar_radiation: own(o[OBS.solar]),
-      precip_accum_local_day: own(o[OBS.dayRain]),
-      station_pressure: own(o[OBS.press]),
-      // The barometer gauge reads `sea_level_pressure`; without this line it showed the model's
-      // MSL forever and a real barometer sat unused two fields away.
-      sea_level_pressure: own(toSeaLevel(o[OBS.press], j.elevation, tempC(o[OBS.temp], metric))),
-    };
-    for (const k in overlay) if (overlay[k] !== undefined) c[k] = overlay[k];
-  }
+  if (ownTuple) overlayStation(c, ownTuple, j.elevation);
 
-  return { current_conditions: c, forecast: { daily, hourly } };
+  // Kept so a later observation can be overlaid on this same payload without refetching.
+  return { current_conditions: c, forecast: { daily, hourly }, elevation: j.elevation };
+}
+
+// The station's reading painted over the model's guess. Exported because observations arrive
+// far more often than forecasts do — a five-minute-old model wind is not "your" wind.
+export function overlayStation(c, tuple, elevation) {
+  const metric = settings().units === 'metric';
+  const o = siToDisplay([[...tuple]])[0];
+  const own = (v) => (v == null ? undefined : v);
+  const overlay = {
+    air_temperature: own(o[OBS.temp]),
+    relative_humidity: own(o[OBS.rh]),
+    wind_avg: own(o[OBS.windAvg]),
+    wind_gust: own(o[OBS.windGust]),
+    wind_direction: own(o[OBS.windDir]),
+    uv: own(o[OBS.uv]),
+    solar_radiation: own(o[OBS.solar]),
+    precip_accum_local_day: own(o[OBS.dayRain]),
+    station_pressure: own(o[OBS.press]),
+    // The barometer gauge reads `sea_level_pressure`; without this line it showed the model's
+    // MSL forever and a real barometer sat unused two fields away.
+    sea_level_pressure: own(toSeaLevel(o[OBS.press], settings().elevationM ?? elevation,
+      tempC(o[OBS.temp], metric))),
+  };
+  for (const k in overlay) if (overlay[k] !== undefined) c[k] = overlay[k];
+  return c;
 }
 
 export async function omForecast(lat = coords().lat, lon = coords().lon) {
@@ -374,8 +382,22 @@ export function aqi(lat = coords().lat, lon = coords().lon) {
   })}`);
 }
 
+// A ZIP hit comes back with name="06092" and the town only in `city`, so a label without it
+// reads as a bare number among five countries' worth of matches.
+export function placeLabel(p) {
+  return [p.name, p.city && p.city !== p.name ? p.city : null, p.state, p.country]
+    .filter(Boolean).join(', ');
+}
+
 export function geocode(q) {
-  return getJSON(`https://photon.komoot.io/api/?${qs({ q, limit: 5 })}`);
+  const c = coords();
+  const lang = (navigator.language || 'en').slice(0, 2);
+  return getJSON(`https://photon.komoot.io/api/?${qs({
+    q, limit: 5,
+    // Photon only speaks these three; anything else has to fall back or it 400s.
+    lang: ['en', 'de', 'fr'].includes(lang) ? lang : 'en',
+    ...(c.lat != null && c.lon != null ? { lat: c.lat, lon: c.lon } : {}),
+  })}`);
 }
 
 // 31 members of the GFS ensemble, which between them are an honest answer to "how sure is
