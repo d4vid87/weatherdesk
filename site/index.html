@@ -242,8 +242,11 @@
   /* the canvas is positioned, so the content has to be too or it paints underneath */
   #hero > *:not(#hero-fx):not(#hero-icon) { position: relative; z-index: 1; }
   #hero > #hero-icon { z-index: 1; }
-  #hero { padding: 16px 20px 20px; color: #fff; overflow: hidden; border-radius: 12px;
+  #hero { padding: 16px 20px 20px; color: var(--hero-text, #fff); overflow: hidden; border-radius: 12px;
     background: linear-gradient(160deg, #1f6fb8, #7fb6e6); }
+  /* e-ink kills background-image, so the gradient goes and white-on-white would follow. */
+  html[data-palette="eink"] #hero { --hero-text: var(--text); background-color: var(--bg);
+    border: 1px solid var(--line); }
   #hero-clock { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px;
     font-variant-numeric: tabular-nums; }
   #clock-time { font-size: 56px; font-weight: 700; line-height: 1; }
@@ -692,6 +695,7 @@
           <div>
             <div class="now-temp"><span id="live-wind">--</span><small id="live-wind-unit">mph</small></div>
             <div id="live-dir" class="muted"></div>
+            <div id="live-rate" class="muted" style="font-size:12px"></div>
           </div>
         </div>
         <div class="muted" style="font-size:12px;margin-top:6px">socket: <span id="ws-state">idle</span></div>
@@ -760,6 +764,11 @@
     <label>Tempest API token</label><input id="set-token" type="password" placeholder="personal use token">
     <label>Station ID</label><input id="set-station" inputmode="numeric">
     <label>Device ID (Tempest sensor)</label><input id="set-device" inputmode="numeric">
+    <label>Station elevation <span id="set-elev-unit">(ft)</span></label>
+    <input id="set-elev" inputmode="decimal" placeholder="from the forecast model">
+    <p class="muted" style="font-size:12px">Only the barometer uses it: a station reading is
+      reduced to sea level before it is shown, and doing that with the model's elevation instead
+      of yours is why the dashboard and the console disagree by a few hundredths.</p>
     <h2 style="font-size:13px;margin-top:18px">Another brand of station</h2>
     <p class="muted" style="font-size:12px">Leave as Tempest unless you have one of these. Push
       brands need no keys — point the console at the address shown below.</p>

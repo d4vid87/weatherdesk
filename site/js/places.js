@@ -47,7 +47,7 @@ async function search() {
     const j = await api.geocode(q);
     $('place-results').innerHTML = (j.features || []).map((f, i) => {
       const p = f.properties;
-      const label = [p.name, p.state, p.country].filter(Boolean).join(', ');
+      const label = api.placeLabel(p);
       return `<button class="place-hit" data-i="${i}">${label}</button>`;
     }).join('') || '<div class="muted">no matches</div>';
     $('place-results').querySelectorAll('.place-hit').forEach((b) => {
@@ -56,7 +56,7 @@ async function search() {
         const p = f.properties;
         const place = {
           id: String(Date.now()),
-          name: [p.name, p.state].filter(Boolean).join(', '),
+          name: [p.city || p.name, p.state].filter(Boolean).join(', '),
           lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
         };
         saveSettings({ places: [...settings().places, place], activePlace: place.id });
