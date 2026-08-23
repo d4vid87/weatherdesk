@@ -166,7 +166,9 @@ jobs:
             gh api -H 'Accept: application/octet-stream' \
               "repos/${{ github.repository }}/releases/assets/$id" > "$name"
           done
-          sha256sum ./* > ../SHA256SUMS.txt
+          # Plain filenames: `sha256sum ./*` writes a ./ prefix that `sha256sum -c` then
+          # looks for literally, in a directory the downloader doesn't have.
+          sha256sum * > ../SHA256SUMS.txt
           gh api --method POST -H "Content-Type: text/plain" \
             "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=SHA256SUMS.txt" \
             --input ../SHA256SUMS.txt
