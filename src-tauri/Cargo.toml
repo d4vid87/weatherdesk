@@ -40,6 +40,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 ureq = "2"
 # The dashboard itself, so the headless binary is one file with nothing beside it.
 include_dir = "0.7"
+# MQTT for the Home Assistant integration. The blocking client: this binary has no async
+# runtime and does not want one for a publish every ten seconds.
+rumqttc = "0.24"
 # Desktop updates in place. Android is signed with its own key and stays a sideload.
 tauri-plugin-updater = { version = "2", optional = true }
 

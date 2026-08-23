@@ -176,6 +176,7 @@ function fillDrawer() {
   $('set-webhook').value = s.webhookUrl || '';
   renderRules();
   $('set-mqtt-url').value = s.mqttUrl;
+  $('set-ha-prefix').value = s.haDiscoveryPrefix || '';
   $('set-mqtt-user').value = s.mqttUser;
   $('set-mqtt-pass').value = s.mqttPass;
   $('set-mqtt-subs').value = (s.mqttSubs || []).map((x) => [x.topic, x.label, x.unit].filter(Boolean).join(' | ')).join('\n');
@@ -360,6 +361,7 @@ $('btn-save').onclick = async () => {
     ntfyUrl: $('set-ntfy-url').value.trim() || 'https://ntfy.sh',
     webhookUrl: $('set-webhook').value.trim(),
     mqttUrl: $('set-mqtt-url').value.trim(),
+    haDiscoveryPrefix: $('set-ha-prefix').value.trim(),
     mqttUser: $('set-mqtt-user').value.trim(),
     mqttPass: $('set-mqtt-pass').value,
     mqttSubs: $('set-mqtt-subs').value.split('\n').map((line) => {

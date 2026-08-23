@@ -180,11 +180,23 @@ function event(name, payload) {
   client?.publish(`${base()}/event/${name}`, JSON.stringify(payload));
 }
 
-export function initHome() {
+// The LAN server publishes over plain MQTT and keeps doing it with every tab shut, which is the
+// only way Home Assistant sensors stay available overnight. When it is, this page stays off the
+// topics entirely — two publishers on one topic set is a fight nobody wins. The in-page
+// publisher remains for a static host, a phone build, or a broker that only has a websocket
+// listener open.
+async function serverPublishing() {
+  try {
+    const d = await (await fetch(`${window.__WD_SRV || ''}/diag`, { signal: expires(4000) })).json();
+    return !!d.mqtt?.ok;
+  } catch { return false; }
+}
+
+export async function initHome() {
   client?.close();
   client = null;
   const s = settings();
-  if (s.mqttUrl && s.stationId) {
+  if (s.mqttUrl && s.stationId && !(await serverPublishing())) {
     client = mqtt({
       url: s.mqttUrl, user: s.mqttUser, pass: s.mqttPass,
       clientId: `weatherdesk-${s.stationId}-${Math.random().toString(16).slice(2, 8)}`,
@@ -200,6 +212,9 @@ export function initHome() {
       onMessage: (topic, payload) => { subValues.set(topic, payload); renderSubs(); },
       onState: (st) => { const el = $('mqtt-state'); if (el) { el.textContent = st; el.className = st === 'connected' ? 'ok' : 'muted'; } },
     });
+  } else if (s.mqttUrl && s.stationId) {
+    const el = $('mqtt-state');
+    if (el) { el.textContent = 'published by the server'; el.className = 'ok'; }
   }
   initHaPanel();
 }
