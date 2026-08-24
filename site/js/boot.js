@@ -516,6 +516,24 @@ async function wizardFind() {
   target();
 }
 
+// The console announces itself over mDNS, and the server is already listening for it — so the
+// address nobody can find on a router page is one button away.
+$('btn-find-wll').onclick = async () => {
+  const out = $('wll-found');
+  out.textContent = 'looking…';
+  try {
+    const hits = await (await fetch(`${SRV}/discover/wll`, { signal: expires(6000) })).json();
+    if (!hits.length) {
+      out.textContent = 'nothing announced itself — type the address from the WeatherLink app';
+      return;
+    }
+    $('set-wll').value = hits[0].host;
+    out.textContent = hits.length === 1 ? `found ${hits[0].name}` : `found ${hits.length}, using ${hits[0].name}`;
+  } catch {
+    out.textContent = 'this build has no server to ask — type the address instead';
+  }
+};
+
 $('btn-wiz-find').onclick = () => wizardFind();
 $('wiz-token').onkeydown = (e) => { if (e.key === 'Enter') wizardFind(); };
 $('btn-wiz-close').onclick = () => { $('wizard').hidden = true; };
