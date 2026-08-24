@@ -160,6 +160,8 @@
     border: 1px solid var(--line); border-radius: 8px; font: inherit;
   }
   .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  /* display:flex outranks the UA [hidden] rule, so a hidden .row would still show. */
+  .row[hidden] { display: none; }
   .row button { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; }
   .row button.primary { background: var(--accent); color: #04121d; border-color: var(--accent); }
@@ -514,32 +516,37 @@
   <div class="wizard-box">
     <img src="icon-512.png" alt="" style="display:block;width:180px;max-width:60%;margin:0 auto 10px">
     <h2 style="margin-top:0;text-align:center">Welcome to WeatherDesk</h2>
-    <p class="muted" style="font-size:13px">Two ways in. <b>Tempest owners:</b> paste a personal
-      use token (tempestwx.com → Settings → Data Authorizations). <b>Every other brand</b> —
-      Ecowitt, Ambient, Davis, AcuRite, La Crosse — needs no token at all: open the second box.</p>
+    <p class="muted" style="font-size:13px">Pick the brand of station in the garden. Every brand
+      except Tempest needs no token and no account — the readings come from your own sensors, the
+      forecast from open-meteo.</p>
+    <select id="wiz-source"></select>
+    <div class="row" style="margin-top:8px">
+      <input id="wiz-place" placeholder="town or postcode">
+      <button id="btn-wiz-place" style="flex:0 0 auto">Find</button>
+    </div>
+    <div id="wiz-place-list" style="margin-top:8px"></div>
+    <div id="wiz-wll" class="row" style="margin-top:8px" hidden>
+      <input id="wiz-wll-host" placeholder="192.168.1.50">
+      <button id="btn-wiz-wll" style="flex:0 0 auto">Find console</button>
+    </div>
+    <p id="wiz-target" class="muted" style="font-size:12px"></p>
+
+    <h3 style="font-size:13px;margin:16px 0 4px">Tempest owners</h3>
+    <p class="muted" style="font-size:12px">Paste a personal use token — tempestwx.com &rarr;
+      Settings &rarr; Data Authorizations.</p>
     <div class="row">
       <input id="wiz-token" type="password" placeholder="personal use token">
       <button class="primary" id="btn-wiz-find" style="flex:0 0 auto">Find stations</button>
     </div>
     <div id="wiz-list" style="margin-top:8px"></div>
+    <p class="muted" style="font-size:12px">No token? The desktop app also reads a Tempest hub
+      directly off the network with none at all.</p>
+
+    <div id="wiz-first" class="muted" style="font-size:12px;margin-top:10px"></div>
     <div class="row" style="margin-top:10px">
       <button id="btn-wiz-demo">Skip — just show me the weather somewhere</button>
       <button id="btn-wiz-close" style="flex:0 0 auto">Close</button>
     </div>
-    <p class="muted" style="font-size:12px">No station? The desktop app also reads a Tempest hub
-      directly off the network with no token at all.</p>
-    <details id="wiz-other" style="margin-top:10px" open>
-      <summary style="cursor:pointer;font-size:13px">Not a Tempest? Ecowitt, Ambient, Davis, AcuRite, La Crosse…</summary>
-      <p class="muted" style="font-size:12px">Pick the brand, then say where the station is —
-        the forecast comes from open-meteo, the readings come from your own sensors.</p>
-      <select id="wiz-source"></select>
-      <div class="row" style="margin-top:8px">
-        <input id="wiz-place" placeholder="town or postcode">
-        <button id="btn-wiz-place" style="flex:0 0 auto">Find</button>
-      </div>
-      <div id="wiz-place-list" style="margin-top:8px"></div>
-      <p id="wiz-target" class="muted" style="font-size:12px"></p>
-    </details>
   </div>
 </div>
 
