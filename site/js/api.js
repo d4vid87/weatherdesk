@@ -262,6 +262,9 @@ export function shapeOm(j, ownTuple = null) {
     wind_direction: H.wind_direction_10m?.[i],
     icon: omIcon(H.weather_code?.[i], true),
     conditions: omWords(H.weather_code?.[i]),
+    // The solar card reads the whole day out of these two, so they travel with the hour.
+    uv: H.uv_index?.[i],
+    solar_radiation: H.shortwave_radiation?.[i],
   }));
 
   const day = cur.is_day == null ? true : !!cur.is_day;
