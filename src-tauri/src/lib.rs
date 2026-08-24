@@ -10,6 +10,10 @@
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod alerts;
+// `api` reads the archive and the diag table and hands back `server::State` — every one of them
+// desktop-only, so it has to carry the same gate. Without it the Android build is the only thing
+// that notices, at link time, in CI, after the tag is already pushed.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod api;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod cwop;
