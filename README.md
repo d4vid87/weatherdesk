@@ -231,56 +231,51 @@ Notes that apply to all of them:
 
 ## Smart home
 
-WeatherDesk publishes the station to your own MQTT broker and reads a few Home Assistant entities
-back. Both halves are dark until you fill them in under Settings → **Smart home**.
+WeatherDesk publishes your station to Home Assistant over MQTT, evaluates your alert rules
+server-side, and reads Home Assistant entities back onto the dashboard. **Full guide:
+[docs/homeassistant.md](docs/homeassistant.md).** The short version:
 
-**Publishing.** Point *MQTT WebSocket URL* at a broker with a WebSocket listener — mosquitto wants
+**Publishing.** Settings → **Home Assistant** → point *MQTT broker* at `mqtt://host:1883`
+(`mqtts://` for TLS) and press **Test both** — it connects for real and waits for the broker to
+acknowledge a message, because a broker that rejects your password accepts the TCP connection
+first. Home Assistant then discovers one device with fifteen sensors under it, plus `feels_like`,
+`pressure_trend` as a word, `alert` and `rule`. Nothing to add to `configuration.yaml`.
 
-```
-listener 9001
-protocol websockets
-```
+Readings are retained on `weatherdesk/<station id>/…`, **in SI units** (°C, m/s, hPa, mm) whatever
+the dashboard displays — a units switch here must never rewrite months of Home Assistant history.
+`weatherdesk/<station id>/status` is `online`/`offline`, the second written by the broker's
+last will.
 
-— and readings arrive on `weatherdesk/<station id>/temp`, `…/wind`, `…/gust`, `…/rain`,
-`…/pressure`, and the rest, retained, **in SI units** (°C, m/s, hPa, mm) whatever the dashboard is
-set to display. Events land on `weatherdesk/<station id>/event/{lightning,rain,gust}` and are not
-retained. `weatherdesk/<station id>/status` is `online`/`offline`, the second written by the
-broker's last-will when the dashboard goes away.
+The server does this, not the page, so it keeps working with every window closed. Leave the
+desktop app or the container running; that is the always-on copy.
 
-Alongside the raw readings it publishes what a HA automation would otherwise have to work out:
-`feels_like`, `pressure_trend` as a word, a `storm` binary sensor, and one binary sensor per alert
-rule you wrote in the drawer.
+> Upgrading from before 3.2.0? Publishing used to run in the browser over a WebSocket. Change the
+> address from `ws://host:9001` to `mqtt://host:1883` — the app says so if you leave the old one
+> there — and you can drop `protocol websockets` from mosquitto if nothing else used it.
 
-Broker topics can also be read *back*: list them under Settings → **Broker topics to show**
-(`topic | label | unit`, one per line) and their values appear on the Home Assistant card. That is
-for the sensors that never went near Home Assistant — a greenhouse probe publishing straight to
-mosquitto.
+**Alerts.** Your alert rules are evaluated by the server too, against the same thresholds, hold
+times and re-arm behaviour the dashboard uses, and pushed through ntfy, a webhook and the broker.
+Severe weather comes off the National Weather Service the same way. A tablet that sleeps at
+midnight used to be a house with no frost warning. **Test push channels** sends one real
+notification down every configured channel.
 
-Home Assistant discovers all of it by itself: the retained `homeassistant/…/config` topics
-materialize one device with every sensor under it, and they survive a Home Assistant restart with
-no dashboard open. Changing your station ID leaves the old device's retained configs behind —
-delete them with `mosquitto_pub -t 'homeassistant/sensor/wd_<old id>_temp/config' -r -n`, one per
-topic, if you care.
+**Reading back.** Paste a Home Assistant URL and a long-lived access token, press **List
+entities**, and tick what you want on the Desk. The list is fetched by the server, so the token
+never reaches a browser and **you no longer need `cors_allowed_origins`** — the request is
+same-origin. Read-only, deliberately: switching things is Home Assistant's job.
 
-**Reading back.** *Home Assistant URL* + a long-lived access token + a comma-separated list of
-entity ids puts their live states on the Desk. Home Assistant has to allow this origin —
-in `configuration.yaml`:
+Broker topics can be read back too — Settings → **Broker topics to show** (`topic | label | unit`,
+one per line), for sensors that never went near Home Assistant, like a greenhouse probe publishing
+straight to mosquitto.
 
-```yaml
-http:
-  cors_allowed_origins:
-    - http://tauri.localhost
-    - http://<the LAN URL in the window title>
-```
+**Blueprints.** Three importable automations in
+[`blueprints/automation/weatherdesk`](blueprints/automation/weatherdesk): a severe alert to a
+critical push, a gust threshold to any action, and skip-irrigation-after-rain.
 
 **HomeKit, Alexa, Google.** Through Home Assistant, which already bridges all three — there is no
 WeatherDesk-specific code for them and there shouldn't be. Add the MQTT integration (the device
 above appears), then Settings → Devices & Services → Add Integration → **HomeKit Bridge** and pick
 it; Alexa and Google go through Home Assistant Cloud or their own manual setups.
-
-Two limits worth knowing: publishing only happens while the dashboard is open somewhere (leave the
-desktop app running — that is the always-on copy), and a browser tab served over `https` cannot
-reach a `ws://` broker at all. The desktop app and the LAN URL are both plain origins, so they can.
 
 ## Quick start
 

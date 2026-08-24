@@ -294,6 +294,43 @@ pub fn ver_script() -> String {
     format!("window.__WD_VER='{}'", env!("CARGO_PKG_VERSION"))
 }
 
+/// Where this page should send its own requests.
+///
+/// Normally nowhere in particular: the page is served from the same origin as `/config` and
+/// `/history`, so a bare path works and `__WD_SRV` stays empty. Home Assistant's Ingress is the
+/// exception — it serves the add-on under `/api/hassio_ingress/<token>/` and tells us so in a
+/// header, so a request to `/config` would leave the add-on entirely and 404 against Home
+/// Assistant itself. Handing the page the prefix is the whole of Ingress support; every asset in
+/// `index.html` is already a relative URL.
+///
+/// The token is Home Assistant's, changes per session, and is only ever echoed back into the page
+/// that was served with it.
+fn srv_script(req: &tiny_http::Request) -> String {
+    req.headers()
+        .iter()
+        .find(|h| h.field.equiv("X-Ingress-Path"))
+        .and_then(|h| ingress_prefix(h.value.as_str()))
+        .map(|p| format!("window.__WD_SRV='{p}';"))
+        .unwrap_or_default()
+}
+
+/// A path prefix we are willing to write into a `<script>`, or nothing.
+///
+/// It goes inside a single-quoted JavaScript string, so anything that could end that string early
+/// is refused outright rather than escaped: this value arrives in a header, and a header is
+/// whatever the other end felt like sending. Ingress paths are `/api/hassio_ingress/<token>` and
+/// contain none of it.
+fn ingress_prefix(raw: &str) -> Option<String> {
+    let p = raw.trim().trim_end_matches('/');
+    if p.is_empty() || !p.starts_with('/') {
+        return None;
+    }
+    if p.contains(['"', '\'', '\\', '<', '>', '\n', '\r']) {
+        return None;
+    }
+    Some(p.to_string())
+}
+
 /// Every spelling a console might report on. Firmware varies more than the protocols do: some
 /// Weather Underground clones post to `/updateweatherstation.php` with no prefix, some to
 /// `/weatherstation/updateweatherstation.php?...`, and Ecowitt's `/data/report/` shows up with
@@ -489,8 +526,10 @@ fn handle(state: &Arc<State>, mut req: Request) {
             // The page has no other way to know what it is: the site is baked in and the
             // version lives in the binary.
             Some((bytes, "text/html")) => {
-                let page = String::from_utf8_lossy(&bytes)
-                    .replace("<head>", &format!("<head><script>{}</script>", ver_script()));
+                let page = String::from_utf8_lossy(&bytes).replace(
+                    "<head>",
+                    &format!("<head><script>{}{}</script>", srv_script(&req), ver_script()),
+                );
                 Response::from_string(page).with_header(header("Content-Type", "text/html")).boxed()
             }
             Some((bytes, mime)) => Response::from_data(bytes).with_header(header("Content-Type", mime)).boxed(),
@@ -636,6 +675,23 @@ mod tests {
         for p in ["/config", "/public", "/", "/history/daily", "/diag"] {
             assert!(!is_ingest_path(p), "{p} must not be swallowed by ingest");
         }
+    }
+
+    /// This value ends up inside a single-quoted JavaScript string in a page we serve, and it
+    /// arrives in a header. Anything that could close that string early is refused, not escaped.
+    #[test]
+    fn an_ingress_prefix_cannot_break_out_of_the_script_it_lands_in() {
+        assert_eq!(
+            ingress_prefix("/api/hassio_ingress/abc123/"),
+            Some("/api/hassio_ingress/abc123".to_string())
+        );
+        assert_eq!(ingress_prefix("/x';alert(1);//"), None);
+        assert_eq!(ingress_prefix("/x\"></script><script>"), None);
+        assert_eq!(ingress_prefix("/x\\"), None);
+        assert_eq!(ingress_prefix("/a\nb"), None);
+        assert_eq!(ingress_prefix("http://evil.example"), None, "must be a path, not an origin");
+        assert_eq!(ingress_prefix(""), None);
+        assert_eq!(ingress_prefix("/"), None);
     }
 
     #[test]

@@ -385,21 +385,39 @@ fn tick(
     }
 
     let Some(feats) = nws(cfg) else { return };
-    let live: std::collections::HashSet<String> = feats
-        .iter()
-        .filter_map(|f| f.get("properties").map(alert_key))
-        .collect();
     for f in &feats {
         let Some(p) = f.get("properties") else { continue };
-        let key = alert_key(p);
-        if !seen.insert(key) {
+        if !is_new(seen, p) {
             continue;
         }
         let s = |k: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
         push(cfg, "severe", &s("event"), &s("headline"));
     }
-    // Forget warnings that have expired, so the next one of the same kind chimes again.
+    if expire(seen, &feats) {
+        crate::mqtt::send("alert", "");
+    }
+}
+
+/// Has this warning been announced already? Announcing sets the memory, so a caller that skips is
+/// a caller that has nothing to say.
+fn is_new(seen: &mut std::collections::HashSet<String>, props: &serde_json::Value) -> bool {
+    seen.insert(alert_key(props))
+}
+
+/// Drop warnings that are no longer in the feed, so the next one of the same kind chimes again.
+/// Returns true on the all-clear: the moment the last warning went away.
+///
+/// Without the all-clear the `alert` sensor keeps its last headline forever, and an automation
+/// asking "is anything out right now" gets answered by a thunderstorm that ended on Tuesday.
+/// Only on the transition, so a quiet month is not a message a minute.
+fn expire(seen: &mut std::collections::HashSet<String>, feats: &[serde_json::Value]) -> bool {
+    let live: std::collections::HashSet<String> = feats
+        .iter()
+        .filter_map(|f| f.get("properties").map(alert_key))
+        .collect();
+    let had = !seen.is_empty();
     seen.retain(|k| live.contains(k));
+    had && seen.is_empty()
 }
 
 /// Run the engine for as long as the process lives. Silent until a rule is saved or a warning is
@@ -479,6 +497,35 @@ mod tests {
         let rs = [rule("gust", ">", 30.0, 0.0)];
         let mut st = HashMap::new();
         assert_eq!(evaluate(&m(&[("gust", 40.0)]), &rs, &mut st, 0).len(), 1);
+    }
+
+    fn warning(event: &str, area: &str, sev: &str) -> serde_json::Value {
+        serde_json::json!({ "properties": { "event": event, "areaDesc": area, "severity": sev } })
+    }
+
+    /// NWS mints a fresh id for every continuation of the same warning, so keying the memory on
+    /// the id re-chimed the same tornado warning every five minutes.
+    #[test]
+    fn a_continued_warning_does_not_chime_twice_but_a_worse_one_does() {
+        let mut seen = std::collections::HashSet::new();
+        let w = warning("Tornado Warning", "Hartford", "Severe");
+        assert!(is_new(&mut seen, w.get("properties").unwrap()));
+        assert!(!is_new(&mut seen, w.get("properties").unwrap()), "same warning, continued");
+        let worse = warning("Tornado Warning", "Hartford", "Extreme");
+        assert!(is_new(&mut seen, worse.get("properties").unwrap()), "a severity change is worth a second chime");
+    }
+
+    #[test]
+    fn the_all_clear_fires_once_when_the_last_warning_goes_away() {
+        let mut seen = std::collections::HashSet::new();
+        let w = warning("Flood Warning", "Hartford", "Severe");
+        let x = warning("Wind Advisory", "Hartford", "Moderate");
+        is_new(&mut seen, w.get("properties").unwrap());
+        is_new(&mut seen, x.get("properties").unwrap());
+        assert!(!expire(&mut seen, &[w.clone(), x.clone()]), "both still out");
+        assert!(!expire(&mut seen, std::slice::from_ref(&w)), "one left is not an all-clear");
+        assert!(expire(&mut seen, &[]), "the last one going away is");
+        assert!(!expire(&mut seen, &[]), "and a quiet month says nothing further");
     }
 
     #[test]
