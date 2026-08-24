@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -436,6 +436,29 @@ async function hydrateStation() {
   }
 }
 
+// The wizard has always closed on a saved setting, which is not the same thing as a working
+// station: a console pointed at the wrong address looks identical until the dashboard is empty.
+// Wait for one real number instead, and say what it was.
+async function firstReading(fetcher) {
+  const out = $('wiz-first');
+  out.className = 'muted';
+  out.textContent = 'waiting for the first reading…';
+  for (let i = 0; i < 15; i++) {
+    try {
+      const t = await fetcher();
+      if (t != null) {
+        out.className = 'ok';
+        out.textContent = `${num(t, 1)}${U.temp()} received ✓`;
+        setTimeout(() => { $('wizard').hidden = true; }, 1500);
+        return;
+      }
+    } catch { /* the console may still be mid-upload; the loop is the retry */ }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  out.className = 'fail';
+  out.textContent = 'no reading yet — the dashboard is open behind this; check the console is uploading to the address above';
+}
+
 // --- first run ---
 //
 // The old first run opened the whole settings drawer at someone who had not yet decided to care.
@@ -458,7 +481,7 @@ async function wizardFind() {
       b.onclick = async () => {
         const st = list[+b.dataset.wiz];
         saveSettings({ stationId: String(st.station_id) });
-        $('wizard').hidden = true;
+        firstReading(async () => (await api.stationObs()).obs?.[0]?.air_temperature);
         await hydrateStation();
         refreshAll();
         for (const el of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
@@ -479,6 +502,7 @@ async function wizardFind() {
   sel.innerHTML = $('set-source').innerHTML;
   const target = () => {
     const v = sel.value;
+    $('wiz-wll').hidden = v !== 'wll';
     $('wiz-target').textContent = ['ecowitt', 'ambient', 'wu', 'rtl433'].includes(v)
       ? `Point the console at ${ingestUrl()}`
       : v ? 'Fill in the address or keys under ⚙ Settings once this is closed.' : '';
@@ -499,9 +523,13 @@ async function wizardFind() {
         b.onclick = () => {
           const h = hits[+b.dataset.hit];
           const [lon, lat] = h.geometry.coordinates;
-          saveSettings({ stationSource: sel.value || 'ecowitt', lat, lon, stationName: h.properties.city || h.properties.name || q });
-          $('wizard').hidden = true;
+          saveSettings({
+            stationSource: sel.value || 'ecowitt', lat, lon,
+            stationName: h.properties.city || h.properties.name || q,
+            ...($('wiz-wll-host').value.trim() ? { wllHost: $('wiz-wll-host').value.trim() } : {}),
+          });
           fillDrawer();
+          firstReading(async () => (await api.localObs(1)).obs?.at(-1)?.[api.OBS.temp]);
           refreshAll();
           for (const el of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
             const node = $(el);
@@ -513,15 +541,16 @@ async function wizardFind() {
       $('wiz-place-list').innerHTML = `<div class="fail">${e.message}</div>`;
     }
   };
+  $('btn-wiz-wll').onclick = () => findWll($('wiz-wll-host'), $('wiz-target'));
   $('btn-wiz-place').onclick = find;
   $('wiz-place').onkeydown = (e) => { if (e.key === 'Enter') find(); };
   target();
 }
 
 // The console announces itself over mDNS, and the server is already listening for it — so the
-// address nobody can find on a router page is one button away.
-$('btn-find-wll').onclick = async () => {
-  const out = $('wll-found');
+// address nobody can find on a router page is one button away. Both the wizard and the settings
+// drawer ask the same question, so they ask it through one function.
+async function findWll(input, out) {
   out.textContent = 'looking…';
   try {
     const hits = await (await fetch(`${SRV}/discover/wll`, { signal: expires(6000) })).json();
@@ -529,12 +558,13 @@ $('btn-find-wll').onclick = async () => {
       out.textContent = 'nothing announced itself — type the address from the WeatherLink app';
       return;
     }
-    $('set-wll').value = hits[0].host;
+    input.value = hits[0].host;
     out.textContent = hits.length === 1 ? `found ${hits[0].name}` : `found ${hits.length}, using ${hits[0].name}`;
   } catch {
     out.textContent = 'this build has no server to ask — type the address instead';
   }
-};
+}
+$('btn-find-wll').onclick = () => findWll($('set-wll'), $('wll-found'));
 
 // Save first, then ask the server to try both for real: the credentials it tests are the ones
 // on disk, and a password typed with a trailing space is otherwise a silent nothing found days
