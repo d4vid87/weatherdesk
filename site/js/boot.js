@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs, setServerAlerts, alertsAreServerSide, every } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -221,6 +221,95 @@ function renderDiag() {
     })
     .catch(() => { el.innerHTML = ''; });
 }
+
+// Does this install have a server running the alert engine? Asked here rather than in app.js
+// because /diag is a LAN-server route and app.js has no idea whether it is talking to one.
+async function probeServerAlerts() {
+  try {
+    const d = await (await fetch(`${SRV}/diag`, { signal: expires(5000) })).json();
+    setServerAlerts(!!d.alerts?.ok);
+  } catch {
+    setServerAlerts(false);
+  }
+  const el = $('rule-server');
+  if (el) {
+    el.textContent = alertsAreServerSide()
+      ? 'The server is evaluating these rules and sending the pushes, so they keep working with every window closed.'
+      : 'These rules are evaluated by this page, so they only fire while it is open. The desktop app and the Docker image evaluate them on the server instead.';
+  }
+}
+
+// The banner test above exercises the page's own pipe. This one asks the server to send a real
+// notification down every channel that is configured — the credentials never leave it, and what
+// arrives on the phone took exactly the path a 3am wind warning will take.
+$('btn-alert-test').onclick = async () => {
+  const out = $('alert-test-out');
+  out.textContent = 'sending…';
+  try {
+    const r = await (await fetch(`${SRV}/alerts/test`, { signal: expires(30000) })).json();
+    out.textContent = r.sent
+      ? `sent to ${r.channels.join(', ')} — check the phone`
+      : 'nothing to send to: set an ntfy topic, a webhook or a broker above';
+  } catch {
+    out.textContent = 'this build has no server to send from — the page pushes while it is open';
+  }
+};
+
+// The entity picker. Home Assistant ids are typed by hand today, which means a typo shows up
+// three days later as a row that says 404 — and it means opening Home Assistant in another tab
+// to go and read them. The list comes from the server, which is the only thing here holding a
+// token that can ask for it.
+//
+// Read-only, deliberately: this picks what to display. Turning things on and off is Home
+// Assistant's job, and the moment a dashboard on a LAN with no auth can switch a socket, the
+// LAN-trust model this app documents stops being defensible.
+let haEntities = null;
+
+function renderHaPick() {
+  const box = $('ha-pick-list');
+  if (!haEntities) return;
+  const q = $('ha-pick-q').value.trim().toLowerCase();
+  const chosen = new Set($('set-ha-entities').value.split(/[\s,]+/).filter(Boolean));
+  const hits = haEntities
+    .filter((e) => !q || e.id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q))
+    .slice(0, 200);
+  box.innerHTML = hits.length
+    ? hits.map((e, i) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:2px 0">
+        <input type="checkbox" data-ent="${i}"${chosen.has(e.id) ? ' checked' : ''}>
+        <span style="flex:1"></span><span class="muted"></span></label>`).join('')
+    : '<div class="muted" style="font-size:12px">nothing matches</div>';
+  // Names and states are Home Assistant's text, not ours: written in, never interpolated into
+  // markup.
+  box.querySelectorAll('[data-ent]').forEach((cb) => {
+    const e = hits[+cb.dataset.ent];
+    const [name, state] = cb.parentElement.querySelectorAll('span');
+    name.textContent = `${e.name} · ${e.id}`;
+    state.textContent = `${e.state}${e.unit ? ` ${e.unit}` : ''}`;
+    cb.onchange = () => {
+      const set = new Set($('set-ha-entities').value.split(/[\s,]+/).filter(Boolean));
+      if (cb.checked) set.add(e.id); else set.delete(e.id);
+      $('set-ha-entities').value = [...set].join(', ');
+    };
+  });
+}
+
+$('btn-ha-pick').onclick = async () => {
+  const box = $('ha-pick-list');
+  box.innerHTML = '<div class="muted" style="font-size:12px">asking Home Assistant…</div>';
+  // The URL and token have to be on disk before the server can use them.
+  saveSettings({ haUrl: $('set-ha-url').value.trim(), haToken: $('set-ha-token').value.trim() });
+  await pushConfig();
+  try {
+    const j = await (await fetch(`${SRV}/ha/states`, { signal: expires(30000) })).json();
+    if (j.error) { box.innerHTML = `<div class="fail" style="font-size:12px">${j.error}</div>`; return; }
+    haEntities = j.entities;
+    renderHaPick();
+  } catch {
+    box.innerHTML = '<div class="muted" style="font-size:12px">this build has no server to ask — '
+      + 'type the ids from Home Assistant\'s own developer tools</div>';
+  }
+};
+$('ha-pick-q').oninput = renderHaPick;
 
 // A panel's own heading, so the lists read the way the page does. Falls back to the id for a
 // panel that has no heading — better than a blank button.
@@ -1141,6 +1230,7 @@ if (!hasSource() && !PUBLIC) {
 hydrateStation().then(() => {
   loadDeskRadar();
   initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initUdp(); initHome();
+  every('server-alerts', 300, probeServerAlerts);
 });
 
 // ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.

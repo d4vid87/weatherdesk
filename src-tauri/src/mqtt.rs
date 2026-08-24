@@ -11,7 +11,25 @@
 
 use crate::store;
 use rumqttc::{Client, LastWill, MqttOptions, QoS};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+
+/// Text the alert engine wants on the broker. It runs on its own thread and must not open a
+/// second connection to say one sentence, so it leaves messages here and the live session picks
+/// them up on its next tick. Bounded: a broker that is down for a week must not become a leak.
+fn outbox() -> &'static Mutex<Vec<(String, String)>> {
+    static O: OnceLock<Mutex<Vec<(String, String)>>> = OnceLock::new();
+    O.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Queue one retained message for `weatherdesk/<station>/<suffix>`.
+pub fn send(suffix: &str, payload: &str) {
+    let mut q = outbox().lock().unwrap();
+    if q.len() >= 64 {
+        q.remove(0);
+    }
+    q.push((suffix.to_string(), payload.to_string()));
+}
 
 /// How often we look for a new row. The archive gains one a minute at best, so this is mostly
 /// a cheap "has anything changed" query.
@@ -47,9 +65,14 @@ const FIELDS: [(&str, &str, Option<&str>, &str, &str); 15] = [
 /// Assistant can't derive these itself without a template sensor per house.
 /// name, device_class, unit, state_class — each optional, because a trend has none of them.
 type Derived = (&'static str, Option<&'static str>, Option<&'static str>, Option<&'static str>);
-const DERIVED: [Derived; 2] = [
+const DERIVED: [Derived; 4] = [
     ("feels_like", Some("temperature"), Some("°C"), Some("measurement")),
     ("pressure_trend", None, None, None),
+    // Written by the alert engine rather than by a row of the archive: the headline of the
+    // worst NWS alert in force, and the last user rule to fire. Both are text, and both are
+    // retained, so a Home Assistant that restarts still knows what is out.
+    ("alert", None, None, None),
+    ("rule", None, None, None),
 ];
 
 struct Conf {
@@ -148,8 +171,13 @@ fn announce(client: &Client, c: &Conf) {
             "name": name.replace('_', " "),
             "unique_id": format!("wd_{}_{}", c.station, name),
             "state_topic": format!("weatherdesk/{}/{}", c.station, name),
-            "expire_after": EXPIRE_AFTER,
         });
+        // Everything driven by a row of the archive expires, so a dead poller shows up as dead.
+        // The two the alert engine writes must not: a quiet fortnight is not a fault, and an
+        // alert sensor that went unavailable is an automation that silently stopped working.
+        if !matches!(name, "alert" | "rule") {
+            cfg["expire_after"] = EXPIRE_AFTER.into();
+        }
         if let Some(dc) = dc {
             cfg["device_class"] = dc.into();
         }
@@ -327,6 +355,16 @@ fn session(data_dir: &std::path::Path, cfg_path: &std::path::Path, c: &Conf) {
                 let _ = client.disconnect();
                 return;
             }
+        }
+        // Anything the alert engine left for us, before the row: an alert is the message
+        // people built the automation for.
+        for (suffix, payload) in outbox().lock().unwrap().drain(..) {
+            let _ = client.publish(
+                format!("weatherdesk/{}/{}", c.station, suffix),
+                QoS::AtLeastOnce,
+                true,
+                payload,
+            );
         }
         if last_announce.elapsed() >= REANNOUNCE {
             announce(&client, c);
