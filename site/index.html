@@ -94,7 +94,8 @@
     border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
   main { flex: 1; overflow: hidden; position: relative; }
   section.page { display: none; height: 100%; overflow: auto;
-    padding: var(--gap) var(--gap) calc(var(--gap) + env(safe-area-inset-bottom)); }
+    padding: var(--gap) calc(var(--gap) + env(safe-area-inset-right))
+      calc(var(--gap) + env(safe-area-inset-bottom)) calc(var(--gap) + env(safe-area-inset-left)); }
   section.page.active { display: block; }
 
   /* cap columns so an ultrawide doesn't smear 8 cards into one thin row */
@@ -150,7 +151,10 @@
   /* settings drawer */
   #drawer {
     position: absolute; inset: 0 0 0 auto; width: min(420px, 100%); background: var(--panel);
-    border-left: 1px solid var(--line); padding: var(--gap); overflow: auto;
+    border-left: 1px solid var(--line); overflow: auto;
+    /* the drawer scrolls to the bottom edge of the window, so the gesture bar sits on its last
+       control unless the inset is paid here too */
+    padding: var(--gap) var(--gap) calc(var(--gap) + env(safe-area-inset-bottom));
     transform: translateX(100%); transition: transform .18s ease; z-index: 20;
   }
   #drawer.open { transform: none; }
@@ -172,7 +176,11 @@
   #desk { padding: 0; }
   /* One flat 12-column grid holds every Desk panel, so anything can be dragged anywhere —
      the radar included. Column span is what a horizontal resize edits. */
-  #desk-stack { max-width: 1560px; margin: 0 auto; padding: var(--gap); display: grid;
+  /* #desk pays no padding, so this owes the insets section.page would have paid — without them the
+     last panel sits under the gesture bar, and in landscape the right edge does too. */
+  #desk-stack { max-width: 1560px; margin: 0 auto;
+    padding: var(--gap) calc(var(--gap) + env(safe-area-inset-right))
+      calc(var(--gap) + env(safe-area-inset-bottom)) calc(var(--gap) + env(safe-area-inset-left)); display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); align-items: start; }
   #desk-stack > * { grid-column: span 12; }
   #desk-radar { grid-column: span 6; grid-row: span 2; }
@@ -402,11 +410,17 @@
     body { font-size: 14px; }
     .now-temp { font-size: 52px; }
     .chart { height: 120px; }
-    header { padding: 5px 10px; }
+    /* Tighter, but the insets still have to be paid: a bare padding here overwrote them and put
+       the status bar back on top of the tabs. */
+    header { padding: calc(5px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right))
+      5px calc(10px + env(safe-area-inset-left)); }
   }
   /* phone: one column, and saved column spans stop applying — a panel resized to a third of a
      desktop screen is unreadable on a handset, and the layout is per-install, not per-device. */
-  @media (max-width: 720px) {
+  /* A phone is compact in both orientations. Landscape is 780x360 on a modern handset: too wide
+     for a width-only query, and every reason for these rules still holds — no mouse, no room for
+     panel furniture, and saved desktop pixel sizes that do not fit either way. */
+  @media (max-width: 720px), (max-height: 500px) {
     #desk-stack, #desk-stack > *, #desk-radar, #trends, #c48 { grid-column: span 12 !important; }
     #desk-radar { grid-row: span 1; height: 340px !important; min-height: 0; }
     .grid { grid-template-columns: 1fr; }
@@ -456,7 +470,10 @@
     .hero-right { text-align: left; }
     #hero { padding: 12px 14px 16px; }
     #clock-time { font-size: 40px; }
-    #hero-icon { right: 10px; }
+    /* 150px of sun beside a 40px clock is 150px of sun on top of it. Small enough to sit in the
+       corner the stacked hero leaves empty. */
+    #hero-icon { right: 8px; top: 8px; }
+    #hero-icon svg { width: 84px; height: 84px; }
     #hero-temp { font-size: 64px; }
     #hero-cond { font-size: 22px; }
     .hero-now { gap: 12px; }
@@ -464,6 +481,15 @@
     .sig-row { grid-template-columns: 1.5fr .8fr 1fr .9fr 20px; font-size: 12px; }
     .sig-row > span:nth-child(3), .sig-row > span:nth-child(5) { display: none; }
     .sig-row .fail { grid-column: 2 / -2 !important; }
+  }
+  /* A phone in landscape is compact by height, not by width: the hero's two columns fit side by
+     side again, and stacking them there costs the rows below the fold. */
+  @media (min-width: 721px) and (max-height: 500px) {
+    .hero-top { flex-direction: row; }
+    /* the right column runs back under the icon once it is a row again */
+    .hero-right { text-align: right; padding-right: 96px; }
+    #daycards, #gauges { grid-template-columns: repeat(4, 1fr); }
+    .grid { grid-template-columns: 1fr 1fr; }
   }
   .live-wind-wrap { display: flex; align-items: center; gap: 16px; }
   .compass { width: 74px; height: 74px; border: 2px solid var(--line); border-radius: 50%;
@@ -483,7 +509,10 @@
      a severe banner never times out, so a warning hid the sun and moon times for as long as it ran.
      Sticky keeps it on screen while the page scrolls; `:empty` means it costs no space unbannered. */
   #notif-stack { position: sticky; top: 8px; width: min(340px, calc(100% - 16px));
-    margin: 0 8px 0 auto; z-index: 30; }
+    margin: 0 8px 0 auto; z-index: 30;
+    /* In flow it pushes, and four banners are taller than a phone in landscape — the dashboard
+       was off the bottom of the screen behind its own warnings. The stack scrolls instead. */
+    max-height: 45vh; overflow-y: auto; }
   #notif-stack:empty { display: none; }
   .notif { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
     border-radius: 8px; padding: 8px 28px 8px 10px; margin-bottom: 6px; position: relative; }
