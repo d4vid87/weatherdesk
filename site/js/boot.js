@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -138,6 +138,10 @@ function fillDrawer() {
   $('set-clock').value = s.clock24 || 'auto';
   $('set-refresh').value = s.refreshSec;
   $('set-gust').value = s.windGustAlert;
+  $('set-wind-unit').value = s.windUnit || '';
+  // The threshold is a bare number in whatever wind unit is showing, so name that unit next to
+  // it — 30 means something different in knots.
+  $('gust-unit').textContent = U.wind();
   $('set-nearby-radius').value = s.nearbyRadius ?? 0;
   $('set-desk-radar').checked = !!s.deskRadar;
   $('set-eco').value = s.eco || 'auto';
@@ -325,6 +329,7 @@ $('btn-save').onclick = async () => {
     clock24: $('set-clock').value,
     refreshSec: +$('set-refresh').value || 60,
     windGustAlert: +$('set-gust').value || 30,
+    windUnit: $('set-wind-unit').value,
     nearbyRadius: +$('set-nearby-radius').value || 0,
     deskRadar: $('set-desk-radar').checked,
     eco: $('set-eco').value,
@@ -1128,6 +1133,20 @@ if (location.search.includes('selftest')) {
     === '06092, Simsbury, Connecticut, United States', 'geocode label keeps the town');
   console.assert(api.placeLabel({ name: 'Simsbury', city: 'Simsbury', state: 'Connecticut' })
     === 'Simsbury, Connecticut', 'geocode label does not repeat the town');
+
+  // Wind override: six files used to carry their own m/s factor. One knot is 1.94384 m/s, and
+  // the label has to move with the number or the dashboard lies twice.
+  {
+    const held = settings().windUnit;
+    saveSettings({ windUnit: 'kt' });
+    console.assert(U.wind() === 'kt', 'wind override: label follows the setting');
+    console.assert(Math.abs(msToWind(10) - 19.4384) < 1e-3, 'wind override: m/s to knots');
+    console.assert(Math.abs(windToMs(msToWind(7)) - 7) < 1e-9, 'wind override: round trip');
+    saveSettings({ windUnit: '' });
+    console.assert(U.wind() === (settings().units === 'metric' ? 'km/h' : 'mph'),
+      'wind override: empty follows the master switch');
+    saveSettings({ windUnit: held });
+  }
 
   // The fetch deadline every screen depends on, on the browsers that have no AbortSignal.timeout.
   const sig = expires(50);

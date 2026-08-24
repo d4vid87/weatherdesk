@@ -1,13 +1,16 @@
 // All remote endpoints live here. Single choke point for token + units.
-import { settings, coords, expires } from './app.js';
+import { settings, coords, expires, windUnit, msToWind, WIND_UNITS } from './app.js';
 
 const SWD = 'https://swd.weatherflow.com/swd/rest';
 
 function unitParams() {
   const s = settings();
-  return s.units === 'metric'
-    ? { units_temp: 'c', units_wind: 'kph', units_pressure: 'mb', units_precip: 'mm', units_distance: 'km' }
-    : { units_temp: 'f', units_wind: 'mph', units_pressure: 'inhg', units_precip: 'in', units_distance: 'mi' };
+  return {
+    ...(s.units === 'metric'
+      ? { units_temp: 'c', units_pressure: 'mb', units_precip: 'mm', units_distance: 'km' }
+      : { units_temp: 'f', units_pressure: 'inhg', units_precip: 'in', units_distance: 'mi' }),
+    units_wind: WIND_UNITS[windUnit()].tempest,
+  };
 }
 
 function qs(obj) {
@@ -97,7 +100,7 @@ export async function metarObs(id) {
     obs: [{
       timestamp: p.timestamp ? Date.parse(p.timestamp) / 1000 : null,
       air_temperature: c == null ? null : (metric ? c : c * 9 / 5 + 32),
-      wind_avg: w == null ? null : (metric ? w : w * 0.621371),
+      wind_avg: msToWind(w == null ? null : w / 3.6),   // NWS reports km/h
       wind_direction: p.windDirection?.value,
       precip_accum_local_day: null, // airports report precip on their own schedule; not comparable
     }],
@@ -134,8 +137,8 @@ export function siToDisplay(obs) {
   const metric = settings().units === 'metric';
   const conv = (o, i, f) => { if (o[i] != null) o[i] = o[i] * f; };
   for (const o of obs) {
-    // wind is m/s in both systems — even metric needs km/h
-    for (const i of [OBS.windLull, OBS.windAvg, OBS.windGust]) conv(o, i, metric ? 3.6 : 2.23694);
+    // wind is m/s on the wire whatever the system, and its unit is separately overridable
+    for (const i of [OBS.windLull, OBS.windAvg, OBS.windGust]) conv(o, i, WIND_UNITS[windUnit()].fromMs);
     if (metric) continue;
     if (o[OBS.temp] != null) o[OBS.temp] = o[OBS.temp] * 9 / 5 + 32;
     conv(o, OBS.press, 0.02953);
@@ -325,7 +328,8 @@ export async function omForecast(lat = coords().lat, lon = coords().lon) {
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,'
       + 'precipitation_probability_max,precipitation_sum',
     forecast_days: 10, timezone: 'auto', timeformat: 'unixtime',
-    ...(imperial ? { temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch' } : {}),
+    wind_speed_unit: WIND_UNITS[windUnit()].om,
+    ...(imperial ? { temperature_unit: 'fahrenheit', precipitation_unit: 'inch' } : {}),
   })}`);
   return shapeOm(j, lastTuple);
 }
@@ -353,7 +357,8 @@ export function multiModel(lat = coords().lat, lon = coords().lon) {
     latitude: lat, longitude: lon, models: MODELS,
     hourly: 'temperature_2m,precipitation,wind_speed_10m',
     forecast_days: 3, timezone: 'auto',
-    ...(imperial ? { temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch' } : {}),
+    wind_speed_unit: WIND_UNITS[windUnit()].om,
+    ...(imperial ? { temperature_unit: 'fahrenheit', precipitation_unit: 'inch' } : {}),
   })}`);
 }
 

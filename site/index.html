@@ -831,10 +831,12 @@
     </div>
     <label>Units</label>
     <select id="set-units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
+    <label>Wind unit</label>
+    <select id="set-wind-unit"><option value="">Follow units above</option><option value="mph">mph</option><option value="km/h">km/h</option><option value="m/s">m/s</option><option value="kt">knots</option></select>
     <label>Clock</label>
     <select id="set-clock"><option value="auto">Follow this device</option><option value="12">12-hour</option><option value="24">24-hour</option></select>
     <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">
-    <label>Wind gust alert threshold</label><input id="set-gust" type="number" min="0">
+    <label>Wind gust alert threshold (<span id="gust-unit">mph</span>)</label><input id="set-gust" type="number" min="0">
     <label>Nearby sensor radius (mi, 0 = manual only)</label><input id="set-nearby-radius" type="number" min="0">
     <div class="row"><button id="btn-station-save">Remember this station</button></div>
     <div id="station-list"></div>

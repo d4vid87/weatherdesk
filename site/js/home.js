@@ -8,7 +8,7 @@
 // HomeKit, Alexa and Google are reached through Home Assistant's own bridges — see README. There
 // is no native code here for them, and there shouldn't be.
 
-import { settings, every, stamp, stormMode, expires } from './app.js';
+import { settings, every, stamp, stormMode, expires, msToWind } from './app.js';
 import { OBS } from './api.js';
 import { mqtt } from './mqtt.js';
 
@@ -132,7 +132,7 @@ function publishObs(obs) {
   const s = settings();
   const gust = obs[OBS.windGust];
   if (gust != null && s.windGustAlert > 0) {
-    const shown = s.units === 'metric' ? gust * 3.6 : gust * 2.23694;
+    const shown = msToWind(gust);
     if (!gustLatched && shown >= s.windGustAlert) {
       gustLatched = true;
       event('gust', { event_type: 'gust', speed: +shown.toFixed(1) });

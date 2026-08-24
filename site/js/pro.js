@@ -1,7 +1,7 @@
 // Desk layout matching myWeatherDesk: sky hero, signal ticker, trend strip,
 // 48h combined chart, day cards, dial gauges. Driven by the wd:forecast event.
 import * as api from './api.js';
-import { settings, coords, U, num, timeStr, deg2compass, every, ecoOn } from './app.js';
+import { settings, coords, U, num, timeStr, deg2compass, every, ecoOn, msToWind, windToMs } from './app.js';
 import { forecast as deskForecast } from './desk.js';
 import * as icon from './icons.js';
 import { initLayout } from './layout.js';
@@ -360,7 +360,7 @@ function renderGauges(fc) {
     `<b>${num(wb)}°</b><span>Air ${num(c.air_temperature)}°</span>`);
 
   const taC = metric ? c.air_temperature : (c.air_temperature - 32) / 1.8;
-  const windMps = c.wind_avg / (metric ? 3.6 : 2.23694);
+  const windMps = windToMs(c.wind_avg);
   const wbgt = wbgtC(taC, c.relative_humidity, c.solar_radiation || 0, windMps);
   const shown = wbgt == null ? null : metric ? wbgt : wbgt * 1.8 + 32;
   $('g-wbgt').innerHTML = gauge(icon.thermometer(((shown ?? 0) - (metric ? 0 : 32)) / (metric ? 35 : 60)),
@@ -471,7 +471,7 @@ const wbgtWord = (f) => (f >= 90 ? 'Extreme' : f >= 88 ? 'Very high' : f >= 85 ?
 function renderLocal(o) {
   const metric = settings().units === 'metric';
   const t = (c) => (c == null ? null : metric ? c : c * 9 / 5 + 32);
-  const w = (mps) => (mps == null ? null : mps * (metric ? 3.6 : 2.23694));
+  const w = msToWind;
   const p = (mb) => (mb == null ? null : metric ? mb : mb * 0.02953);
   const r = (mm) => (mm == null ? null : metric ? mm : mm / 25.4);
 
