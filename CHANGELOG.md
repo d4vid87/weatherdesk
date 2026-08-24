@@ -6,6 +6,23 @@ and the format loosely follows [Keep a Changelog](https://keepachangelog.com/en/
 Every release ships desktop installers (Linux `.deb`, Windows, macOS), an arm64 `.deb` for the
 Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container image.
 
+## [Unreleased]
+
+### Security
+- **The `rustls-webpki` advisory in our dependency tree is not reachable from WeatherDesk, and there
+  is now a written record of why.** The affected 0.102.8 comes in twice, both times under `rumqttc`,
+  the MQTT publisher; the panic it describes (RUSTSEC-2026-0104 / GHSA-82j2-j2ch-gfr8) is in CRL
+  parsing, code that runs only for a revocation list the application hands it, and WeatherDesk hands
+  it none — TLS is configured in exactly two places, both a bare
+  `Transport::tls_with_default_config()`. No upgrade exists yet: the fix is in 0.103.13, there is no
+  0.102.x backport, and `rumqttc 0.25.1` still asks for `rustls-webpki ^0.102.8`. So
+  [SECURITY.md](SECURITY.md) stands in for the bump until a release moves, and `cargo deny check
+  advisories` now fails if the exception stops being true (#55).
+
+### Documentation
+- A [SECURITY.md](SECURITY.md): where to report something, the LAN trust model in one place instead
+  of only halfway down the README, and the analysis above with the commands to check it yourself.
+
 ## [3.2.0] — 2026-08-24
 
 Home Assistant, done properly. The MQTT publisher, the alert engine and the Home Assistant
@@ -422,7 +439,7 @@ tablet on the LAN — vanilla JS, no build step, no framework, no chart library.
 - Radar from [Hook Echo-WX](https://github.com/d4vid87/hookecho)
 - MIT license
 
-[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.0.9...HEAD
+[Unreleased]: https://github.com/d4vid87/weatherdesk/compare/v3.2.0...HEAD
 [3.0.9]: https://github.com/d4vid87/weatherdesk/compare/v3.0.8...v3.0.9
 [3.0.8]: https://github.com/d4vid87/weatherdesk/compare/v3.0.7...v3.0.8
 [3.0.7]: https://github.com/d4vid87/weatherdesk/compare/v3.0.6...v3.0.7

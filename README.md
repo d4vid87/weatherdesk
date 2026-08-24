@@ -552,6 +552,15 @@ viewport size. Start there — it separates "my token is wrong" from "NWS is dow
 On Windows, if the tablet can't load the LAN URL, it's the firewall prompt that was dismissed on
 first launch — allow WeatherDesk on private networks.
 
+## Security
+
+`GET /config` serves your station token to anything on the LAN, and any LAN client can write
+settings back. That is deliberate — see [Sharing a read-only dashboard](#sharing-a-read-only-dashboard)
+for what to hand out instead, which is `/public`.
+
+To report something, or to read why the `rustls-webpki` advisory a scanner will find in
+`src-tauri/Cargo.lock` is not reachable from this app, see [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

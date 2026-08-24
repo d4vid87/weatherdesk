@@ -1,0 +1,11 @@
+# cargo-deny configuration. Only the advisories check runs in CI (see .github/workflows/audit.yml) —
+# licences, bans and sources are not policed yet, and turning them on needs an allowlist for a
+# ~700-crate tree rather than a one-line change here.
+#
+# Every entry below is written up in ../SECURITY.md. Adding one without the writeup defeats the
+# point: the file exists so an accepted advisory has a reason attached, not so the check goes quiet.
+
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8 CRL parsing panic (GHSA-82j2-j2ch-gfr8). Reached only through rumqttc's TLS transport, and only by an application that passes RevocationOptions to verify_for_usage() and hands it CRL bytes. This one never constructs RevocationOptions, builds no ClientConfig, and loads no CRL — TLS is configured in exactly two places, both a bare Transport::tls_with_default_config() in src/mqtt.rs. See SECURITY.md for the full path analysis. The fix is in 0.103.13 with no 0.102.x backport, and rumqttc 0.25.1 still requires rustls-webpki ^0.102.8, so there is nothing to upgrade to. Drop this entry the moment a rumqttc release asks for rustls-webpki 0.103." },
+]
