@@ -450,6 +450,10 @@ or the `docker-compose.yml` in this repo. Then open `http://<host>:8088`.
 broadcast does not cross a bridged Docker network no matter how many ports you publish — without
 host networking the container serves the dashboard but never hears the hub.
 
+**Home Assistant users upgrading from 3.1.x:** publishing moved from the browser into the server,
+so the broker address changes from `ws://host:9001` to `mqtt://host:1883`. The app says so if you
+leave the old one there. See [docs/homeassistant.md](docs/homeassistant.md).
+
 **Upgrading from 3.0.9 or older takes one `chown`.** The container runs as uid 1000 now instead of
 root, and a `./data` directory left by an earlier image is owned by root. The server does not
 complain about that — it starts, serves the dashboard and stores nothing. Once, before you pull:
