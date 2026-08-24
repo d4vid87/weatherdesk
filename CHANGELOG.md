@@ -60,6 +60,17 @@ card, and a [Home Assistant OS add-on](https://github.com/d4vid87/weatherdesk-ad
   right now" would have been answered by a thunderstorm that ended on Tuesday. It clears on the
   all-clear.
 - Publishing no longer stops when the last browser tab closes.
+- **The Android app is 16 KB page compatible.** Android 15 and up refuses a shared library whose
+  segments are aligned to the old 4 KB page, and told every phone so in a dialog on first launch.
+- **A phone in landscape is 780x360**, and the phone stylesheet asked about width alone — so
+  landscape got the desktop treatment: drag handles over the panel titles, saved desktop widths,
+  and the hero icon painted on top of the clock.
+- Android draws edge to edge. The status bar sat on the tabs, and the last panel and the last
+  setting sat under the gesture bar — which in landscape is down the right-hand side.
+- The alert banners are in the page flow rather than over it, and four of them are taller than a
+  phone held sideways: the dashboard was entirely behind its own warnings. The stack scrolls now.
+- The hero clock, the wet bulb and WBGT gauges, and the sun and moon times were each painted over
+  by something of their own — a drag grip, a thermometer column and the alert banners.
 
 ### Upgrading
 Publishing used to run in the browser over a WebSocket. Change the broker address from
