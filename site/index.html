@@ -242,7 +242,10 @@
   /* hero */
   #hero-fx { position: absolute; inset: 0; pointer-events: none; }
   /* the canvas is positioned, so the content has to be too or it paints underneath */
-  #hero > *:not(#hero-fx):not(#hero-icon) { position: relative; z-index: 1; }
+  /* The grip and the resize handles are excluded on purpose: three id selectors outrank
+     `.grip { position: absolute }`, so without this the furniture fell into the flow and the grip
+     painted as a black chip over the clock. They carry their own z-index, above the canvas. */
+  #hero > *:not(#hero-fx):not(#hero-icon):not(.grip):not(.rz) { position: relative; z-index: 1; }
   #hero > #hero-icon { z-index: 1; }
   #hero { padding: 16px 20px 20px; color: var(--hero-text, #fff); overflow: hidden; border-radius: 12px;
     background: linear-gradient(160deg, #1f6fb8, #7fb6e6); }
@@ -373,6 +376,11 @@
   .ginner b { font-size: 26px; font-weight: 600; }
   .ginner small { font-size: 11px; color: var(--muted); }
   .ginner span { font-size: 12px; color: #cdd7e2; max-width: 118px; }
+  /* Every other face is a ring with a hole in it, which is where the readout goes. The thermometer
+     is a solid column up the middle of the same box, so the readout landed on the glass — the
+     column moves to the left of the face and the readout to the right of it. */
+  .gwrap:has(svg.therm) .ginner { align-items: flex-end; text-align: right; padding-right: 6px; }
+  .gwrap:has(svg.therm) .ginner span { max-width: 74px; }
 
   .chart { width: 100%; height: 150px; display: block; }
   #places { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -471,7 +479,12 @@
   #add-station-id { flex: 1; padding: 8px; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 8px; font: inherit; }
   #lab-frame { width: 100%; height: 100%; border: 0; display: block; }
-  #notif-stack { position: absolute; top: 8px; right: 8px; width: min(340px, calc(100% - 16px)); z-index: 30; }
+  /* In flow, not over the top of the page: absolute put the stack on the hero's right column, and
+     a severe banner never times out, so a warning hid the sun and moon times for as long as it ran.
+     Sticky keeps it on screen while the page scrolls; `:empty` means it costs no space unbannered. */
+  #notif-stack { position: sticky; top: 8px; width: min(340px, calc(100% - 16px));
+    margin: 0 8px 0 auto; z-index: 30; }
+  #notif-stack:empty { display: none; }
   .notif { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
     border-radius: 8px; padding: 8px 28px 8px 10px; margin-bottom: 6px; position: relative; }
   .notif-severe { border-left-color: var(--bad); }
