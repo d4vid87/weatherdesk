@@ -195,12 +195,15 @@ export function boltRing(frac, active) {
 export function thermometer(frac, color = '#4fdc8b') {
   const f = clamp01(frac);
   const top = 74 - f * 52;
-  return `<svg viewBox="0 0 100 100">
-    <rect x="43" y="16" width="14" height="60" rx="7" fill="none" stroke="#2b3745" stroke-width="3"/>
-    <rect x="46" y="${top.toFixed(1)}" width="8" height="${(76 - top).toFixed(1)}" rx="4" fill="${color}"/>
-    <circle cx="50" cy="80" r="11" fill="${color}"/>
-    <circle cx="50" cy="80" r="11" fill="none" stroke="#2b3745" stroke-width="3"/>
-    ${[0, 1, 2, 3].map((i) => `<line x1="60" y1="${24 + i * 15}" x2="68" y2="${24 + i * 15}"
+  // Drawn on the left of the box, not through the middle: the readout is centred over a ring face,
+  // and a column up the centre is the one face it cannot be centred over. The class is what the
+  // gauge CSS keys the right-aligned readout off.
+  return `<svg class="therm" viewBox="0 0 100 100">
+    <rect x="17" y="16" width="14" height="60" rx="7" fill="none" stroke="#2b3745" stroke-width="3"/>
+    <rect x="20" y="${top.toFixed(1)}" width="8" height="${(76 - top).toFixed(1)}" rx="4" fill="${color}"/>
+    <circle cx="24" cy="80" r="11" fill="${color}"/>
+    <circle cx="24" cy="80" r="11" fill="none" stroke="#2b3745" stroke-width="3"/>
+    ${[0, 1, 2, 3].map((i) => `<line x1="34" y1="${24 + i * 15}" x2="42" y2="${24 + i * 15}"
       stroke="#3a4655" stroke-width="2"/>`).join('')}
   </svg>`;
 }
