@@ -355,6 +355,20 @@ fn handle(state: &Arc<State>, mut req: Request) {
         // What each station source last did, for the drawer and for a screenshot in a bug
         // report. Fixed phrases and status codes only, so there is nothing here to gate.
         "/diag" => json(ingest::diag_json()),
+        // The versioned contract: named fields, SI, no credentials. Everything else here is
+        // shaped for the page and free to change with it — this one isn't. See `api.rs`.
+        "/api/v1" => json(crate::api::snapshot(state)),
+        // WeatherLink Live consoles seen on the LAN, for the wizard's find button. Names and
+        // addresses of hardware on this network only — nothing here that isn't already visible
+        // to anything else plugged into it.
+        "/discover/wll" => {
+            let hosts = crate::discover::wll_hosts();
+            json(serde_json::json!(hosts
+                .iter()
+                .map(|(n, a)| serde_json::json!({ "name": n, "host": a }))
+                .collect::<Vec<_>>())
+            .to_string())
+        }
         // The National Hurricane Center serves its storm list without CORS headers, so no page
         // can read it. One fixed URL, fetched here and handed on — not a general proxy.
         "/proxy/nhc" => {

@@ -9,7 +9,7 @@ use rusqlite::{params_from_iter, Connection};
 use std::path::{Path, PathBuf};
 
 /// obs_st tuple layout minus its leading timestamp, same order as `site/js/api.js` OBS.
-const FIELDS: [&str; 18] = [
+pub const FIELDS: [&str; 18] = [
     "wind_lull",
     "wind_avg",
     "wind_gust",
