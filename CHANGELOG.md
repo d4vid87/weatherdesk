@@ -6,6 +6,66 @@ and the format loosely follows [Keep a Changelog](https://keepachangelog.com/en/
 Every release ships desktop installers (Linux `.deb`, Windows, macOS), an arm64 `.deb` for the
 Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container image.
 
+## [3.2.0] — 2026-08-24
+
+Home Assistant, done properly. The MQTT publisher, the alert engine and the Home Assistant
+read-back all moved off the page and into the server, so they keep working with every window in
+the house closed — which is the one thing an alert cannot depend on a browser for.
+
+Two new repositories ship alongside this release: a
+[HACS integration](https://github.com/d4vid87/ha-weatherdesk) for a weather entity with a forecast
+card, and a [Home Assistant OS add-on](https://github.com/d4vid87/weatherdesk-addons).
+
+### Added
+- **Server-side MQTT publishing.** One Home Assistant device, nineteen entities, discovered with
+  no YAML and no custom component. SI on the wire always — a units switch on the dashboard must
+  never rewrite months of Home Assistant history. `feels_like`, `pressure_trend` as a word,
+  `alert` and `rule` alongside the raw readings; the first fifteen carry `expire_after`, so a
+  station that stops reporting shows as unavailable rather than serving a frozen number.
+- **Server-side alert engine**, mirroring the page's rules latch for latch — same thresholds,
+  hold times, AND conditions and re-arm band — plus the NWS poll. Pushes through ntfy, a webhook
+  and the broker. The page stands down when the server is running, so nothing arrives twice.
+- **Test push channels** in Settings sends one real notification down every configured channel.
+  A test that takes a different path to your phone than the alerts do tests nothing.
+- **Home Assistant entity picker.** The state list is fetched by the server, so the long-lived
+  token never reaches a browser — and `cors_allowed_origins` in `configuration.yaml` is no longer
+  needed, which is what used to make this fail for most people. Read-only, deliberately.
+- **`GET /api/v1`** — named fields, SI, no credentials, and a version number that means it.
+  Everything else this server answers is shaped for the page and free to change with it.
+- **mDNS.** The dashboard announces itself as `_weatherdesk._tcp`, and finds a WeatherLink Live
+  console the same way — the *Find console* button in the wizard and in Settings.
+- **Wind unit override** — mph, km/h, m/s or knots, independent of the master units switch.
+- **Layout presets**: Wall landscape, Kitchen portrait, E-ink. A starting point to drag from.
+- **Data and Signals cards are draggable**, resizable and hideable like every other panel.
+- **Sun strength panel**: UV now and its band, burn time, today's peak UV and when, solar now,
+  and the day's energy in kWh/m².
+- **This day, other years** — what your own station recorded on this date in previous years.
+- **Station elevation**, **three importable Home Assistant blueprints**, and
+  [`docs/homeassistant.md`](docs/homeassistant.md).
+- Ingress support: served behind a path prefix, the page is handed that prefix rather than
+  firing absolute paths at whatever is in front of it.
+
+### Changed
+- The setup wizard leads with the brand of station rather than a Tempest token, and waits for one
+  real reading before it closes — "68.2°F received ✓". A saved setting was never the same thing
+  as a working station.
+- Six files each carried their own copy of the metres-per-second conversion factor. One helper
+  now: six chances for a chart to be plausible and wrong, removed.
+- The Home Assistant settings are one section split into *Publish the station* and *Read entities
+  back*, with a **Test both** button that connects for real and waits for the broker to
+  acknowledge a message — a broker that rejects your password accepts the TCP connection first.
+
+### Fixed
+- The `alert` sensor kept its last headline forever, so an automation asking "is anything out
+  right now" would have been answered by a thunderstorm that ended on Tuesday. It clears on the
+  all-clear.
+- Publishing no longer stops when the last browser tab closes.
+
+### Upgrading
+Publishing used to run in the browser over a WebSocket. Change the broker address from
+`ws://host:9001` to `mqtt://host:1883` — the app says so if you leave the old one there — and you
+can drop `protocol websockets` from mosquitto if nothing else used it.
+
 ## [3.1.1] — 2026-08-23
 
 Three things testers wrote in about, and the elevation setting the barometer always wanted.
