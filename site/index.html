@@ -695,7 +695,7 @@
   <section class="page" id="lab" style="padding:0"><iframe id="lab-frame" title="Forecast Lab"></iframe></section>
   <section class="page" id="signals">
     <div class="grid" id="signals-grid">
-      <div class="card">
+      <div class="card" data-panel="sig-live-wind-websocket">
         <h2>Live wind · websocket</h2>
         <div class="live-wind-wrap">
           <div class="compass"><i id="live-needle"></i></div>
@@ -711,7 +711,7 @@
         <div id="strike-log" class="kv-rows"></div>
       </div>
 
-      <div class="card" style="grid-column: span 2">
+      <div class="card" data-panel="sig-nearby-stations" style="grid-column: span 2">
         <h2>Nearby stations</h2>
         <div class="row" style="margin:0 0 8px">
           <input id="add-station-id" placeholder="public station ID, or an airport code like KBDL">
@@ -725,7 +725,7 @@
         <div id="signals-table"></div>
       </div>
 
-      <div class="card" style="grid-column: span 3">
+      <div class="card" data-panel="sig-notification-history" style="grid-column: span 3">
         <h2>Notification history</h2>
         <div id="notif-log" class="kv-rows"></div>
       </div>
@@ -733,20 +733,20 @@
   </section>
   <section class="page" id="data">
     <div class="grid" id="data-grid">
-      <div class="card"><h2 id="board-temp">Temperature</h2><canvas id="c-temp" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-rain">Rain</h2><canvas id="c-rain" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-wind">Wind</h2><canvas id="c-wind" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-rose">Wind rose</h2><canvas id="c-rose" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-press">Pressure</h2><canvas id="c-press" class="chart"></canvas></div>
-      <div class="card"><h2>Records · 7 days</h2><div id="extremes" class="kv-rows"></div></div>
-      <div class="card" style="grid-column: span 2"><h2 id="board-models">Model comparison</h2><canvas id="c-models" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-accuracy">Forecast accuracy</h2><canvas id="c-accuracy" class="chart"></canvas></div>
-      <div class="card"><h2>NWS vs Tempest</h2><div id="official" class="kv-rows"></div></div>
-      <div class="card"><h2 id="board-qpf">Precip outlook</h2><canvas id="c-qpf" class="chart"></canvas></div>
-      <div class="card"><h2>Garden</h2><div id="garden" class="kv-rows"></div></div>
-      <div class="card"><h2>Almanac · all time</h2><div id="almanac" class="kv-rows"></div></div>
-      <div class="card"><h2 id="board-monthly">Month by month</h2><canvas id="c-monthly" class="chart"></canvas></div>
-      <div class="card" style="grid-column: span 2">
+      <div class="card" data-panel="data-temperature"><h2 id="board-temp">Temperature</h2><canvas id="c-temp" class="chart"></canvas></div>
+      <div class="card" data-panel="data-rain"><h2 id="board-rain">Rain</h2><canvas id="c-rain" class="chart"></canvas></div>
+      <div class="card" data-panel="data-wind"><h2 id="board-wind">Wind</h2><canvas id="c-wind" class="chart"></canvas></div>
+      <div class="card" data-panel="data-wind-rose"><h2 id="board-rose">Wind rose</h2><canvas id="c-rose" class="chart"></canvas></div>
+      <div class="card" data-panel="data-pressure"><h2 id="board-press">Pressure</h2><canvas id="c-press" class="chart"></canvas></div>
+      <div class="card" data-panel="data-records-7-days"><h2>Records · 7 days</h2><div id="extremes" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-model-comparison" style="grid-column: span 2"><h2 id="board-models">Model comparison</h2><canvas id="c-models" class="chart"></canvas></div>
+      <div class="card" data-panel="data-forecast-accuracy"><h2 id="board-accuracy">Forecast accuracy</h2><canvas id="c-accuracy" class="chart"></canvas></div>
+      <div class="card" data-panel="data-nws-vs-tempest"><h2>NWS vs Tempest</h2><div id="official" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-precip-outlook"><h2 id="board-qpf">Precip outlook</h2><canvas id="c-qpf" class="chart"></canvas></div>
+      <div class="card" data-panel="data-garden"><h2>Garden</h2><div id="garden" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-almanac-all-time"><h2>Almanac · all time</h2><div id="almanac" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-month-by-month"><h2 id="board-monthly">Month by month</h2><canvas id="c-monthly" class="chart"></canvas></div>
+      <div class="card" data-panel="data-explore-the-archive" style="grid-column: span 2">
         <h2>Explore the archive</h2>
         <div class="row" style="margin-top:0">
           <input id="ex-from" type="date" aria-label="From date" style="flex:1">
@@ -919,6 +919,9 @@
            whole house, and "I am rearranging right now" is not something to sync. -->
       <button id="btn-edit" class="phone-only">Rearrange panels</button>
     </div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Starting points — pick one, then drag
+      what's left into place and save it under a name.</p>
+    <div class="row" id="preset-row"></div>
     <div class="row">
       <input id="layout-name" placeholder="layout name (e.g. tablet)">
       <button id="btn-layout-save" style="flex:0 0 auto">Save layout</button>

@@ -55,11 +55,13 @@ const save = () => {
 const entry = (id) => (state[id] ||= {});
 
 // Containers whose direct children are rearrangeable, in the order they appear on the Desk.
-const CONTAINERS = ['desk-stack', 'daycards', 'gauges', 'desk-grid'];
+// The Data and Signals grids were placement targets only — a panel could be sent to them but
+// their own cards were fixed in markup order, which is the wrong way round for the two tabs that
+// hold the most cards.
+const CONTAINERS = ['desk-stack', 'daycards', 'gauges', 'desk-grid', 'data-grid', 'signals-grid'];
 
 // Tabs a panel can be sent to, and the container it lands in. The Desk entry is where a panel
-// goes home to; the others hold cards that were never draggable, so they are placement targets
-// only and their own children are left alone.
+// goes home to.
 export const TABS = { desk: 'desk-grid', data: 'data-grid', signals: 'signals-grid' };
 
 // Every panel's home, captured before anything is moved — otherwise sending a panel to the Data

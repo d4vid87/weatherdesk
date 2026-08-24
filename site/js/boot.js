@@ -757,6 +757,42 @@ $('btn-edit').onclick = () => {
 };
 applyEdit();
 
+// Shipped starting points. A preset is not a saved layout: it says which panels a screen is for
+// and in what order, and deliberately carries no widths or heights — those belong to the screen
+// they were dragged on, not to a name shipped in the source.
+const PRESETS = {
+  'Wall landscape': ['hero', 'radar', 'gauges', 'daycards', 'alerts', 'ticker'],
+  'Kitchen portrait': ['hero', 'daycards', 'alerts', 'tenday'],
+  'E-ink': ['hero', 'tenday', 'alerts', 'changes'],
+};
+
+// Gauge faces, and the Data and Signals cards, are inside panels of their own — a preset that
+// hid them would empty the gauges block and both other tabs along with it.
+const isDeskPanel = (id) => !/^(g-|data-|sig-)/.test(id);
+
+function applyPreset(name) {
+  const keep = PRESETS[name].slice();
+  // The Desk grid is a panel holding panels: keeping a card inside it while hiding it would show
+  // nothing at all.
+  if (keep.some((id) => document.querySelector(`#desk-grid > [data-panel="${id}"]`))) keep.push('desk-grid');
+  const st = {};
+  for (const id of panelIds().filter(isDeskPanel)) {
+    const i = keep.indexOf(id);
+    if (i === -1) st[id] = { hidden: true };
+    else st[id] = { order: i };
+  }
+  restore(st);
+  renderHiddenPanels();
+  notify({ title: `${name} layout applied`, body: 'Everything else is under Hidden panels in Settings.' });
+}
+
+$('preset-row').innerHTML = Object.keys(PRESETS).map((n, i) => `<button data-preset="${i}"></button>`).join('');
+$('preset-row').querySelectorAll('[data-preset]').forEach((b) => {
+  const n = Object.keys(PRESETS)[+b.dataset.preset];
+  b.textContent = n;
+  b.onclick = () => applyPreset(n);
+});
+
 const layouts = () => load('wd.layouts', {});
 
 function renderLayouts() {
