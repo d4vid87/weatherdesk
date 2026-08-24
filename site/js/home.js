@@ -267,8 +267,43 @@ function renderSubs() {
 
 // --- Home Assistant read-back ---
 
-// One GET per entity id. A picker would mean pulling the whole state list and rendering a tree;
-// the ids are copy-paste from Home Assistant's own UI.
+// The server reads Home Assistant when there is a server: one request for the whole state list
+// instead of one per entity, the long-lived token stays out of the browser, and the CORS block
+// most installs never edited their YAML for stops mattering — the fetch is same-origin.
+//
+// A static self-host has no server to ask, so the direct path stays as the fallback. That one
+// does need `cors_allowed_origins` in Home Assistant's configuration.yaml, and always did.
+async function haRows(ids) {
+  try {
+    const j = await (await fetch(`${window.__WD_SRV || ''}/ha/states`, { signal: expires(20000) })).json();
+    if (j.error) throw new Error(j.error);
+    const by = new Map(j.entities.map((e) => [e.id, e]));
+    return ids.map((id) => {
+      const e = by.get(id);
+      return e
+        ? { id, name: e.name, value: `${e.state}${e.unit ? ` ${e.unit}` : ''}`, ok: true }
+        : { id, name: id, value: 'not in Home Assistant', ok: false };
+    });
+  } catch {
+    const s = settings();
+    const url = s.haUrl.replace(/\/+$/, '');
+    return Promise.all(ids.map(async (id) => {
+      try {
+        const r = await fetch(`${url}/api/states/${encodeURIComponent(id)}`, {
+          signal: expires(15000),
+          headers: { Authorization: `Bearer ${s.haToken}` },
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        const j = await r.json();
+        const u = j.attributes?.unit_of_measurement;
+        return { id, name: j.attributes?.friendly_name || id, value: `${j.state}${u ? ` ${u}` : ''}`, ok: true };
+      } catch (e) {
+        return { id, name: id, value: e.message, ok: false };
+      }
+    }));
+  }
+}
+
 function initHaPanel() {
   const panel = $('ha-panel');
   if (!panel) return;
@@ -277,22 +312,16 @@ function initHaPanel() {
   panel.style.display = s.haUrl && ids.length ? '' : 'none';
   if (!s.haUrl || !ids.length) return;
   every('ha-states', 30, async () => {
-    const url = s.haUrl.replace(/\/+$/, '');
-    const rows = await Promise.all(ids.map(async (id) => {
-      try {
-        const r = await fetch(`${url}/api/states/${encodeURIComponent(id)}`, {
-          signal: expires(15000),
-          headers: { Authorization: `Bearer ${s.haToken}` },
-        });
-        if (!r.ok) throw new Error(`${r.status}`);
-        const j = await r.json();
-        return `<div><span>${j.attributes?.friendly_name || id}</span>`
-          + `<span class="ok">${j.state}${j.attributes?.unit_of_measurement ? ' ' + j.attributes.unit_of_measurement : ''}</span></div>`;
-      } catch (e) {
-        return `<div><span>${id}</span><span class="fail">${e.message}</span></div>`;
-      }
-    }));
-    $('ha-rows').innerHTML = rows.join('');
+    const rows = await haRows(ids);
+    // Home Assistant's own text, written in rather than interpolated: a friendly name is
+    // whatever somebody typed into another application.
+    $('ha-rows').innerHTML = rows.map(() => '<div><span></span><span></span></div>').join('');
+    [...$('ha-rows').children].forEach((el, i) => {
+      const [name, value] = el.querySelectorAll('span');
+      name.textContent = rows[i].name;
+      value.textContent = rows[i].value;
+      value.className = rows[i].ok ? 'ok' : 'fail';
+    });
     stamp('ha-stamp', 90);
   });
 }

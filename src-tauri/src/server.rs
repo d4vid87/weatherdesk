@@ -367,6 +367,10 @@ fn handle(state: &Arc<State>, mut req: Request) {
         // One real notification down every configured channel. Real on purpose: a test that
         // takes a different path to the phone from the alerts tests nothing.
         "/alerts/test" => json(crate::alerts::test_push(&state.cfg_path)),
+        // Home Assistant's entity list, read with the token this process holds. The browser
+        // never sees the token, and the CORS configuration most installs never edited stops
+        // mattering — the fetch is same-origin now.
+        "/ha/states" => json(crate::api::ha_states(&state.cfg_path)),
         "/discover/wll" => {
             let hosts = crate::discover::wll_hosts();
             json(serde_json::json!(hosts

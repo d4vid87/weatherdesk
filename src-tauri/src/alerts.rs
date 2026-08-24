@@ -143,17 +143,11 @@ fn wind_factor(cfg: &std::path::Path) -> f64 {
 fn metrics(conn: &rusqlite::Connection, cfg: &std::path::Path) -> Option<(i64, HashMap<&'static str, f64>)> {
     let imp = imperial(cfg);
     let w = wind_factor(cfg);
-    let (ts, gust, wind, rh, temp, uv, rain, interval, press): (
-        i64,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-    ) = conn
+    /// ts, then the eight readings a rule can name, each of which any station is free to be
+    /// missing.
+    type Row = (i64, Opt, Opt, Opt, Opt, Opt, Opt, Opt, Opt);
+    type Opt = Option<f64>;
+    let (ts, gust, wind, rh, temp, uv, rain, interval, press): Row = conn
         .query_row(
             "SELECT ts, wind_gust, wind_avg, humidity, temp, uv, rain, report_interval, pressure
              FROM obs ORDER BY ts DESC LIMIT 1",

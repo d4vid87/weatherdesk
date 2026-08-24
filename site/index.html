@@ -1037,6 +1037,11 @@
     <label>Home Assistant URL</label><input id="set-ha-url" placeholder="http://homeassistant.local:8123">
     <label>Home Assistant token</label><input id="set-ha-token" type="password" placeholder="long-lived access token">
     <label>Entities to show</label><input id="set-ha-entities" placeholder="light.porch, sensor.attic_temp">
+    <div class="row" style="margin-top:6px">
+      <input id="ha-pick-q" placeholder="search entities">
+      <button id="btn-ha-pick" style="flex:0 0 auto">List entities</button>
+    </div>
+    <div id="ha-pick-list" style="max-height:220px;overflow:auto"></div>
     <label>Broker topics to show (one per line: topic | label | unit)</label>
     <textarea id="set-mqtt-subs" rows="3" placeholder="home/greenhouse/temp | Greenhouse | °F"
       style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
