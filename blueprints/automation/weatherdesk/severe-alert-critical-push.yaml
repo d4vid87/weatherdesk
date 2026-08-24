@@ -1,0 +1,62 @@
+blueprint:
+  name: WeatherDesk — severe weather alert to a critical push
+  description: >-
+    Sends a critical notification to a phone when WeatherDesk publishes a severe
+    weather alert.
+
+    WeatherDesk writes the headline of the worst warning in force to its `alert`
+    sensor and clears it when nothing is out, so this fires on the transition
+    into a warning rather than repeatedly while one is running.
+
+    A critical notification overrides silent mode and Do Not Disturb on both
+    iOS and Android. That is the point at 3am, and it is also why this blueprint
+    is for tornado-and-hurricane weather rather than for a windy afternoon —
+    use the gust blueprint for that.
+  domain: automation
+  source_url: https://github.com/d4vid87/weatherdesk/blob/main/blueprints/automation/weatherdesk/severe-alert-critical-push.yaml
+  input:
+    alert_sensor:
+      name: WeatherDesk alert sensor
+      description: The `alert` sensor on your WeatherDesk device.
+      selector:
+        entity:
+          domain: sensor
+          integration: mqtt
+    notify_device:
+      name: Phone
+      description: The phone running the Home Assistant companion app.
+      selector:
+        device:
+          integration: mobile_app
+
+mode: queued
+max: 5
+
+trigger:
+  - platform: state
+    entity_id: !input alert_sensor
+
+condition:
+  # An empty sensor is the all-clear, and `unknown`/`unavailable` are a restart or a broker
+  # blip — neither is worth waking anyone for.
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.state not in ['', 'unknown', 'unavailable', 'none'] }}
+
+action:
+  - device_id: !input notify_device
+    domain: mobile_app
+    type: notify
+    title: Severe weather
+    message: "{{ trigger.to_state.state }}"
+    data:
+      # iOS and Android read different keys for the same idea, and sending both is harmless
+      # on either.
+      push:
+        sound:
+          name: default
+          critical: 1
+          volume: 1.0
+      ttl: 0
+      priority: high
+      channel: Weather

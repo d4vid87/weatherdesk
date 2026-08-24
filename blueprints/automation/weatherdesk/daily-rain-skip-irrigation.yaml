@@ -1,0 +1,67 @@
+blueprint:
+  name: WeatherDesk — skip irrigation after rain
+  description: >-
+    Waters at a set time each day, unless your own rain gauge says the garden
+    already got some.
+
+    This is the one automation a weather station pays for itself with. The
+    reading is from the gauge in the garden, not a forecast for the county and
+    not an airport eleven miles away — the shower that soaked one street and
+    missed the next is exactly the case a forecast gets wrong.
+
+    WeatherDesk publishes rain in millimetres whatever the dashboard shows.
+    5 mm is about a fifth of an inch.
+  domain: automation
+  source_url: https://github.com/d4vid87/weatherdesk/blob/main/blueprints/automation/weatherdesk/daily-rain-skip-irrigation.yaml
+  input:
+    rain_sensor:
+      name: Day rain sensor
+      description: The `day rain` sensor on your WeatherDesk device.
+      selector:
+        entity:
+          domain: sensor
+          integration: mqtt
+    water_at:
+      name: Water at
+      default: "06:00:00"
+      selector:
+        time:
+    threshold:
+      name: Skip if it has rained at least
+      description: In the unit the sensor is displayed in.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 0.5
+          mode: box
+    water_actions:
+      name: Watering
+      description: Turn the valve on, run the sprinkler script — whatever waters the garden.
+      selector:
+        action:
+    skip_actions:
+      name: When it is skipped
+      description: Optional — somewhere to hang a notification so a dry week is visible.
+      default: []
+      selector:
+        action:
+
+mode: single
+
+trigger:
+  - platform: time
+    at: !input water_at
+
+action:
+  - choose:
+      - conditions:
+          # `above` treats a missing reading as "not above", so a station that has been
+          # offline all night waters rather than silently skipping. A dead sensor should
+          # cost water, not a dead garden.
+          - condition: numeric_state
+            entity_id: !input rain_sensor
+            above: !input threshold
+        sequence: !input skip_actions
+    default: !input water_actions

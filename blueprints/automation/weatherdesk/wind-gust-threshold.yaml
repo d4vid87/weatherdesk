@@ -1,0 +1,79 @@
+blueprint:
+  name: WeatherDesk — wind gust over a threshold
+  description: >-
+    Runs whatever you like when the gust reading from your own station goes over
+    a number and stays there.
+
+    The hold time is what makes this usable: a single 40 mph spike on an
+    otherwise calm afternoon is a leaf hitting the anemometer, and closing the
+    awning for it every time is how people end up turning the automation off.
+    Two minutes is a reasonable starting point.
+
+    WeatherDesk publishes wind in metres per second, whatever the dashboard is
+    set to display — the unit switch on the dashboard must never rewrite months
+    of Home Assistant history. Type the threshold in the unit the sensor shows
+    in Home Assistant. 10 m/s is about 22 mph or 36 km/h.
+  domain: automation
+  source_url: https://github.com/d4vid87/weatherdesk/blob/main/blueprints/automation/weatherdesk/wind-gust-threshold.yaml
+  input:
+    gust_sensor:
+      name: Gust sensor
+      description: The `gust` sensor on your WeatherDesk device.
+      selector:
+        entity:
+          domain: sensor
+          integration: mqtt
+    threshold:
+      name: Threshold
+      description: In the unit the sensor is displayed in.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 0.5
+          mode: box
+    hold:
+      name: Hold for
+      description: How long the gusts have to stay above the threshold.
+      default:
+        minutes: 2
+      selector:
+        duration:
+    windy_actions:
+      name: When it gets windy
+      selector:
+        action:
+    calm_actions:
+      name: When it calms down again
+      description: >-
+        Optional — runs when the gusts drop back below the threshold. Leave
+        empty if there is nothing to undo.
+      default: []
+      selector:
+        action:
+
+mode: single
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input gust_sensor
+    above: !input threshold
+    for: !input hold
+    id: windy
+  - platform: numeric_state
+    entity_id: !input gust_sensor
+    below: !input threshold
+    for: !input hold
+    id: calm
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: windy
+        sequence: !input windy_actions
+      - conditions:
+          - condition: trigger
+            id: calm
+        sequence: !input calm_actions
