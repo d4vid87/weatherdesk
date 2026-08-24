@@ -1,10 +1,9 @@
 // 03 Local Signals — nearby public Tempest stations vs yours, plus the live websocket feed.
 import * as api from './api.js';
-import { settings, saveSettings, configured, hasSource, U, num, deg2compass, every, notify, store, load, notifHistory, timeStr } from './app.js';
+import { settings, saveSettings, configured, hasSource, U, num, deg2compass, every, notify, store, load, notifHistory, timeStr, msToWind } from './app.js';
 import { milesBetween } from './boot.js';
 
 const $ = (id) => document.getElementById(id);
-const MPS = { imperial: 2.23694, metric: 3.6 }; // rapid_wind is always m/s
 
 // --- discovery: what is within nearbyRadius of the station ---
 
@@ -179,8 +178,7 @@ export function disconnectWs() {
 }
 
 export function renderRapid(mps, dir) {
-  const f = MPS[settings().units] || MPS.imperial;
-  const v = mps * f;
+  const v = msToWind(mps);   // rapid_wind is always m/s
   $('live-wind').textContent = num(v, 1);
   $('live-wind-unit').textContent = U.wind();
   $('live-dir').textContent = `${deg2compass(dir)} ${num(dir)}°`;

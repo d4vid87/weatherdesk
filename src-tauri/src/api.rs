@@ -132,6 +132,113 @@ pub fn snapshot(state: &Arc<State>) -> String {
     body.to_string()
 }
 
+/// Both halves of the smart-home setup, tried for real: the broker we publish to, and the Home
+/// Assistant we read entities back from. The token never leaves this process — that is the whole
+/// reason this lives here rather than in a fetch from the drawer.
+pub fn test_smart_home(cfg: &std::path::Path) -> String {
+    let (mqtt_ok, mqtt_says) = crate::mqtt::probe(cfg);
+    let get = |k: &str| crate::setting(cfg, k).unwrap_or_default().trim_matches('"').to_string();
+    let (url, token) = (get("haUrl"), get("haToken"));
+    let (ha_ok, ha_says) = if url.is_empty() {
+        (false, "no Home Assistant URL set".to_string())
+    } else {
+        let base = url.trim_end_matches('/');
+        match ureq::get(&format!("{base}/api/"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .timeout(Duration::from_secs(10))
+            .call()
+        {
+            Ok(_) => (true, "connected".to_string()),
+            // The status code, never the error body: a Home Assistant error page can echo the
+            // request, and the request carries the token.
+            Err(ureq::Error::Status(401 | 403, _)) => (false, "token rejected".to_string()),
+            Err(ureq::Error::Status(code, _)) => (false, format!("HTTP {code}")),
+            Err(_) => (false, "no answer".to_string()),
+        }
+    };
+    serde_json::json!({
+        "mqtt": { "ok": mqtt_ok, "what": mqtt_says },
+        "ha": { "ok": ha_ok, "what": ha_says },
+    })
+    .to_string()
+}
+
+/// Every entity Home Assistant knows about, slimmed to what a picker and a read-back panel need.
+///
+/// This exists so the browser never holds the long-lived token. It also retires the CORS block
+/// people hit here — Home Assistant does not send CORS headers unless its YAML says to, so the
+/// old direct-from-the-page fetch failed for most installs until they edited a config file. The
+/// page still falls back to that path on a static host, which has no server to ask.
+///
+/// Cached briefly: a house with four dashboards open should be four reads of this, not four
+/// reads of Home Assistant.
+pub fn ha_states(cfg: &std::path::Path) -> String {
+    let now = crate::server::epoch();
+    if let Ok(c) = states_cache().lock() {
+        if let Some((at, body)) = c.as_ref() {
+            if now.saturating_sub(*at) < STATES_TTL {
+                return body.clone();
+            }
+        }
+    }
+    let get = |k: &str| crate::setting(cfg, k).unwrap_or_default().trim_matches('"').to_string();
+    let (url, token) = (get("haUrl"), get("haToken"));
+    if url.is_empty() {
+        return r#"{"error":"no Home Assistant URL set"}"#.to_string();
+    }
+    let base = url.trim_end_matches('/');
+    let body = match ureq::get(&format!("{base}/api/states"))
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(Duration::from_secs(20))
+        .call()
+    {
+        Ok(r) => r.into_string().unwrap_or_default(),
+        // Codes and fixed words only: a Home Assistant error page can echo back the request that
+        // carried the token.
+        Err(ureq::Error::Status(401 | 403, _)) => return r#"{"error":"token rejected"}"#.to_string(),
+        Err(ureq::Error::Status(code, _)) => {
+            return serde_json::json!({ "error": format!("HTTP {code}") }).to_string()
+        }
+        Err(_) => return r#"{"error":"no answer"}"#.to_string(),
+    };
+    let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&body) else {
+        return r#"{"error":"unexpected answer"}"#.to_string();
+    };
+    let out: Vec<serde_json::Value> = list
+        .iter()
+        .filter_map(|e| {
+            let id = e.get("entity_id")?.as_str()?;
+            let attrs = e.get("attributes");
+            Some(serde_json::json!({
+                "id": id,
+                "name": attrs
+                    .and_then(|a| a.get("friendly_name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(id),
+                "state": e.get("state").and_then(|v| v.as_str()).unwrap_or(""),
+                "unit": attrs
+                    .and_then(|a| a.get("unit_of_measurement"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+            }))
+        })
+        .collect();
+    let body = serde_json::json!({ "entities": out }).to_string();
+    if let Ok(mut c) = states_cache().lock() {
+        *c = Some((now, body.clone()));
+    }
+    body
+}
+
+fn states_cache() -> &'static Mutex<Option<(u64, String)>> {
+    static C: OnceLock<Mutex<Option<(u64, String)>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(None))
+}
+
+/// Long enough that a wall of dashboards is one read, short enough that a light switch shows up
+/// on the panel while somebody is still standing next to it.
+const STATES_TTL: u64 = 15;
+
 #[cfg(test)]
 mod tests {
     use super::*;

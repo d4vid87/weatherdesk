@@ -160,6 +160,8 @@
     border: 1px solid var(--line); border-radius: 8px; font: inherit;
   }
   .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  /* display:flex outranks the UA [hidden] rule, so a hidden .row would still show. */
+  .row[hidden] { display: none; }
   .row button { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; }
   .row button.primary { background: var(--accent); color: #04121d; border-color: var(--accent); }
@@ -514,32 +516,37 @@
   <div class="wizard-box">
     <img src="icon-512.png" alt="" style="display:block;width:180px;max-width:60%;margin:0 auto 10px">
     <h2 style="margin-top:0;text-align:center">Welcome to WeatherDesk</h2>
-    <p class="muted" style="font-size:13px">Two ways in. <b>Tempest owners:</b> paste a personal
-      use token (tempestwx.com → Settings → Data Authorizations). <b>Every other brand</b> —
-      Ecowitt, Ambient, Davis, AcuRite, La Crosse — needs no token at all: open the second box.</p>
+    <p class="muted" style="font-size:13px">Pick the brand of station in the garden. Every brand
+      except Tempest needs no token and no account — the readings come from your own sensors, the
+      forecast from open-meteo.</p>
+    <select id="wiz-source"></select>
+    <div class="row" style="margin-top:8px">
+      <input id="wiz-place" placeholder="town or postcode">
+      <button id="btn-wiz-place" style="flex:0 0 auto">Find</button>
+    </div>
+    <div id="wiz-place-list" style="margin-top:8px"></div>
+    <div id="wiz-wll" class="row" style="margin-top:8px" hidden>
+      <input id="wiz-wll-host" placeholder="192.168.1.50">
+      <button id="btn-wiz-wll" style="flex:0 0 auto">Find console</button>
+    </div>
+    <p id="wiz-target" class="muted" style="font-size:12px"></p>
+
+    <h3 style="font-size:13px;margin:16px 0 4px">Tempest owners</h3>
+    <p class="muted" style="font-size:12px">Paste a personal use token — tempestwx.com &rarr;
+      Settings &rarr; Data Authorizations.</p>
     <div class="row">
       <input id="wiz-token" type="password" placeholder="personal use token">
       <button class="primary" id="btn-wiz-find" style="flex:0 0 auto">Find stations</button>
     </div>
     <div id="wiz-list" style="margin-top:8px"></div>
+    <p class="muted" style="font-size:12px">No token? The desktop app also reads a Tempest hub
+      directly off the network with none at all.</p>
+
+    <div id="wiz-first" class="muted" style="font-size:12px;margin-top:10px"></div>
     <div class="row" style="margin-top:10px">
       <button id="btn-wiz-demo">Skip — just show me the weather somewhere</button>
       <button id="btn-wiz-close" style="flex:0 0 auto">Close</button>
     </div>
-    <p class="muted" style="font-size:12px">No station? The desktop app also reads a Tempest hub
-      directly off the network with no token at all.</p>
-    <details id="wiz-other" style="margin-top:10px" open>
-      <summary style="cursor:pointer;font-size:13px">Not a Tempest? Ecowitt, Ambient, Davis, AcuRite, La Crosse…</summary>
-      <p class="muted" style="font-size:12px">Pick the brand, then say where the station is —
-        the forecast comes from open-meteo, the readings come from your own sensors.</p>
-      <select id="wiz-source"></select>
-      <div class="row" style="margin-top:8px">
-        <input id="wiz-place" placeholder="town or postcode">
-        <button id="btn-wiz-place" style="flex:0 0 auto">Find</button>
-      </div>
-      <div id="wiz-place-list" style="margin-top:8px"></div>
-      <p id="wiz-target" class="muted" style="font-size:12px"></p>
-    </details>
   </div>
 </div>
 
@@ -664,6 +671,8 @@
       <div class="card" data-panel="verify"><h2>Forecast accuracy</h2><div id="verify" class="muted">--</div></div>
 
       <div class="card" data-panel="sky"><h2>Sun &amp; moon</h2><div id="sky" class="kv-rows"></div></div>
+      <div class="card" data-panel="solar"><h2>Sun strength</h2><div id="solar" class="kv-rows"></div></div>
+      <div class="card" data-panel="lastyear"><h2>This day, other years</h2><div id="lastyear" class="kv-rows"></div></div>
       <div class="card" data-panel="fire"><h2>Fire &amp; dryness</h2><div id="fire" class="kv-rows"></div></div>
       <div class="card" data-panel="health"><h2>Station health</h2><div id="health" class="kv-rows"></div></div>
 
@@ -688,7 +697,7 @@
   <section class="page" id="lab" style="padding:0"><iframe id="lab-frame" title="Forecast Lab"></iframe></section>
   <section class="page" id="signals">
     <div class="grid" id="signals-grid">
-      <div class="card">
+      <div class="card" data-panel="sig-live-wind-websocket">
         <h2>Live wind · websocket</h2>
         <div class="live-wind-wrap">
           <div class="compass"><i id="live-needle"></i></div>
@@ -704,7 +713,7 @@
         <div id="strike-log" class="kv-rows"></div>
       </div>
 
-      <div class="card" style="grid-column: span 2">
+      <div class="card" data-panel="sig-nearby-stations" style="grid-column: span 2">
         <h2>Nearby stations</h2>
         <div class="row" style="margin:0 0 8px">
           <input id="add-station-id" placeholder="public station ID, or an airport code like KBDL">
@@ -718,7 +727,7 @@
         <div id="signals-table"></div>
       </div>
 
-      <div class="card" style="grid-column: span 3">
+      <div class="card" data-panel="sig-notification-history" style="grid-column: span 3">
         <h2>Notification history</h2>
         <div id="notif-log" class="kv-rows"></div>
       </div>
@@ -726,20 +735,20 @@
   </section>
   <section class="page" id="data">
     <div class="grid" id="data-grid">
-      <div class="card"><h2 id="board-temp">Temperature</h2><canvas id="c-temp" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-rain">Rain</h2><canvas id="c-rain" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-wind">Wind</h2><canvas id="c-wind" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-rose">Wind rose</h2><canvas id="c-rose" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-press">Pressure</h2><canvas id="c-press" class="chart"></canvas></div>
-      <div class="card"><h2>Records · 7 days</h2><div id="extremes" class="kv-rows"></div></div>
-      <div class="card" style="grid-column: span 2"><h2 id="board-models">Model comparison</h2><canvas id="c-models" class="chart"></canvas></div>
-      <div class="card"><h2 id="board-accuracy">Forecast accuracy</h2><canvas id="c-accuracy" class="chart"></canvas></div>
-      <div class="card"><h2>NWS vs Tempest</h2><div id="official" class="kv-rows"></div></div>
-      <div class="card"><h2 id="board-qpf">Precip outlook</h2><canvas id="c-qpf" class="chart"></canvas></div>
-      <div class="card"><h2>Garden</h2><div id="garden" class="kv-rows"></div></div>
-      <div class="card"><h2>Almanac · all time</h2><div id="almanac" class="kv-rows"></div></div>
-      <div class="card"><h2 id="board-monthly">Month by month</h2><canvas id="c-monthly" class="chart"></canvas></div>
-      <div class="card" style="grid-column: span 2">
+      <div class="card" data-panel="data-temperature"><h2 id="board-temp">Temperature</h2><canvas id="c-temp" class="chart"></canvas></div>
+      <div class="card" data-panel="data-rain"><h2 id="board-rain">Rain</h2><canvas id="c-rain" class="chart"></canvas></div>
+      <div class="card" data-panel="data-wind"><h2 id="board-wind">Wind</h2><canvas id="c-wind" class="chart"></canvas></div>
+      <div class="card" data-panel="data-wind-rose"><h2 id="board-rose">Wind rose</h2><canvas id="c-rose" class="chart"></canvas></div>
+      <div class="card" data-panel="data-pressure"><h2 id="board-press">Pressure</h2><canvas id="c-press" class="chart"></canvas></div>
+      <div class="card" data-panel="data-records-7-days"><h2>Records · 7 days</h2><div id="extremes" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-model-comparison" style="grid-column: span 2"><h2 id="board-models">Model comparison</h2><canvas id="c-models" class="chart"></canvas></div>
+      <div class="card" data-panel="data-forecast-accuracy"><h2 id="board-accuracy">Forecast accuracy</h2><canvas id="c-accuracy" class="chart"></canvas></div>
+      <div class="card" data-panel="data-nws-vs-tempest"><h2>NWS vs Tempest</h2><div id="official" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-precip-outlook"><h2 id="board-qpf">Precip outlook</h2><canvas id="c-qpf" class="chart"></canvas></div>
+      <div class="card" data-panel="data-garden"><h2>Garden</h2><div id="garden" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-almanac-all-time"><h2>Almanac · all time</h2><div id="almanac" class="kv-rows"></div></div>
+      <div class="card" data-panel="data-month-by-month"><h2 id="board-monthly">Month by month</h2><canvas id="c-monthly" class="chart"></canvas></div>
+      <div class="card" data-panel="data-explore-the-archive" style="grid-column: span 2">
         <h2>Explore the archive</h2>
         <div class="row" style="margin-top:0">
           <input id="ex-from" type="date" aria-label="From date" style="flex:1">
@@ -824,10 +833,12 @@
     </div>
     <label>Units</label>
     <select id="set-units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
+    <label>Wind unit</label>
+    <select id="set-wind-unit"><option value="">Follow units above</option><option value="mph">mph</option><option value="km/h">km/h</option><option value="m/s">m/s</option><option value="kt">knots</option></select>
     <label>Clock</label>
     <select id="set-clock"><option value="auto">Follow this device</option><option value="12">12-hour</option><option value="24">24-hour</option></select>
     <label>Obs refresh (seconds)</label><input id="set-refresh" type="number" min="10" step="10">
-    <label>Wind gust alert threshold</label><input id="set-gust" type="number" min="0">
+    <label>Wind gust alert threshold (<span id="gust-unit">mph</span>)</label><input id="set-gust" type="number" min="0">
     <label>Nearby sensor radius (mi, 0 = manual only)</label><input id="set-nearby-radius" type="number" min="0">
     <div class="row"><button id="btn-station-save">Remember this station</button></div>
     <div id="station-list"></div>
@@ -910,6 +921,9 @@
            whole house, and "I am rearranging right now" is not something to sync. -->
       <button id="btn-edit" class="phone-only">Rearrange panels</button>
     </div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Starting points — pick one, then drag
+      what's left into place and save it under a name.</p>
+    <div class="row" id="preset-row"></div>
     <div class="row">
       <input id="layout-name" placeholder="layout name (e.g. tablet)">
       <button id="btn-layout-save" style="flex:0 0 auto">Save layout</button>
@@ -955,9 +969,14 @@
       <label><input type="checkbox" data-cat="rule"> My alert rules</label>
       <label><input type="checkbox" data-cat="station"> Station health</label>
     </div>
-    <div class="row"><button id="btn-notif-test">Test notifications</button></div>
+    <div class="row">
+      <button id="btn-notif-test">Test banners</button>
+      <button id="btn-alert-test">Test push channels</button>
+    </div>
+    <div id="alert-test-out" class="muted" style="font-size:12px"></div>
 
     <h2 style="font-size:13px;margin-top:18px">Alert rules</h2>
+    <p id="rule-server" class="muted" style="font-size:12px"></p>
     <div id="rule-list"></div>
     <div class="row" style="margin-top:6px">
       <select id="rule-metric"></select>
@@ -997,7 +1016,12 @@
       formatted for them automatically. Alerts are sent as title, body and category only — never your token.
       An ntfy.sh topic is public to anyone who guesses it, so make it long.</p>
 
-    <h2 style="font-size:13px;margin-top:18px">Smart home</h2>
+    <h2 style="font-size:13px;margin-top:18px">Home Assistant</h2>
+    <p class="muted" style="font-size:12px">Two halves, either useful on its own: the station is
+      published to your broker and appears in Home Assistant on its own, and a few Home Assistant
+      entities can be read back onto the Signals tab.</p>
+
+    <h3 style="font-size:12px;margin:12px 0 0">Publish the station</h3>
     <label>MQTT broker</label><input id="set-mqtt-url" placeholder="mqtt://homeassistant.local:1883">
     <p class="muted" style="font-size:12px">The desktop and Docker builds speak plain MQTT
       (<code>mqtt://</code> or <code>mqtts://</code>) and keep publishing with every tab closed,
@@ -1005,13 +1029,25 @@
       instead, and only while it is open.</p>
     <label>MQTT username</label><input id="set-mqtt-user" autocomplete="off">
     <label>MQTT password</label><input id="set-mqtt-pass" type="password" autocomplete="off">
-    <label>Broker topics to show (one per line: topic | label | unit)</label>
-    <textarea id="set-mqtt-subs" rows="3" placeholder="home/greenhouse/temp | Greenhouse | °F"
-      style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
     <label>Discovery prefix</label><input id="set-ha-prefix" placeholder="homeassistant">
+    <p class="muted" style="font-size:12px">Leave this alone unless you changed it in Home
+      Assistant's own MQTT settings first.</p>
+
+    <h3 style="font-size:12px;margin:12px 0 0">Read entities back</h3>
     <label>Home Assistant URL</label><input id="set-ha-url" placeholder="http://homeassistant.local:8123">
     <label>Home Assistant token</label><input id="set-ha-token" type="password" placeholder="long-lived access token">
     <label>Entities to show</label><input id="set-ha-entities" placeholder="light.porch, sensor.attic_temp">
+    <div class="row" style="margin-top:6px">
+      <input id="ha-pick-q" placeholder="search entities">
+      <button id="btn-ha-pick" style="flex:0 0 auto">List entities</button>
+    </div>
+    <div id="ha-pick-list" style="max-height:220px;overflow:auto"></div>
+    <label>Broker topics to show (one per line: topic | label | unit)</label>
+    <textarea id="set-mqtt-subs" rows="3" placeholder="home/greenhouse/temp | Greenhouse | °F"
+      style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
+
+    <button id="btn-ha-test" class="ghost" style="margin-top:10px">Test both</button>
+    <div id="ha-test-out" class="muted" style="font-size:12px;margin-top:6px"></div>
 
     <!-- Help. Plain <details> and no script: this is the manual people asked for, and it has to
          still be readable on an install whose JavaScript is having a bad day. Keep in step with

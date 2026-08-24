@@ -6,6 +6,7 @@
 import { settings, coords, U, num, notify, every, stamp, expires } from './app.js';
 import { forecast as deskForecast } from './desk.js';
 import { OBS } from './api.js';
+import { toDisplay } from './almanac.js';
 
 const $ = (id) => document.getElementById(id);
 const rad = Math.PI / 180;
@@ -102,6 +103,68 @@ async function loadMoon() {
     set: p.moonset?.time ? new Date(p.moonset.time) : null,
   };
   renderSky();
+}
+
+// --- sun strength: UV and solar radiation, for the whole day rather than this minute ---
+//
+// The gauge shows what the sensor reads now, which answers "should I go out" and nothing else.
+// The questions people actually ask of a UV number are when it peaks and how long skin lasts,
+// and both are arithmetic on hours the forecast already carries.
+//
+// Burn time is the standard erythema estimate — roughly 200/(3 × UV) minutes for fair skin that
+// has not been out yet this year. It is a rule of thumb, labelled as one; anything more precise
+// would need a skin type and a sunscreen factor this dashboard has no business asking for.
+const uvBand = (v) => (v < 3 ? 'low' : v < 6 ? 'moderate' : v < 8 ? 'high' : v < 11 ? 'very high' : 'extreme');
+
+export function renderSolar() {
+  const fc = deskForecast();
+  if (!fc) return;
+  const c = fc.current_conditions;
+  const today = new Date().toDateString();
+  const hours = (fc.forecast?.hourly || []).filter((h) => new Date(h.time * 1000).toDateString() === today);
+
+  let peak = null;
+  for (const h of hours) if (h.uv != null && (!peak || h.uv > peak.uv)) peak = h;
+  // Hourly W/m² held for an hour is Wh/m²; the day's total is what a panel or a tomato sees.
+  const energy = hours.reduce((a, h) => a + (h.solar_radiation || 0), 0) / 1000;
+
+  const uv = c.uv;
+  const burn = uv >= 1 ? Math.round(200 / (3 * uv)) : null;
+  const rows = [
+    uv == null ? null : ['UV now', `${num(uv, 1)} · ${uvBand(uv)}`],
+    burn == null ? null : ['Burn time', burn >= 120 ? '2h+' : `${burn} min`],
+    peak ? ['Peak UV today', `${num(peak.uv, 1)} at ${hhmm(new Date(peak.time * 1000))}`] : null,
+    c.solar_radiation == null ? null : ['Solar now', `${num(c.solar_radiation)} W/m²`],
+    energy > 0 ? ['Solar today', `${num(energy, 2)} kWh/m²`] : null,
+  ].filter(Boolean);
+  $('solar').innerHTML = rows.length
+    ? rows.map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join('')
+    : '<div class="muted">No UV or solar data from this source</div>';
+  stamp('solar', 900);
+}
+
+// --- this day, other years ---
+//
+// The archive already answers this: /history/daily is every day this install has ever recorded,
+// and the almanac downloads all of it anyway. Matching on month and day is the whole feature —
+// no new endpoint, no new query parameter, and it works for a station that has been up for
+// thirteen months as well as one that has been up for ten years.
+async function renderLastYear() {
+  const tz = -new Date().getTimezoneOffset();
+  const r = await fetch(`${window.__WD_SRV || ''}/history/daily?tz=${tz}`, { signal: expires(10000) });
+  if (!r.ok) throw new Error(`${r.status}`);
+  const now = new Date();
+  const md = `-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const rows = (await r.json())
+    .filter((d) => d.day.endsWith(md) && d.day.slice(0, 4) !== String(now.getFullYear()))
+    .sort((a, b) => b.day.localeCompare(a.day))
+    .slice(0, 6)
+    .map(toDisplay);
+  $('lastyear').innerHTML = rows.length
+    ? rows.map((d) => `<div><span>${d.day.slice(0, 4)}</span><span>${num(d.tempMax)}° / ${num(d.tempMin)}°`
+        + `${d.rain ? ` · ${num(d.rain, 2)} ${U.precip()}` : ''}</span></div>`).join('')
+    : '<div class="muted">Nothing recorded on this date yet — come back next year.</div>';
+  stamp('lastyear', 3600);
 }
 
 // --- fire weather and dryness ---
@@ -288,7 +351,10 @@ window.addEventListener('wd:device-status', (e) => {
 export function initEnv() {
   renderHealth(lastStatus);
   window.addEventListener('wd:forecast', renderSky);
+  window.addEventListener('wd:forecast', renderSolar);
   renderSky();
+  renderSolar();
+  every('env-lastyear', 21600, () => renderLastYear().catch(() => {}));
   every('env-moon', 21600, () => loadMoon().catch(() => {}));
   every('env-garden', 21600, () => loadGarden().catch(() => {}));
   every('env-season', 3600, () => loadSeason().catch(() => {}));

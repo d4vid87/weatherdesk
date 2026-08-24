@@ -6,7 +6,7 @@
 //
 // Fires through notify(), so a rule reaches every channel the banners already reach — the ntfy
 // topic, the webhook, the broker — with no per-channel code here.
-import { settings, saveSettings, notify, num, U } from './app.js';
+import { settings, saveSettings, notify, num, U, msToWind } from './app.js';
 import { OBS } from './api.js';
 
 const $ = (id) => document.getElementById(id);
@@ -31,7 +31,7 @@ export const OPS = { '>': 'above', '<': 'below' };
 
 const metric = () => settings().units === 'metric';
 const toTemp = (c) => (c == null ? null : metric() ? c : c * 9 / 5 + 32);
-const toWind = (ms) => (ms == null ? null : ms * (metric() ? 3.6 : 2.23694));
+const toWind = msToWind;
 const toRain = (mm) => (mm == null ? null : mm * (metric() ? 1 : 1 / 25.4));
 const toPress = (mb) => (mb == null ? null : mb * (metric() ? 1 : 0.02953));
 

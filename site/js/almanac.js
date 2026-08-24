@@ -4,7 +4,7 @@
 // the REST history is capped and paged, and the point of the log is to keep going once it ends.
 // Nothing here backfills — the archive starts the day the app was first run, and the panel says
 // so rather than pretending the record is older than it is.
-import { settings, U, num, every, expires } from './app.js';
+import { settings, U, num, every, expires, msToWind } from './app.js';
 import { chart } from './charts.js';
 import { normals, normalFor } from './api.js';
 
@@ -16,7 +16,7 @@ const SRV = window.__WD_SRV || '';
 export function toDisplay(row) {
   const metric = settings().units === 'metric';
   const t = (c) => (c == null ? null : metric ? c : c * 9 / 5 + 32);
-  const wind = (ms) => (ms == null ? null : ms * (metric ? 3.6 : 2.23694));
+  const wind = msToWind;
   const rain = (mm) => (mm == null ? null : mm * (metric ? 1 : 1 / 25.4));
   return {
     day: row.day,

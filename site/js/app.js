@@ -7,6 +7,8 @@ const DEFAULTS = {
   // in flat country and tens of metres in a valley, which is a barometer's worth of error.
   elevationM: null,
   units: 'imperial', refreshSec: 60,
+  // Empty means "follow the master switch" — see WIND_UNITS.
+  windUnit: '',
   // 'auto' follows the browser locale; the other two are for the screen that lives in a country
   // its OS wasn't set up for.
   clock24: 'auto', places: [], activePlace: null,
@@ -137,9 +139,25 @@ export function coords() {
 
 // --- formatting helpers ---
 
+// Wind is the one unit people override: a sailor wants knots on an otherwise imperial
+// dashboard, a glider pilot m/s. Six files each carried their own copy of the m/s factor, which
+// is six chances for a chart to be plausible and wrong — they all go through here now.
+export const WIND_UNITS = {
+  mph: { fromMs: 2.23694, om: 'mph', tempest: 'mph' },
+  'km/h': { fromMs: 3.6, om: 'kmh', tempest: 'kph' },
+  'm/s': { fromMs: 1, om: 'ms', tempest: 'mps' },
+  kt: { fromMs: 1.94384, om: 'kn', tempest: 'kts' },
+};
+export const windUnit = () =>
+  _settings.windUnit && WIND_UNITS[_settings.windUnit]
+    ? _settings.windUnit
+    : (_settings.units === 'metric' ? 'km/h' : 'mph');
+export const msToWind = (v) => (v == null ? null : v * WIND_UNITS[windUnit()].fromMs);
+export const windToMs = (v) => (v == null ? null : v / WIND_UNITS[windUnit()].fromMs);
+
 export const U = {
   temp: () => (_settings.units === 'metric' ? '°C' : '°F'),
-  wind: () => (_settings.units === 'metric' ? 'km/h' : 'mph'),
+  wind: () => windUnit(),
   precip: () => (_settings.units === 'metric' ? 'mm' : 'in'),
   press: () => (_settings.units === 'metric' ? 'mb' : 'inHg'),
   dist: () => (_settings.units === 'metric' ? 'km' : 'mi'),
@@ -270,7 +288,16 @@ function webNative({ category, title, body }) {
 // Security: the payloads carry the title, the body and the category and nothing else. The
 // Tempest token, the broker password and the station ID are deliberately absent — ntfy.sh is a
 // public relay by default and a webhook goes wherever the user pointed it.
+// The server runs the same rules engine and the same NWS poll (src-tauri/src/alerts.rs), and it
+// runs them whether or not a browser is open — which is the whole point. When it is doing that,
+// this page must not push as well: one ntfy topic and two engines means every alert arrives
+// twice, and the second copy always looks like a bug in the first.
+let serverAlerts = false;
+export const setServerAlerts = (on) => { serverAlerts = on; };
+export const alertsAreServerSide = () => serverAlerts;
+
 function push({ category, title, body }) {
+  if (serverAlerts) return;
   const s = _settings;
   if (s.ntfyTopic) {
     fetch(`${s.ntfyUrl || 'https://ntfy.sh'}/${encodeURIComponent(s.ntfyTopic)}`, {

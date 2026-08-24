@@ -11,7 +11,25 @@
 
 use crate::store;
 use rumqttc::{Client, LastWill, MqttOptions, QoS};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+
+/// Text the alert engine wants on the broker. It runs on its own thread and must not open a
+/// second connection to say one sentence, so it leaves messages here and the live session picks
+/// them up on its next tick. Bounded: a broker that is down for a week must not become a leak.
+fn outbox() -> &'static Mutex<Vec<(String, String)>> {
+    static O: OnceLock<Mutex<Vec<(String, String)>>> = OnceLock::new();
+    O.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Queue one retained message for `weatherdesk/<station>/<suffix>`.
+pub fn send(suffix: &str, payload: &str) {
+    let mut q = outbox().lock().unwrap();
+    if q.len() >= 64 {
+        q.remove(0);
+    }
+    q.push((suffix.to_string(), payload.to_string()));
+}
 
 /// How often we look for a new row. The archive gains one a minute at best, so this is mostly
 /// a cheap "has anything changed" query.
@@ -47,9 +65,14 @@ const FIELDS: [(&str, &str, Option<&str>, &str, &str); 15] = [
 /// Assistant can't derive these itself without a template sensor per house.
 /// name, device_class, unit, state_class — each optional, because a trend has none of them.
 type Derived = (&'static str, Option<&'static str>, Option<&'static str>, Option<&'static str>);
-const DERIVED: [Derived; 2] = [
+const DERIVED: [Derived; 4] = [
     ("feels_like", Some("temperature"), Some("°C"), Some("measurement")),
     ("pressure_trend", None, None, None),
+    // Written by the alert engine rather than by a row of the archive: the headline of the
+    // worst NWS alert in force, and the last user rule to fire. Both are text, and both are
+    // retained, so a Home Assistant that restarts still knows what is out.
+    ("alert", None, None, None),
+    ("rule", None, None, None),
 ];
 
 struct Conf {
@@ -148,8 +171,13 @@ fn announce(client: &Client, c: &Conf) {
             "name": name.replace('_', " "),
             "unique_id": format!("wd_{}_{}", c.station, name),
             "state_topic": format!("weatherdesk/{}/{}", c.station, name),
-            "expire_after": EXPIRE_AFTER,
         });
+        // Everything driven by a row of the archive expires, so a dead poller shows up as dead.
+        // The two the alert engine writes must not: a quiet fortnight is not a fault, and an
+        // alert sensor that went unavailable is an automation that silently stopped working.
+        if !matches!(name, "alert" | "rule") {
+            cfg["expire_after"] = EXPIRE_AFTER.into();
+        }
         if let Some(dc) = dc {
             cfg["device_class"] = dc.into();
         }
@@ -328,6 +356,16 @@ fn session(data_dir: &std::path::Path, cfg_path: &std::path::Path, c: &Conf) {
                 return;
             }
         }
+        // Anything the alert engine left for us, before the row: an alert is the message
+        // people built the automation for.
+        for (suffix, payload) in outbox().lock().unwrap().drain(..) {
+            let _ = client.publish(
+                format!("weatherdesk/{}/{}", c.station, suffix),
+                QoS::AtLeastOnce,
+                true,
+                payload,
+            );
+        }
         if last_announce.elapsed() >= REANNOUNCE {
             announce(&client, c);
             last_announce = std::time::Instant::now();
@@ -352,6 +390,47 @@ fn err_kind(e: &rumqttc::ConnectionError) -> &'static str {
         ConnectionError::MqttState(_) => "protocol",
         _ => "error",
     }
+}
+
+/// Connect to the configured broker, publish one retained value, and say what happened. The
+/// settings drawer's test button: a password typed with a trailing space is otherwise a silent
+/// nothing, discovered days later when an automation doesn't fire.
+pub fn probe(cfg_path: &std::path::Path) -> (bool, String) {
+    let Some(c) = conf(cfg_path) else {
+        return (false, "no broker address, or no station id to publish under".into());
+    };
+    let Some((host, port, tls)) = parse_url(&c.url) else {
+        return (false, "address must start mqtt:// or mqtts:// — a ws:// broker is published by the page instead".into());
+    };
+    let mut opts = MqttOptions::new(format!("weatherdesk-probe-{}", c.station), host, port);
+    opts.set_keep_alive(Duration::from_secs(5));
+    if !c.user.is_empty() {
+        opts.set_credentials(c.user.clone(), c.pass.clone());
+    }
+    if tls {
+        opts.set_transport(rumqttc::Transport::tls_with_default_config());
+    }
+    let (client, mut connection) = Client::new(opts, 8);
+    let _ = client.publish(
+        format!("weatherdesk/{}/status", c.station),
+        QoS::AtLeastOnce,
+        true,
+        "online",
+    );
+    // Wait for the broker to acknowledge the publish, not merely for the socket to open: a
+    // broker that rejects the credentials accepts the TCP connection first.
+    for _ in 0..40 {
+        match connection.recv_timeout(Duration::from_millis(250)) {
+            Ok(Ok(rumqttc::Event::Incoming(rumqttc::Packet::PubAck(_)))) => {
+                let _ = client.disconnect();
+                return (true, format!("published to {}", c.prefix));
+            }
+            Ok(Err(e)) => return (false, err_kind(&e).into()),
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    (false, "no answer from the broker".into())
 }
 
 pub fn start(data_dir: std::path::PathBuf, cfg_path: std::path::PathBuf) {

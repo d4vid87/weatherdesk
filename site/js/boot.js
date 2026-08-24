@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs, setServerAlerts, alertsAreServerSide, every } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -58,9 +58,11 @@ export function mayPush(pulled = rev !== null) {
   return pulled || configured() || !!settings().stationSource;
 }
 
+// Returns the write, so a caller that needs the server to have the new settings before it asks
+// the server anything (the Home Assistant test button) can wait for it.
 function pushConfig() {
-  if (syncing || PUBLIC || !mayPush()) return;
-  fetch(`${SRV}/config`, {
+  if (syncing || PUBLIC || !mayPush()) return Promise.resolve();
+  return fetch(`${SRV}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ _rev: rev ?? 0, at: Date.now(), settings: settings(), layout: load('wd.layout', {}) }),
@@ -136,6 +138,10 @@ function fillDrawer() {
   $('set-clock').value = s.clock24 || 'auto';
   $('set-refresh').value = s.refreshSec;
   $('set-gust').value = s.windGustAlert;
+  $('set-wind-unit').value = s.windUnit || '';
+  // The threshold is a bare number in whatever wind unit is showing, so name that unit next to
+  // it — 30 means something different in knots.
+  $('gust-unit').textContent = U.wind();
   $('set-nearby-radius').value = s.nearbyRadius ?? 0;
   $('set-desk-radar').checked = !!s.deskRadar;
   $('set-eco').value = s.eco || 'auto';
@@ -215,6 +221,95 @@ function renderDiag() {
     })
     .catch(() => { el.innerHTML = ''; });
 }
+
+// Does this install have a server running the alert engine? Asked here rather than in app.js
+// because /diag is a LAN-server route and app.js has no idea whether it is talking to one.
+async function probeServerAlerts() {
+  try {
+    const d = await (await fetch(`${SRV}/diag`, { signal: expires(5000) })).json();
+    setServerAlerts(!!d.alerts?.ok);
+  } catch {
+    setServerAlerts(false);
+  }
+  const el = $('rule-server');
+  if (el) {
+    el.textContent = alertsAreServerSide()
+      ? 'The server is evaluating these rules and sending the pushes, so they keep working with every window closed.'
+      : 'These rules are evaluated by this page, so they only fire while it is open. The desktop app and the Docker image evaluate them on the server instead.';
+  }
+}
+
+// The banner test above exercises the page's own pipe. This one asks the server to send a real
+// notification down every channel that is configured — the credentials never leave it, and what
+// arrives on the phone took exactly the path a 3am wind warning will take.
+$('btn-alert-test').onclick = async () => {
+  const out = $('alert-test-out');
+  out.textContent = 'sending…';
+  try {
+    const r = await (await fetch(`${SRV}/alerts/test`, { signal: expires(30000) })).json();
+    out.textContent = r.sent
+      ? `sent to ${r.channels.join(', ')} — check the phone`
+      : 'nothing to send to: set an ntfy topic, a webhook or a broker above';
+  } catch {
+    out.textContent = 'this build has no server to send from — the page pushes while it is open';
+  }
+};
+
+// The entity picker. Home Assistant ids are typed by hand today, which means a typo shows up
+// three days later as a row that says 404 — and it means opening Home Assistant in another tab
+// to go and read them. The list comes from the server, which is the only thing here holding a
+// token that can ask for it.
+//
+// Read-only, deliberately: this picks what to display. Turning things on and off is Home
+// Assistant's job, and the moment a dashboard on a LAN with no auth can switch a socket, the
+// LAN-trust model this app documents stops being defensible.
+let haEntities = null;
+
+function renderHaPick() {
+  const box = $('ha-pick-list');
+  if (!haEntities) return;
+  const q = $('ha-pick-q').value.trim().toLowerCase();
+  const chosen = new Set($('set-ha-entities').value.split(/[\s,]+/).filter(Boolean));
+  const hits = haEntities
+    .filter((e) => !q || e.id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q))
+    .slice(0, 200);
+  box.innerHTML = hits.length
+    ? hits.map((e, i) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:2px 0">
+        <input type="checkbox" data-ent="${i}"${chosen.has(e.id) ? ' checked' : ''}>
+        <span style="flex:1"></span><span class="muted"></span></label>`).join('')
+    : '<div class="muted" style="font-size:12px">nothing matches</div>';
+  // Names and states are Home Assistant's text, not ours: written in, never interpolated into
+  // markup.
+  box.querySelectorAll('[data-ent]').forEach((cb) => {
+    const e = hits[+cb.dataset.ent];
+    const [name, state] = cb.parentElement.querySelectorAll('span');
+    name.textContent = `${e.name} · ${e.id}`;
+    state.textContent = `${e.state}${e.unit ? ` ${e.unit}` : ''}`;
+    cb.onchange = () => {
+      const set = new Set($('set-ha-entities').value.split(/[\s,]+/).filter(Boolean));
+      if (cb.checked) set.add(e.id); else set.delete(e.id);
+      $('set-ha-entities').value = [...set].join(', ');
+    };
+  });
+}
+
+$('btn-ha-pick').onclick = async () => {
+  const box = $('ha-pick-list');
+  box.innerHTML = '<div class="muted" style="font-size:12px">asking Home Assistant…</div>';
+  // The URL and token have to be on disk before the server can use them.
+  saveSettings({ haUrl: $('set-ha-url').value.trim(), haToken: $('set-ha-token').value.trim() });
+  await pushConfig();
+  try {
+    const j = await (await fetch(`${SRV}/ha/states`, { signal: expires(30000) })).json();
+    if (j.error) { box.innerHTML = `<div class="fail" style="font-size:12px">${j.error}</div>`; return; }
+    haEntities = j.entities;
+    renderHaPick();
+  } catch {
+    box.innerHTML = '<div class="muted" style="font-size:12px">this build has no server to ask — '
+      + 'type the ids from Home Assistant\'s own developer tools</div>';
+  }
+};
+$('ha-pick-q').oninput = renderHaPick;
 
 // A panel's own heading, so the lists read the way the page does. Falls back to the id for a
 // panel that has no heading — better than a blank button.
@@ -323,6 +418,7 @@ $('btn-save').onclick = async () => {
     clock24: $('set-clock').value,
     refreshSec: +$('set-refresh').value || 60,
     windGustAlert: +$('set-gust').value || 30,
+    windUnit: $('set-wind-unit').value,
     nearbyRadius: +$('set-nearby-radius').value || 0,
     deskRadar: $('set-desk-radar').checked,
     eco: $('set-eco').value,
@@ -434,6 +530,29 @@ async function hydrateStation() {
   }
 }
 
+// The wizard has always closed on a saved setting, which is not the same thing as a working
+// station: a console pointed at the wrong address looks identical until the dashboard is empty.
+// Wait for one real number instead, and say what it was.
+async function firstReading(fetcher) {
+  const out = $('wiz-first');
+  out.className = 'muted';
+  out.textContent = 'waiting for the first reading…';
+  for (let i = 0; i < 15; i++) {
+    try {
+      const t = await fetcher();
+      if (t != null) {
+        out.className = 'ok';
+        out.textContent = `${num(t, 1)}${U.temp()} received ✓`;
+        setTimeout(() => { $('wizard').hidden = true; }, 1500);
+        return;
+      }
+    } catch { /* the console may still be mid-upload; the loop is the retry */ }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  out.className = 'fail';
+  out.textContent = 'no reading yet — the dashboard is open behind this; check the console is uploading to the address above';
+}
+
 // --- first run ---
 //
 // The old first run opened the whole settings drawer at someone who had not yet decided to care.
@@ -456,7 +575,7 @@ async function wizardFind() {
       b.onclick = async () => {
         const st = list[+b.dataset.wiz];
         saveSettings({ stationId: String(st.station_id) });
-        $('wizard').hidden = true;
+        firstReading(async () => (await api.stationObs()).obs?.[0]?.air_temperature);
         await hydrateStation();
         refreshAll();
         for (const el of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
@@ -477,6 +596,7 @@ async function wizardFind() {
   sel.innerHTML = $('set-source').innerHTML;
   const target = () => {
     const v = sel.value;
+    $('wiz-wll').hidden = v !== 'wll';
     $('wiz-target').textContent = ['ecowitt', 'ambient', 'wu', 'rtl433'].includes(v)
       ? `Point the console at ${ingestUrl()}`
       : v ? 'Fill in the address or keys under ⚙ Settings once this is closed.' : '';
@@ -497,9 +617,13 @@ async function wizardFind() {
         b.onclick = () => {
           const h = hits[+b.dataset.hit];
           const [lon, lat] = h.geometry.coordinates;
-          saveSettings({ stationSource: sel.value || 'ecowitt', lat, lon, stationName: h.properties.city || h.properties.name || q });
-          $('wizard').hidden = true;
+          saveSettings({
+            stationSource: sel.value || 'ecowitt', lat, lon,
+            stationName: h.properties.city || h.properties.name || q,
+            ...($('wiz-wll-host').value.trim() ? { wllHost: $('wiz-wll-host').value.trim() } : {}),
+          });
           fillDrawer();
+          firstReading(async () => (await api.localObs(1)).obs?.at(-1)?.[api.OBS.temp]);
           refreshAll();
           for (const el of ['tenday', 'alerts', 'story', 'agree-verdict', 'changes', 'verify']) {
             const node = $(el);
@@ -511,15 +635,16 @@ async function wizardFind() {
       $('wiz-place-list').innerHTML = `<div class="fail">${e.message}</div>`;
     }
   };
+  $('btn-wiz-wll').onclick = () => findWll($('wiz-wll-host'), $('wiz-target'));
   $('btn-wiz-place').onclick = find;
   $('wiz-place').onkeydown = (e) => { if (e.key === 'Enter') find(); };
   target();
 }
 
 // The console announces itself over mDNS, and the server is already listening for it — so the
-// address nobody can find on a router page is one button away.
-$('btn-find-wll').onclick = async () => {
-  const out = $('wll-found');
+// address nobody can find on a router page is one button away. Both the wizard and the settings
+// drawer ask the same question, so they ask it through one function.
+async function findWll(input, out) {
   out.textContent = 'looking…';
   try {
     const hits = await (await fetch(`${SRV}/discover/wll`, { signal: expires(6000) })).json();
@@ -527,10 +652,37 @@ $('btn-find-wll').onclick = async () => {
       out.textContent = 'nothing announced itself — type the address from the WeatherLink app';
       return;
     }
-    $('set-wll').value = hits[0].host;
+    input.value = hits[0].host;
     out.textContent = hits.length === 1 ? `found ${hits[0].name}` : `found ${hits.length}, using ${hits[0].name}`;
   } catch {
     out.textContent = 'this build has no server to ask — type the address instead';
+  }
+}
+$('btn-find-wll').onclick = () => findWll($('set-wll'), $('wll-found'));
+
+// Save first, then ask the server to try both for real: the credentials it tests are the ones
+// on disk, and a password typed with a trailing space is otherwise a silent nothing found days
+// later when an automation doesn't fire. The token never comes back to this page.
+$('btn-ha-test').onclick = async () => {
+  const out = $('ha-test-out');
+  out.textContent = 'saving and testing…';
+  // The server tests what is on disk, so these five boxes have to get there first. Save proper
+  // would close the drawer, which is where the answer is about to appear.
+  saveSettings({
+    mqttUrl: $('set-mqtt-url').value.trim(),
+    mqttUser: $('set-mqtt-user').value.trim(),
+    mqttPass: $('set-mqtt-pass').value,
+    haDiscoveryPrefix: $('set-ha-prefix').value.trim(),
+    haUrl: $('set-ha-url').value.trim(),
+    haToken: $('set-ha-token').value.trim(),
+  });
+  await pushConfig();
+  try {
+    const r = await (await fetch(`${SRV}/ha/test`, { signal: expires(30000) })).json();
+    const line = (name, x) => `<div class="${x.ok ? 'ok' : 'fail'}">${name}: ${x.what}</div>`;
+    out.innerHTML = line('broker', r.mqtt) + line('Home Assistant', r.ha);
+  } catch {
+    out.textContent = 'this build has no server to test with — publishing runs in the page instead';
   }
 };
 
@@ -693,6 +845,42 @@ $('btn-edit').onclick = () => {
   if (editing()) { openDrawer(false); loadDeskRadar(); }
 };
 applyEdit();
+
+// Shipped starting points. A preset is not a saved layout: it says which panels a screen is for
+// and in what order, and deliberately carries no widths or heights — those belong to the screen
+// they were dragged on, not to a name shipped in the source.
+const PRESETS = {
+  'Wall landscape': ['hero', 'radar', 'gauges', 'daycards', 'alerts', 'ticker'],
+  'Kitchen portrait': ['hero', 'daycards', 'alerts', 'tenday'],
+  'E-ink': ['hero', 'tenday', 'alerts', 'changes'],
+};
+
+// Gauge faces, and the Data and Signals cards, are inside panels of their own — a preset that
+// hid them would empty the gauges block and both other tabs along with it.
+const isDeskPanel = (id) => !/^(g-|data-|sig-)/.test(id);
+
+function applyPreset(name) {
+  const keep = PRESETS[name].slice();
+  // The Desk grid is a panel holding panels: keeping a card inside it while hiding it would show
+  // nothing at all.
+  if (keep.some((id) => document.querySelector(`#desk-grid > [data-panel="${id}"]`))) keep.push('desk-grid');
+  const st = {};
+  for (const id of panelIds().filter(isDeskPanel)) {
+    const i = keep.indexOf(id);
+    if (i === -1) st[id] = { hidden: true };
+    else st[id] = { order: i };
+  }
+  restore(st);
+  renderHiddenPanels();
+  notify({ title: `${name} layout applied`, body: 'Everything else is under Hidden panels in Settings.' });
+}
+
+$('preset-row').innerHTML = Object.keys(PRESETS).map((n, i) => `<button data-preset="${i}"></button>`).join('');
+$('preset-row').querySelectorAll('[data-preset]').forEach((b) => {
+  const n = Object.keys(PRESETS)[+b.dataset.preset];
+  b.textContent = n;
+  b.onclick = () => applyPreset(n);
+});
 
 const layouts = () => load('wd.layouts', {});
 
@@ -1042,6 +1230,7 @@ if (!hasSource() && !PUBLIC) {
 hydrateStation().then(() => {
   loadDeskRadar();
   initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initUdp(); initHome();
+  every('server-alerts', 300, probeServerAlerts);
 });
 
 // ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.
@@ -1070,6 +1259,20 @@ if (location.search.includes('selftest')) {
     === '06092, Simsbury, Connecticut, United States', 'geocode label keeps the town');
   console.assert(api.placeLabel({ name: 'Simsbury', city: 'Simsbury', state: 'Connecticut' })
     === 'Simsbury, Connecticut', 'geocode label does not repeat the town');
+
+  // Wind override: six files used to carry their own m/s factor. One knot is 1.94384 m/s, and
+  // the label has to move with the number or the dashboard lies twice.
+  {
+    const held = settings().windUnit;
+    saveSettings({ windUnit: 'kt' });
+    console.assert(U.wind() === 'kt', 'wind override: label follows the setting');
+    console.assert(Math.abs(msToWind(10) - 19.4384) < 1e-3, 'wind override: m/s to knots');
+    console.assert(Math.abs(windToMs(msToWind(7)) - 7) < 1e-9, 'wind override: round trip');
+    saveSettings({ windUnit: '' });
+    console.assert(U.wind() === (settings().units === 'metric' ? 'km/h' : 'mph'),
+      'wind override: empty follows the master switch');
+    saveSettings({ windUnit: held });
+  }
 
   // The fetch deadline every screen depends on, on the browsers that have no AbortSignal.timeout.
   const sig = expires(50);
