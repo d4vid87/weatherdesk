@@ -58,9 +58,11 @@ export function mayPush(pulled = rev !== null) {
   return pulled || configured() || !!settings().stationSource;
 }
 
+// Returns the write, so a caller that needs the server to have the new settings before it asks
+// the server anything (the Home Assistant test button) can wait for it.
 function pushConfig() {
-  if (syncing || PUBLIC || !mayPush()) return;
-  fetch(`${SRV}/config`, {
+  if (syncing || PUBLIC || !mayPush()) return Promise.resolve();
+  return fetch(`${SRV}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ _rev: rev ?? 0, at: Date.now(), settings: settings(), layout: load('wd.layout', {}) }),
@@ -531,6 +533,32 @@ $('btn-find-wll').onclick = async () => {
     out.textContent = hits.length === 1 ? `found ${hits[0].name}` : `found ${hits.length}, using ${hits[0].name}`;
   } catch {
     out.textContent = 'this build has no server to ask — type the address instead';
+  }
+};
+
+// Save first, then ask the server to try both for real: the credentials it tests are the ones
+// on disk, and a password typed with a trailing space is otherwise a silent nothing found days
+// later when an automation doesn't fire. The token never comes back to this page.
+$('btn-ha-test').onclick = async () => {
+  const out = $('ha-test-out');
+  out.textContent = 'saving and testing…';
+  // The server tests what is on disk, so these five boxes have to get there first. Save proper
+  // would close the drawer, which is where the answer is about to appear.
+  saveSettings({
+    mqttUrl: $('set-mqtt-url').value.trim(),
+    mqttUser: $('set-mqtt-user').value.trim(),
+    mqttPass: $('set-mqtt-pass').value,
+    haDiscoveryPrefix: $('set-ha-prefix').value.trim(),
+    haUrl: $('set-ha-url').value.trim(),
+    haToken: $('set-ha-token').value.trim(),
+  });
+  await pushConfig();
+  try {
+    const r = await (await fetch(`${SRV}/ha/test`, { signal: expires(30000) })).json();
+    const line = (name, x) => `<div class="${x.ok ? 'ok' : 'fail'}">${name}: ${x.what}</div>`;
+    out.innerHTML = line('broker', r.mqtt) + line('Home Assistant', r.ha);
+  } catch {
+    out.textContent = 'this build has no server to test with — publishing runs in the page instead';
   }
 };
 

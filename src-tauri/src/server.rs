@@ -361,6 +361,9 @@ fn handle(state: &Arc<State>, mut req: Request) {
         // WeatherLink Live consoles seen on the LAN, for the wizard's find button. Names and
         // addresses of hardware on this network only — nothing here that isn't already visible
         // to anything else plugged into it.
+        // Try the broker and Home Assistant for real, and report in words. The credentials stay
+        // in this process — the page never holds the token to make this call.
+        "/ha/test" => json(crate::api::test_smart_home(&state.cfg_path)),
         "/discover/wll" => {
             let hosts = crate::discover::wll_hosts();
             json(serde_json::json!(hosts

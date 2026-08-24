@@ -997,7 +997,12 @@
       formatted for them automatically. Alerts are sent as title, body and category only — never your token.
       An ntfy.sh topic is public to anyone who guesses it, so make it long.</p>
 
-    <h2 style="font-size:13px;margin-top:18px">Smart home</h2>
+    <h2 style="font-size:13px;margin-top:18px">Home Assistant</h2>
+    <p class="muted" style="font-size:12px">Two halves, either useful on its own: the station is
+      published to your broker and appears in Home Assistant on its own, and a few Home Assistant
+      entities can be read back onto the Signals tab.</p>
+
+    <h3 style="font-size:12px;margin:12px 0 0">Publish the station</h3>
     <label>MQTT broker</label><input id="set-mqtt-url" placeholder="mqtt://homeassistant.local:1883">
     <p class="muted" style="font-size:12px">The desktop and Docker builds speak plain MQTT
       (<code>mqtt://</code> or <code>mqtts://</code>) and keep publishing with every tab closed,
@@ -1005,13 +1010,20 @@
       instead, and only while it is open.</p>
     <label>MQTT username</label><input id="set-mqtt-user" autocomplete="off">
     <label>MQTT password</label><input id="set-mqtt-pass" type="password" autocomplete="off">
-    <label>Broker topics to show (one per line: topic | label | unit)</label>
-    <textarea id="set-mqtt-subs" rows="3" placeholder="home/greenhouse/temp | Greenhouse | °F"
-      style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
     <label>Discovery prefix</label><input id="set-ha-prefix" placeholder="homeassistant">
+    <p class="muted" style="font-size:12px">Leave this alone unless you changed it in Home
+      Assistant's own MQTT settings first.</p>
+
+    <h3 style="font-size:12px;margin:12px 0 0">Read entities back</h3>
     <label>Home Assistant URL</label><input id="set-ha-url" placeholder="http://homeassistant.local:8123">
     <label>Home Assistant token</label><input id="set-ha-token" type="password" placeholder="long-lived access token">
     <label>Entities to show</label><input id="set-ha-entities" placeholder="light.porch, sensor.attic_temp">
+    <label>Broker topics to show (one per line: topic | label | unit)</label>
+    <textarea id="set-mqtt-subs" rows="3" placeholder="home/greenhouse/temp | Greenhouse | °F"
+      style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
+
+    <button id="btn-ha-test" class="ghost" style="margin-top:10px">Test both</button>
+    <div id="ha-test-out" class="muted" style="font-size:12px;margin-top:6px"></div>
 
     <!-- Help. Plain <details> and no script: this is the manual people asked for, and it has to
          still be readable on an install whose JavaScript is having a bad day. Keep in step with

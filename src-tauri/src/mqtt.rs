@@ -354,6 +354,47 @@ fn err_kind(e: &rumqttc::ConnectionError) -> &'static str {
     }
 }
 
+/// Connect to the configured broker, publish one retained value, and say what happened. The
+/// settings drawer's test button: a password typed with a trailing space is otherwise a silent
+/// nothing, discovered days later when an automation doesn't fire.
+pub fn probe(cfg_path: &std::path::Path) -> (bool, String) {
+    let Some(c) = conf(cfg_path) else {
+        return (false, "no broker address, or no station id to publish under".into());
+    };
+    let Some((host, port, tls)) = parse_url(&c.url) else {
+        return (false, "address must start mqtt:// or mqtts:// — a ws:// broker is published by the page instead".into());
+    };
+    let mut opts = MqttOptions::new(format!("weatherdesk-probe-{}", c.station), host, port);
+    opts.set_keep_alive(Duration::from_secs(5));
+    if !c.user.is_empty() {
+        opts.set_credentials(c.user.clone(), c.pass.clone());
+    }
+    if tls {
+        opts.set_transport(rumqttc::Transport::tls_with_default_config());
+    }
+    let (client, mut connection) = Client::new(opts, 8);
+    let _ = client.publish(
+        format!("weatherdesk/{}/status", c.station),
+        QoS::AtLeastOnce,
+        true,
+        "online",
+    );
+    // Wait for the broker to acknowledge the publish, not merely for the socket to open: a
+    // broker that rejects the credentials accepts the TCP connection first.
+    for _ in 0..40 {
+        match connection.recv_timeout(Duration::from_millis(250)) {
+            Ok(Ok(rumqttc::Event::Incoming(rumqttc::Packet::PubAck(_)))) => {
+                let _ = client.disconnect();
+                return (true, format!("published to {}", c.prefix));
+            }
+            Ok(Err(e)) => return (false, err_kind(&e).into()),
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    (false, "no answer from the broker".into())
+}
+
 pub fn start(data_dir: std::path::PathBuf, cfg_path: std::path::PathBuf) {
     std::thread::spawn(move || loop {
         match conf(&cfg_path) {

@@ -132,6 +132,37 @@ pub fn snapshot(state: &Arc<State>) -> String {
     body.to_string()
 }
 
+/// Both halves of the smart-home setup, tried for real: the broker we publish to, and the Home
+/// Assistant we read entities back from. The token never leaves this process — that is the whole
+/// reason this lives here rather than in a fetch from the drawer.
+pub fn test_smart_home(cfg: &std::path::Path) -> String {
+    let (mqtt_ok, mqtt_says) = crate::mqtt::probe(cfg);
+    let get = |k: &str| crate::setting(cfg, k).unwrap_or_default().trim_matches('"').to_string();
+    let (url, token) = (get("haUrl"), get("haToken"));
+    let (ha_ok, ha_says) = if url.is_empty() {
+        (false, "no Home Assistant URL set".to_string())
+    } else {
+        let base = url.trim_end_matches('/');
+        match ureq::get(&format!("{base}/api/"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .timeout(Duration::from_secs(10))
+            .call()
+        {
+            Ok(_) => (true, "connected".to_string()),
+            // The status code, never the error body: a Home Assistant error page can echo the
+            // request, and the request carries the token.
+            Err(ureq::Error::Status(401 | 403, _)) => (false, "token rejected".to_string()),
+            Err(ureq::Error::Status(code, _)) => (false, format!("HTTP {code}")),
+            Err(_) => (false, "no answer".to_string()),
+        }
+    };
+    serde_json::json!({
+        "mqtt": { "ok": mqtt_ok, "what": mqtt_says },
+        "ha": { "ok": ha_ok, "what": ha_says },
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
