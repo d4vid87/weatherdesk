@@ -969,9 +969,14 @@
       <label><input type="checkbox" data-cat="rule"> My alert rules</label>
       <label><input type="checkbox" data-cat="station"> Station health</label>
     </div>
-    <div class="row"><button id="btn-notif-test">Test notifications</button></div>
+    <div class="row">
+      <button id="btn-notif-test">Test banners</button>
+      <button id="btn-alert-test">Test push channels</button>
+    </div>
+    <div id="alert-test-out" class="muted" style="font-size:12px"></div>
 
     <h2 style="font-size:13px;margin-top:18px">Alert rules</h2>
+    <p id="rule-server" class="muted" style="font-size:12px"></p>
     <div id="rule-list"></div>
     <div class="row" style="margin-top:6px">
       <select id="rule-metric"></select>

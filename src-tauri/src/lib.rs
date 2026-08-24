@@ -9,6 +9,7 @@
 // the Docker image, a dashboard for a house with no desktop in it.
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod alerts;
 pub mod api;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod cwop;
@@ -76,6 +77,7 @@ pub fn start_services(data_dir: PathBuf, cfg_path: PathBuf) -> (std::sync::Arc<s
     cwop::start_relay(state.data_dir.clone(), state.cfg_path.clone());
     ingest::start_pollers(state.clone());
     mqtt::start(state.data_dir.clone(), state.cfg_path.clone());
+    alerts::start(state.data_dir.clone(), state.cfg_path.clone());
     let port = server::serve(state.clone(), want);
     discover::start(port);
     (state, port)

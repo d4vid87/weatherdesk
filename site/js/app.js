@@ -288,7 +288,16 @@ function webNative({ category, title, body }) {
 // Security: the payloads carry the title, the body and the category and nothing else. The
 // Tempest token, the broker password and the station ID are deliberately absent — ntfy.sh is a
 // public relay by default and a webhook goes wherever the user pointed it.
+// The server runs the same rules engine and the same NWS poll (src-tauri/src/alerts.rs), and it
+// runs them whether or not a browser is open — which is the whole point. When it is doing that,
+// this page must not push as well: one ntfy topic and two engines means every alert arrives
+// twice, and the second copy always looks like a bug in the first.
+let serverAlerts = false;
+export const setServerAlerts = (on) => { serverAlerts = on; };
+export const alertsAreServerSide = () => serverAlerts;
+
 function push({ category, title, body }) {
+  if (serverAlerts) return;
   const s = _settings;
   if (s.ntfyTopic) {
     fetch(`${s.ntfyUrl || 'https://ntfy.sh'}/${encodeURIComponent(s.ntfyTopic)}`, {

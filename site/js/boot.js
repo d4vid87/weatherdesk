@@ -1,5 +1,5 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs, setServerAlerts, alertsAreServerSide, every } from './app.js';
 import * as api from './api.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
@@ -221,6 +221,39 @@ function renderDiag() {
     })
     .catch(() => { el.innerHTML = ''; });
 }
+
+// Does this install have a server running the alert engine? Asked here rather than in app.js
+// because /diag is a LAN-server route and app.js has no idea whether it is talking to one.
+async function probeServerAlerts() {
+  try {
+    const d = await (await fetch(`${SRV}/diag`, { signal: expires(5000) })).json();
+    setServerAlerts(!!d.alerts?.ok);
+  } catch {
+    setServerAlerts(false);
+  }
+  const el = $('rule-server');
+  if (el) {
+    el.textContent = alertsAreServerSide()
+      ? 'The server is evaluating these rules and sending the pushes, so they keep working with every window closed.'
+      : 'These rules are evaluated by this page, so they only fire while it is open. The desktop app and the Docker image evaluate them on the server instead.';
+  }
+}
+
+// The banner test above exercises the page's own pipe. This one asks the server to send a real
+// notification down every channel that is configured — the credentials never leave it, and what
+// arrives on the phone took exactly the path a 3am wind warning will take.
+$('btn-alert-test').onclick = async () => {
+  const out = $('alert-test-out');
+  out.textContent = 'sending…';
+  try {
+    const r = await (await fetch(`${SRV}/alerts/test`, { signal: expires(30000) })).json();
+    out.textContent = r.sent
+      ? `sent to ${r.channels.join(', ')} — check the phone`
+      : 'nothing to send to: set an ntfy topic, a webhook or a broker above';
+  } catch {
+    out.textContent = 'this build has no server to send from — the page pushes while it is open';
+  }
+};
 
 // A panel's own heading, so the lists read the way the page does. Falls back to the id for a
 // panel that has no heading — better than a blank button.
@@ -1141,6 +1174,7 @@ if (!hasSource() && !PUBLIC) {
 hydrateStation().then(() => {
   loadDeskRadar();
   initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initUdp(); initHome();
+  every('server-alerts', 300, probeServerAlerts);
 });
 
 // ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.
