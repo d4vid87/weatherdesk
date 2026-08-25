@@ -208,6 +208,10 @@
      taken apart panel by panel and never moved as a unit. */
   .grip-group { left: 5px; right: auto; }
   .grip-hide.grip-group { left: 40px; right: auto; }
+  /* Top left is also where the group's first panel prints its title, so the two furniture chips
+     sat on the word — "Lightning" read "ght-x-ing". The group gets a strip of its own for as long
+     as the furniture is showing, the same way editing mode gives every panel one. */
+  body:not(.layout-locked) [data-panel]:has(> .grip-group) { padding-top: 34px; }
   .panel-hidden { display: none; }
   /* controls that only mean something at phone width; the phone media query switches them on,
      so this has to sit above it — same specificity, and the later rule wins. */
@@ -239,7 +243,9 @@
   .rz:hover, .rz:active { opacity: .95 !important; }
   body.resizing iframe { pointer-events: none; }
   body.resizing { user-select: none; }
-  @media (hover: none) {
+  /* a finger, not a mouse — some desktop webviews report `hover: none` on their own, and this
+     bump is only wanted where there is no cursor to reveal the handles. */
+  @media (hover: none) and (pointer: coarse) {
     .grip { opacity: .85; }
     .rz { opacity: .4; }
   }
@@ -363,6 +369,15 @@
   .daycard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
   .dc-head { display: flex; justify-content: space-between; font-size: 14px; }
   .dc-head span:last-child { color: var(--muted); }
+  /* the panel's own grip and hide button land on the right end of this row, where the date is */
+  body:not(.layout-locked) .dc-head { padding-right: 68px; }
+  /* same corner, same collision: the ticker's pause button and the third trend column both run
+     under the furniture. */
+  body:not(.layout-locked) #ticker, body:not(.layout-locked) #trends { padding-right: 68px; }
+  /* and a long panel title runs straight under them — "24h wind (mph) — gust and lull" ended
+     underneath the grip on every chart in Data. */
+  body:not(.layout-locked) [data-panel] > h2,
+  body:not(.layout-locked) [data-panel] > h3 { padding-right: 68px; }
   .dc-body { position: relative; height: 128px; display: flex; align-items: center; justify-content: center; }
   .daysvg { position: absolute; inset: 0; margin: auto; width: 128px; height: 128px; }
   .dc-mid { position: relative; text-align: center; }
