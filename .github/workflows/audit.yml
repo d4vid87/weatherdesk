@@ -1,0 +1,32 @@
+name: audit
+
+# Advisories against the locked dependency tree. Scoped to `check advisories` on purpose: a full
+# `cargo deny check` also wants a licence allowlist for ~700 crates, which is a separate job of work.
+#
+# The weekly run is the point of this workflow. A new advisory against a lockfile that nobody has
+# touched arrives with no pull request attached, so a PR-only trigger would never see it.
+on:
+  pull_request:
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/deny.toml"
+      - ".github/workflows/audit.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories
