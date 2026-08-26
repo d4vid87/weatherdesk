@@ -8,12 +8,12 @@ Underground-protocol console all work; with no station at all it runs on a forec
 name. Vanilla JS, native ES modules, no build step, no framework, no chart library, no backend —
 every call goes browser-direct to a free public API.
 
-Radar comes from [Hook Echo-WX](https://github.com/d4vid87/hookecho) — my own NEXRAD viewer,
+Radar comes from [HookEcho](https://hookecho.io/) — my own NEXRAD viewer,
 embedded here and centered on the station.
 
 ![A ten second walkthrough: pasting a Tempest token into the first-run wizard and picking a station,
 the Desk filling in with live temperature, seven day cards and dial gauges, an NWS warning polygon
-with its full text, the national radar mosaic, then Hook Echo-WX zoomed on a storm cell](docs/hero-3.0.5.gif)
+with its full text, the national radar mosaic, then HookEcho zoomed on a storm cell](docs/hero-3.0.5.gif)
 
 ![The full Desk: sky hero at 106° Clear, station-vs-model and temperature and pressure trend panels,
 a 48h forecast chart with rain dots and wind barbs, six day cards, dial gauges for wind, rain,
@@ -21,7 +21,7 @@ humidity, pressure, dew point, UV, lightning and wet bulb, then the 10-day, aler
 weather story and model agreement across GFS, ECMWF, ICON and GEM](docs/weatherdeskgauges.png)
 
 ![The Desk on a wide screen: sky hero reading 106° Clear against a 93° normal, a row of Reality
-signals comparing the station with the models, and Hook Echo-WX filling the page with the national
+signals comparing the station with the models, and HookEcho filling the page with the national
 MRMS mosaic — every radar product listed down the left, 67 active alerts, LIVE playback along the
 bottom](docs/screenshot-national.png)
 
@@ -34,9 +34,9 @@ bottom](docs/screenshot-national.png)
   forecast changes, forecast accuracy, air quality, sun & moon detail (golden hour, day-length
   change, moonrise/set), fire weather & dryness, and station health (battery, signal, sensor
   faults, time since the last report).
-- **Forecast Lab** — radar, embedded from [Hook Echo-WX](https://hookecho.pages.dev/).
+- **Forecast Lab** — radar, embedded from [HookEcho](https://hookecho.io/).
 
-The Desk radar loads itself, in Hook Echo's embedded mode: no chrome, and one frame a minute until
+The Desk radar loads itself, in HookEcho's embedded mode: no chrome, and one frame a minute until
 you touch it. That matters because a live radar loop repaints ten times a second, and the WebKit
 webview the desktop app uses on Linux and macOS redraws the whole Desk on every one of those
 frames — enough to saturate a CPU core. Touch the map and it animates normally; the Forecast Lab
@@ -154,7 +154,7 @@ the layout it writes is the shared one, so a panel moved on the phone moves on t
 | The same, straight off the hub's LAN broadcast (desktop app only) | UDP `50222` |
 | Watches and warnings, gridpoint forecast | `api.weather.gov` |
 | Multi-model agreement, 15-minute nowcast, AQI | `api.open-meteo.com` |
-| Radar | [Hook Echo-WX](https://github.com/d4vid87/hookecho) at `hookecho.pages.dev` |
+| Radar | [HookEcho](https://hookecho.io/) at `hookecho.pages.dev` |
 | Place search | `photon.komoot.io` |
 | Other brands of station (see below) | your own LAN, `rt.ambientweather.net` |
 

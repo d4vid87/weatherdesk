@@ -1020,12 +1020,12 @@ window.addEventListener('wd:refresh', () => {
   refreshSignals().catch(() => {});
 });
 
-// Hook Echo-WX (own NEXRAD viewer) instead of the weathermap build. Deep link is
+// HookEcho (own NEXRAD viewer) instead of the weathermap build. Deep link is
 // `#goto=SITE,lon,lat,zoom[,extras]` — note lon before lat, and unknown extras are ignored by
 // older builds, so adding to this string can never break a deployed viewer.
 const RADAR = 'https://hookecho.pages.dev/';
 
-// The NEXRAD + TDWR registry, generated from Hook Echo's own site table
+// The NEXRAD + TDWR registry, generated from HookEcho's own site table
 // (`cargo run -p wxdata --example sites_json`). Frozen data — a live endpoint would be coupling
 // for nothing.
 let SITES = [];
@@ -1057,7 +1057,7 @@ function radarSite() {
   return n ? n.id : '';
 }
 
-// Hook Echo's own localStorage is partitioned (or dropped) inside our cross-origin iframe, so it
+// HookEcho's own localStorage is partitioned (or dropped) inside our cross-origin iframe, so it
 // cannot remember anything for us — the saved view lives here and rides in on the deep link.
 // That is what stops the site and the camera resetting on every launch.
 export function radarUrl(zoom, embed = true) {
@@ -1067,7 +1067,7 @@ export function radarUrl(zoom, embed = true) {
   if (lat == null && !site) return RADAR;
   const extras = v
     ? [v.moment, v.tilt, `bm:${v.basemap}`, v.srv ? 'srv' : ''].filter(Boolean).join(',')
-    // First load, before the viewer has posted a camera back: Hook Echo's localStorage is
+    // First load, before the viewer has posted a camera back: HookEcho's localStorage is
     // partitioned in our iframe (see above), so without this it opens on whatever its compiled-in
     // default is. Streets orients a first-time viewer fastest; any pick they make sticks via
     // wd.radar and wins from then on.
