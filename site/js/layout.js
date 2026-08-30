@@ -32,7 +32,43 @@ const $ = (id) => document.getElementById(id);
 // here on, and pointer deltas are divided back into layout pixels.
 const zoom = () => +getComputedStyle(document.documentElement).zoom || 1;
 
-const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
+// The designed first-run arrangement, tuned for a desktop window (~1400x900): now (hero), the
+// detail behind now (gauges), the next few days (daycards), then the map. The desk grid keeps
+// the core four visible; everything speculative starts hidden, one grip-click away. `severe`,
+// `winter` and `tropical` are absent on purpose: their cards are display:none until their
+// weather exists, and a hidden flag here would keep them hidden when it does. `alerts` stays
+// visible, so nothing safety-relevant is off-screen.
+// DEFAULT is data, not code: to redesign it, drag the dashboard into shape and copy
+// `snapshot()` out of the console.
+export const DEFAULT = {
+  hero: { order: 0 },
+  gauges: { order: 1 },
+  daycards: { order: 2 },
+  radar: { order: 3 },
+  'desk-grid': { order: 4 },
+  ticker: { order: 5 },
+  ha: { order: 6 },
+  tenday: { order: 0 },
+  alerts: { order: 1 },
+  sky: { order: 2 },
+  nearby: { order: 3 },
+  story: { hidden: true },
+  agree: { hidden: true },
+  changes: { hidden: true },
+  verify: { hidden: true },
+  solar: { hidden: true },
+  fire: { hidden: true },
+  health: { hidden: true },
+  aqi: { hidden: true },
+  lastyear: { hidden: true },
+};
+
+// A missing key seeds DEFAULT; a corrupt blob heals through dropImpossibleHeights instead of
+// silently discarding a working arrangement.
+const load = () => {
+  if (localStorage.getItem(KEY) == null) return structuredClone(DEFAULT);
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
+};
 
 // A height taller than the window can only have come from the bug above — a drag that grew a
 // panel past the bottom of the screen would have had to leave the window to do it. Dropping those
@@ -413,8 +449,8 @@ export function restore(next) {
 }
 
 export function resetLayout() {
-  restore({});
-  localStorage.removeItem(KEY);
+  // The designed arrangement, not raw markup order.
+  restore(DEFAULT);
 }
 
 export function initLayout() {
@@ -499,6 +535,12 @@ if (location.search.includes('selftest')) {
   console.assert(Math.abs(zoom() - 1.5) < 1e-6, 'layout: zoom() reads the root zoom');
   document.documentElement.style.zoom = was;
   probe.remove();
+
+  // every DEFAULT key is a real panel, so a rename cannot silently drop out of the default
+  const ids = new Set(panelIds());
+  for (const k of Object.keys(DEFAULT)) {
+    console.assert(ids.size === 0 || ids.has(k), `layout: DEFAULT names a real panel (${k})`);
+  }
 
   state = JSON.parse(before);
   save(); // the hide/unhide asserts wrote through to storage — put the real layout back

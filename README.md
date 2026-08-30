@@ -295,7 +295,11 @@ tab don't share settings.
 Grab the installer for your OS from [Releases](https://github.com/d4vid87/weatherdesk/releases) and
 double-click it. What changed in each version is in [CHANGELOG.md](CHANGELOG.md). The app opens in its own window *and* serves the same dashboard to the rest of your
 network on port 8088 — the wall tablet just opens the URL shown in the window title. Nothing else to
-install; leave the app running.
+install; leave the app running. On Linux, the `.AppImage` runs on any distro and is the build
+the in-app updater can update in place; the `.deb` updates through `apt` instead.
+
+Already running [WeeWX](https://weewx.com)? It can feed WeatherDesk with a five-line config
+stanza — see [docs/weewx.md](docs/weewx.md).
 
 **One config for the whole house.** The desktop app also keeps your settings and dashboard layout
 on the host computer. Any browser that opens the LAN URL loads that configuration — no re-typing the

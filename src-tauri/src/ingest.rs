@@ -631,6 +631,14 @@ mod tests {
     const WU: &str = "/weatherstation/updateweatherstation.php?ID=KXX1&PASSWORD=x&dateutc=now\
         &tempf=77.0&humidity=55&winddir=180&windspeedmph=10.0&windgustmph=20.0&baromin=29.92&dailyrainin=0.10";
 
+    /// And as WeeWX's Wunderground uploader sends it — same protocol, WeeWX's field set and
+    /// softwaretype tag. Feeding WeatherDesk from WeeWX is docs/weewx.md, and this is the
+    /// assertion behind it.
+    const WEEWX: &str = "/weatherstation/updateweatherstation.php?ID=anything&PASSWORD=anything\
+        &dateutc=2026-08-19+14%3A30%3A00&tempf=77.0&humidity=55&dewptf=60.5&winddir=180\
+        &windspeedmph=10.0&windgustmph=20.0&baromin=29.92&rainin=0.02&dailyrainin=0.10\
+        &solarradiation=812.4&UV=7&softwaretype=weewx-5.0.2&action=updateraw";
+
     fn build(url: &str, body: &str) -> Vec<Option<f64>> {
         let f = collect(url, body);
         let mut m = Mem::default();
@@ -664,6 +672,19 @@ mod tests {
     fn absolute_pressure_wins_over_relative() {
         let t = build("/ingest", ECOWITT);
         assert!(close(t[6], 1013.21), "took the sea-level figure: {:?}", t[6]);
+    }
+
+    #[test]
+    fn weewx_wu_uploader_lands_in_the_right_slots() {
+        let t = build("/weatherstation/updateweatherstation.php", WEEWX);
+        assert!(close(t[7], 25.0), "77 F is 25 C, got {:?}", t[7]);
+        assert!(close(t[8], 55.0));
+        assert!(close(t[2], 4.4704));
+        assert!(close(t[3], 8.9408));
+        assert!(close(t[4], 180.0));
+        assert!(close(t[6], 1013.21), "29.92 inHg in mb, got {:?}", t[6]);
+        assert!(close(t[11], 812.4));
+        assert!(close(t[18], 2.54), "0.10 in of daily rain is 2.54 mm, got {:?}", t[18]);
     }
 
     #[test]

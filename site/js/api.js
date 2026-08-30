@@ -163,7 +163,8 @@ export async function localObs(hours = 3) {
 // of open-meteo, which this app already leans on for six other panels, and every consumer stays
 // unaware. See `shapeOm`.
 export function betterForecast(stationId = settings().stationId) {
-  if (!settings().token) return omForecast();
+  // A non-Tempest source routes to open-meteo even if a stale token survives in the config (#37).
+  if (!settings().token || settings().stationSource) return omForecast();
   return getJSON(`${SWD}/better_forecast?${qs({
     station_id: stationId, token: settings().token, ...unitParams(),
   })}`);

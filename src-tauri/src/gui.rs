@@ -38,6 +38,12 @@ async fn updater_check(app: tauri::AppHandle) -> Result<Option<String>, String> 
     if std::path::Path::new("/.flatpak-info").exists() {
         return Ok(None);
     }
+    // On Linux the updater plugin can only install an AppImage. A .deb (or anything else)
+    // install has no $APPIMAGE, so be honest instead of offering an install that cannot work.
+    #[cfg(target_os = "linux")]
+    if std::env::var("APPIMAGE").is_err() {
+        return Err("updates for this install come through your package manager (apt upgrade weather-desk), not the in-app updater".into());
+    }
     let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
     Ok(update.map(|u| u.version))
 }
@@ -46,6 +52,10 @@ async fn updater_check(app: tauri::AppHandle) -> Result<Option<String>, String> 
 #[tauri::command]
 async fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
+    #[cfg(target_os = "linux")]
+    if std::env::var("APPIMAGE").is_err() {
+        return Err("updates for this install come through your package manager (apt upgrade weather-desk), not the in-app updater".into());
+    }
     let update = app
         .updater()
         .map_err(|e| e.to_string())?

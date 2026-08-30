@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WeatherDesk",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "identifier": "io.github.davidmay87.weatherdesk",
   "build": {
     "frontendDist": "../site"
@@ -17,6 +17,7 @@
     "active": true,
     "targets": [
       "deb",
+      "appimage",
       "msi",
       "nsis",
       "app",

@@ -8,6 +8,34 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-08-30
+
+### Added
+- **A Linux AppImage, and with it a Linux updater that actually works.** The in-app updater can
+  only install an AppImage on Linux, and no release shipped one — every "check for updates"
+  click on Linux was a path that could not complete. x86_64 releases now bundle an AppImage and
+  `latest.json` points the updater at it. On a `.deb` (or any non-AppImage) install the updater
+  now says to update through the package manager instead of failing.
+- **A designed default layout.** A fresh install, a new browser and the reset button all land on
+  a designed arrangement — current conditions, gauges, day cards, radar, then the core four
+  cards — instead of raw markup order. Saved arrangements still win; only the starting point
+  changed.
+- **`--version` and `--check`.** `weatherdesk --check` asks the running server for its source
+  and the age of the last reading, and exits non-zero if nothing has landed — a headless Pi
+  install no longer needs a browser to be verified.
+- **WeeWX, documented.** WeeWX's Weather Underground uploader pointed at
+  `/updateweatherstation.php` feeds WeatherDesk today; [docs/weewx.md](docs/weewx.md) has the
+  five-line stanza (#47).
+
+### Fixed
+- **Switching station brands now really leaves Tempest behind (#37).** Choosing a non-Tempest
+  brand cleared the device ID but left the token and station ID, so the forecast kept coming
+  from WeatherFlow. All three are cleared on a brand switch, and the forecast routes to
+  open-meteo whenever a non-Tempest source is set, even over a stale token.
+- **A public Tempest station that returns 401 says why (#38).** WeatherFlow only serves a
+  station's data to its owner's token; the wizard and diagnostics now say so where the ID was
+  typed, instead of a bare 401.
+
 ### Security
 - **The `rustls-webpki` advisory in our dependency tree is not reachable from WeatherDesk, and there
   is now a written record of why.** The affected 0.102.8 comes in twice, both times under `rumqttc`,
