@@ -141,3 +141,41 @@ Offline, the lockfile and the source answer the same questions:
 network on a cold checkout — `cargo fetch` first. The greps need neither.
 
 [share]: README.md#sharing-a-read-only-dashboard
+
+### The 2026-08 advisory batch — three more rustls-webpki findings, and a wall of "unmaintained"
+
+The advisories run on `main` started failing on 2026-08-26 when the RustSec database grew a
+batch of new entries against crates this tree already shipped. Every one is recorded in
+`src-tauri/deny.toml` with a reason; the summary:
+
+**rustls-webpki 0.102.8, again** (RUSTSEC-2026-0049, -0098, -0099). Same crate, same tree and
+same constraint as RUSTSEC-2026-0104 above: the fixes are in 0.103.x, there is no 0.102.x
+backport, and `rumqttc 0.25.1` still requires `^0.102.8`, so there is nothing to upgrade to.
+Reachability differs per advisory:
+
+- **-0049 (CRL Distribution Point matching):** unreachable for the same reason as -0104 — this
+  application loads no CRLs, so all CRL handling is dead code here.
+- **-0098 / -0099 (name-constraint acceptance for URI and wildcard names):** these sit in
+  certificate validation proper, which *does* run when MQTT-over-TLS is configured. The exposure
+  requires the user's broker to present a certificate chained through a CA that issues
+  name-constrained certificates that a correct validator would reject. The deployment this app
+  supports — a LAN broker with a self-signed or private-CA certificate — has no such chain, and
+  a public-CA chain abusing this needs a misissuing CA, which is a browser-ecosystem event, not
+  a WeatherDesk one. Accepted as low risk; both entries are dropped the moment a rumqttc release
+  moves to rustls-webpki 0.103.
+
+**Unmaintained, not vulnerable.** The rest of the batch is maintenance-status advisories, all
+arriving through Tauri v2's own dependency tree:
+
+- **gtk-rs GTK3 bindings** (RUSTSEC-2024-0411 through -0420): Tauri v2 renders through
+  WebKitGTK on GTK3 on Linux. Moving to GTK4 is Tauri's roadmap, not something a dependent
+  application can do; these leave the list with Tauri v3.
+- **proc-macro-error** (RUSTSEC-2024-0370): build-time proc-macro helper, no runtime code.
+- **rustls-pemfile** (RUSTSEC-2025-0134): PEM parsing was folded into rustls upstream; rumqttc
+  still pulls the standalone crate. It parses local PEM files only.
+- **the unic block** (RUSTSEC-2025-0075, -0080, -0081, -0098, -0100): compile-time Unicode
+  identifier tables under `tauri-utils`.
+
+None of these change what the application does at runtime. The rule from the top of this
+section still holds: each entry exists in `deny.toml` only alongside this writeup, and the
+check goes red again the moment an entry stops being true.

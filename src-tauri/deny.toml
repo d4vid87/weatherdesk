@@ -7,5 +7,29 @@
 
 [advisories]
 ignore = [
+  # -- rustls-webpki 0.102.8, same tree and same constraint as RUSTSEC-2026-0104 below: the fix
+  # is in 0.103.x, rumqttc 0.25.1 still pins ^0.102.8, nothing to upgrade to. See SECURITY.md.
+  { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102.8 CRL Distribution Point matching. This app loads no CRLs at all, so CRL handling is unreachable. Same tree as RUSTSEC-2026-0104; drop when rumqttc asks for rustls-webpki 0.103." },
+  { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102.8 accepts name constraints for URI names. Reachable only if the user's own MQTT broker presents a certificate from a CA that issues name-constrained certificates — a LAN broker with a self-signed or private-CA cert, the actual deployment, has none. See SECURITY.md; drop when rumqttc asks for rustls-webpki 0.103." },
+  { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102.8 accepts name constraints asserting a wildcard name. Same exposure and same upgrade constraint as RUSTSEC-2026-0098. See SECURITY.md." },
+  # -- unmaintained, not vulnerable: these are advisories about maintenance status, and every one
+  # comes in through Tauri v2's own dependency tree. They go away when Tauri does, not before.
+  { id = "RUSTSEC-2024-0411", reason = "gtk-rs GTK3 bindings unmaintained. Tauri v2 renders through WebKitGTK on GTK3 on Linux; the GTK4 move is Tauri v3's, not ours. Applies to the whole 0411-0420 block." },
+  { id = "RUSTSEC-2024-0412", reason = "gdk — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0413", reason = "atk — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0414", reason = "gdkwayland-sys — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0415", reason = "gdkx11 — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0416", reason = "atk-sys — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0417", reason = "gdkx11-sys — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0418", reason = "gdk-sys — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0419", reason = "gdkwayland — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0420", reason = "gtk3-macros — see RUSTSEC-2024-0411." },
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; build-time proc-macro helper deep in the Tauri tree, no runtime code." },
+  { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained; PEM parsing folded into rustls proper upstream, but rumqttc still pulls the standalone crate. Parses local PEM files only." },
+  { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained; part of the unic block under Tauri's tauri-utils (via unic-ucd-ident), compile-time identifier tables." },
+  { id = "RUSTSEC-2025-0080", reason = "unic-common — see RUSTSEC-2025-0075." },
+  { id = "RUSTSEC-2025-0081", reason = "unic-char-property — see RUSTSEC-2025-0075." },
+  { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version — see RUSTSEC-2025-0075." },
+  { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident — see RUSTSEC-2025-0075." },
   { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8 CRL parsing panic (GHSA-82j2-j2ch-gfr8). Reached only through rumqttc's TLS transport, and only by an application that passes RevocationOptions to verify_for_usage() and hands it CRL bytes. This one never constructs RevocationOptions, builds no ClientConfig, and loads no CRL — TLS is configured in exactly two places, both a bare Transport::tls_with_default_config() in src/mqtt.rs. See SECURITY.md for the full path analysis. The fix is in 0.103.13 with no 0.102.x backport, and rumqttc 0.25.1 still requires rustls-webpki ^0.102.8, so there is nothing to upgrade to. Drop this entry the moment a rumqttc release asks for rustls-webpki 0.103." },
 ]
