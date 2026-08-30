@@ -134,13 +134,13 @@ function drawExtremes() {
   const strikes = col(I.strikes).reduce((a, b) => a + b, 0);
   const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
   $('extremes').innerHTML = [
-    ['High', `${num(Math.max(...t), 1)}${U.temp()}`],
-    ['Low', `${num(Math.min(...t), 1)}${U.temp()}`],
-    ['Mean', `${num(avg(t), 1)}${U.temp()}`],
-    ['Peak gust', `${num(Math.max(...g), 1)} ${U.wind()}`],
-    ['Lightning strikes', num(strikes)],
+    ['High', `${num(Math.max(...t), 1)}${U.temp()}`, 'temp'],
+    ['Low', `${num(Math.min(...t), 1)}${U.temp()}`, 'temp'],
+    ['Mean', `${num(avg(t), 1)}${U.temp()}`, 'temp'],
+    ['Peak gust', `${num(Math.max(...g), 1)} ${U.wind()}`, 'windGust'],
+    ['Lightning strikes', num(strikes), 'strikes'],
     ['Samples', num(history.length)],
-  ].map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join('');
+  ].map(([k, v, m]) => `<div${m ? ` data-metric="${m}" role="button" tabindex="0"` : ''}><span>${k}</span><span>${v}</span></div>`).join('');
 }
 
 async function drawModels() {

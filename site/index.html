@@ -158,6 +158,16 @@
     transform: translateX(100%); transition: transform .18s ease; z-index: 20;
   }
   #drawer.open { transform: none; }
+  /* the detail slide-over: same dialog contract as the drawer, same look */
+  #detail {
+    position: fixed; inset: 0 0 0 auto; width: min(420px, 100%); background: var(--panel);
+    border-left: 1px solid var(--line); overflow: auto; z-index: 1002;
+    padding: var(--gap) var(--gap) calc(var(--gap) + env(safe-area-inset-bottom));
+    transform: translateX(100%); transition: transform .2s;
+  }
+  #detail.open { transform: none; }
+  #detail #detail-close { float: right; }
+  [data-metric] { cursor: pointer; }
   #drawer label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
   #drawer input, #drawer select {
     width: 100%; padding: 8px; background: var(--bg); color: var(--text);
@@ -638,7 +648,7 @@
       <div id="hero-icon"></div>
       <div id="hero-feels" class="hero-dim"></div>
       <div class="hero-now">
-        <div id="hero-temp">--°</div>
+        <div id="hero-temp" data-metric="temp">--°</div>
         <div>
           <div id="hero-cond"></div>
           <div id="hero-hilo" class="hero-dim"></div>
@@ -678,13 +688,13 @@
     <div id="daycards" data-panel="daycards"></div>
 
     <div id="gauges" data-panel="gauges">
-      <div class="gauge" data-panel="g-wind"><h3>Wind</h3><div id="g-wind"></div></div>
-      <div class="gauge" data-panel="g-rain"><h3>Rain</h3><div id="g-rain"></div></div>
-      <div class="gauge" data-panel="g-hum"><h3>Humidity</h3><div id="g-hum"></div></div>
-      <div class="gauge" data-panel="g-press"><h3>Pressure</h3><div id="g-press"></div></div>
+      <div class="gauge" data-panel="g-wind" data-metric="windAvg"><h3>Wind</h3><div id="g-wind"></div></div>
+      <div class="gauge" data-panel="g-rain" data-metric="rain"><h3>Rain</h3><div id="g-rain"></div></div>
+      <div class="gauge" data-panel="g-hum" data-metric="rh"><h3>Humidity</h3><div id="g-hum"></div></div>
+      <div class="gauge" data-panel="g-press" data-metric="press"><h3>Pressure</h3><div id="g-press"></div></div>
       <div class="gauge" data-panel="g-dew"><h3>Dew point</h3><div id="g-dew"></div></div>
-      <div class="gauge" data-panel="g-uv"><h3>UV / solar</h3><div id="g-uv"></div></div>
-      <div class="gauge" data-panel="g-ltg"><h3>Lightning</h3><div id="g-ltg"></div></div>
+      <div class="gauge" data-panel="g-uv" data-metric="uv"><h3>UV / solar</h3><div id="g-uv"></div></div>
+      <div class="gauge" data-panel="g-ltg" data-metric="strikes"><h3>Lightning</h3><div id="g-ltg"></div></div>
       <div class="gauge" data-panel="g-wet"><h3>Wet bulb</h3><div id="g-wet"></div></div>
       <div class="gauge" data-panel="g-wbgt"><h3 title="Estimated from temperature, humidity and solar — not a measured WBGT">WBGT</h3><div id="g-wbgt"></div></div>
     </div>

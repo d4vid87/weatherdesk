@@ -46,8 +46,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # x86_64 gets the AppImage too — Tauri's Linux updater can only install an
+          # AppImage, and the bundler is x86_64-only, so the bundle list is explicit per arch.
           - platform: ubuntu-22.04
-            args: ""
+            args: "--bundles deb,appimage"
             targets: ""
           # One universal APK: arm64 for anything current, armv7 so a 32-bit Fire tablet still
           # installs it. Signed with the upload key held in repo secrets — same key forever, or
@@ -59,7 +61,7 @@ jobs:
           # Raspberry Pi 4/5 on 64-bit Pi OS. Native arm64 runner, not a cross-compile:
           # WebKitGTK doesn't cross-link cleanly and the runner is free for public repos.
           - platform: ubuntu-22.04-arm
-            args: ""
+            args: "--bundles deb"
             targets: ""
           - platform: windows-latest
             args: ""

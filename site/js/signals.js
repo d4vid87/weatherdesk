@@ -217,7 +217,7 @@ function renderStrikes() {
   const cut = Date.now() / 1000 - 86400;
   const recent = strikes.filter((x) => x.t >= cut);
   el.innerHTML = recent.length
-    ? recent.map((x) => `<div><span>${new Date(x.t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>`
+    ? recent.map((x) => `<div data-metric="strikes" role="button" tabindex="0"><span>${new Date(x.t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>`
       + `<span>${num(miles(x.km), 1)} ${U.dist()}</span></div>`).join('')
     : '<div class="muted">No strikes in the last 24h</div>';
 }

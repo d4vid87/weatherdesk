@@ -14,6 +14,7 @@ import { initLayout, snapshot, restore, hiddenPanels, unhide, panelIds, tabOf, s
 import { initUdp } from './udp.js';
 import { initHome } from './home.js';
 import { initOutlook } from './outlook.js';
+import { initDetail } from './detail.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -444,9 +445,10 @@ $('btn-save').onclick = async () => {
     pwsKey: $('set-pws-key').value.trim(),
     elevationM: elevMetres(),
     stationSource: $('set-source').value,
-    // Switching to a non-Tempest brand: the old WeatherFlow device id has to go with it, or
-    // history and the age chip keep asking WeatherFlow about a station that isn't there.
-    ...($('set-source').value ? { deviceId: '' } : {}),
+    // Switching to a non-Tempest brand: the old WeatherFlow device id, token and station id all
+    // have to go with it, or the forecast and history keep asking WeatherFlow about a station
+    // that isn't there (#37).
+    ...($('set-source').value ? { deviceId: '', token: '', stationId: '' } : {}),
     wllHost: $('set-wll').value.trim(),
     awnApiKey: $('set-awn-api').value.trim(),
     awnAppKey: $('set-awn-app').value.trim(),
@@ -487,7 +489,7 @@ $('btn-save').onclick = async () => {
   }
   loadDeskRadar();
   initDesk(); // idempotent: every() replaces existing jobs
-  initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initLayout(); initUdp(); initHome(); initOutlook();
+  initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initLayout(); initDetail(); initUdp(); initHome(); initOutlook();
 };
 
 // station meta fills name/lat/lon and the Tempest device id when blank
@@ -1229,7 +1231,7 @@ if (!hasSource() && !PUBLIC) {
 // lat/lon must land before the open-meteo/NWS jobs start (resolves immediately when unconfigured)
 hydrateStation().then(() => {
   loadDeskRadar();
-  initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initUdp(); initHome();
+  initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initDetail(); initUdp(); initHome();
   every('server-alerts', 300, probeServerAlerts);
 });
 
