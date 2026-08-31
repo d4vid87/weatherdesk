@@ -16,6 +16,13 @@ fn main() {
     if std::env::args().any(|a| a == "--headless") {
         return weatherdesk_lib::run_headless();
     }
+    // WebKitGTK's DMABUF renderer draws a blank window on some Wayland stacks (seen on
+    // Hyprland + Intel UHD 600, same class as the NVIDIA/Wayland Error 71 in dev). Disable
+    // it unless the user set the variable themselves; costs the GPU compositing path.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     #[cfg(feature = "gui")]
     weatherdesk_lib::run();
     #[cfg(not(feature = "gui"))]

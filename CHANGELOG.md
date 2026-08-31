@@ -8,6 +8,14 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-08-31
+
+### Fixed
+- **Blank window on some Linux GPU/compositor combinations** (seen on Hyprland with Intel UHD
+  600 graphics): WeatherDesk started and ran, but never drew anything. WebKitGTK's DMABUF
+  renderer is now disabled by default on Linux. Export
+  `WEBKIT_DISABLE_DMABUF_RENDERER=0` to force the old behaviour back on.
+
 ## [3.2.2] - 2026-08-30
 
 ### Fixed
