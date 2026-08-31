@@ -68,15 +68,27 @@ async fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 pub fn run() {
-    #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    let mut builder = tauri::Builder::default();
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder
+            // Registered first, per the plugin's docs, so a second launch exits here before any
+            // other plugin has run. Without this, relaunching while an instance was running tore
+            // down the old UI process, and its WebKit web process — busy in JS — missed the
+            // shutdown watchdog's deadline and died SIGTRAP. The second launch now just focuses
+            // the window that already exists.
+            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }))
             .plugin(tauri_plugin_updater::Builder::new().build())
             .invoke_handler(tauri::generate_handler![updater_check, updater_install]);
     }
+
+    builder = builder.plugin(tauri_plugin_notification::init());
 
     builder
         .setup(|app| {

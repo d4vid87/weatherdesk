@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # libraries installed at all.
 [features]
 default = ["gui"]
-gui = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-notification", "dep:tauri-plugin-updater"]
+gui = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-notification", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -32,6 +32,10 @@ serde_json = "1"
 # Serving the dashboard to the rest of the LAN is a desktop job — Android neither serves nor
 # receives the hub's broadcasts.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# One instance only. A relaunch while one is running used to tear the old instance down, and
+# its WebKit web process would outlive the shutdown watchdog and SIGTRAP. Focus the existing
+# window instead.
+tauri-plugin-single-instance = { version = "2", optional = true }
 tiny_http = "0.12"
 # The observation archive. Bundled: a wall tablet's distro is not where you go looking for a
 # matching libsqlite3.
