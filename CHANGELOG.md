@@ -8,6 +8,13 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+### Fixed
+- **Relaunching while WeatherDesk was already running crashed the old instance.** Each new
+  launch tore down the previous instance's UI process, and its WebKit web process — busy in
+  JavaScript — missed WebKit's shutdown deadline and was killed with SIGTRAP, leaving a core
+  dump behind. WeatherDesk is now single-instance: a second launch focuses the window that is
+  already open and exits.
+
 ## [3.2.1] - 2026-08-30
 
 ### Added
