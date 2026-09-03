@@ -23,12 +23,17 @@ function condense(fc) {
   };
 }
 
+// Cheap gate before the parse: snapshots are 3 h apart, and this runs on every forecast fetch.
+let lastSnapT = 0;
+
 export function snapshot(fc) {
+  if (lastSnapT && Date.now() - lastSnapT < SNAP_MIN_GAP_H * H) return snaps();
   const list = snaps();
   const last = list[list.length - 1];
-  if (last && Date.now() - last.t < SNAP_MIN_GAP_H * H) return list;
+  if (last && Date.now() - last.t < SNAP_MIN_GAP_H * H) { lastSnapT = last.t; return list; }
   list.push(condense(fc));
   while (list.length > SNAP_CAP) list.shift();
+  lastSnapT = list[list.length - 1].t;
   store(SNAP_KEY, list);
   return list;
 }
@@ -59,11 +64,17 @@ export function changes(fc) {
 
 // --- verification: record what was forecast for a future hour, score it when that hour arrives ---
 
+// The 24-hour-out hour only changes once an hour; the forecast is fetched every five minutes.
+let lastTargetHour = 0;
+
 export function recordForecast(fc) {
   const hourly = fc.forecast.hourly || [];
+  const t = hourly.find((h) => h.time * 1000 > Date.now() + 24 * H);
+  if (t && t.time === lastTargetHour) return;
+  if (t) lastTargetHour = t.time;
   const list = verifies();
   // one prediction per fetch: the hour 24h out
-  const target = hourly.find((h) => h.time * 1000 > Date.now() + 24 * H);
+  const target = t;
   if (target && !list.some((v) => v.targetHour === target.time)) {
     list.push({
       targetHour: target.time, leadH: 24,

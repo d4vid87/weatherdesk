@@ -512,7 +512,7 @@ function renderLocal(o) {
 // Module level, not inside initPro: initPro re-runs on every settings save and a listener per
 // save stacks up. Both the websocket and the UDP poller dispatch wd:ws-obs; with a forecast in
 // hand the normal render owns the screen and this does nothing.
-window.addEventListener('wd:ws-obs', (e) => { if (!deskForecast()) renderLocal(e.detail); });
+window.addEventListener('wd:ws-obs', (e) => { if (!document.hidden && !deskForecast()) renderLocal(e.detail); });
 window.addEventListener('wd:forecast', (e) => renderPro(e.detail));
 
 // One dot per station source the LAN server is holding, hover for the /diag line itself. Nothing
@@ -520,7 +520,7 @@ window.addEventListener('wd:forecast', (e) => renderPro(e.detail));
 async function renderHealth() {
   const el = $('src-health');
   try {
-    const d = await (await fetch(`${window.__WD_SRV || ''}/diag`)).json();
+    const d = await api.getJSON(`${window.__WD_SRV || ''}/diag`);
     el.innerHTML = Object.entries(d).map(([src, v]) => {
       const ago = Math.max(0, Math.round(Date.now() / 1000 - v.at));
       const cls = !v.ok ? 'bad' : ago > 600 ? 'stale' : '';

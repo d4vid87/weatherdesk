@@ -6,7 +6,7 @@
 // so rather than pretending the record is older than it is.
 import { settings, U, num, every, expires, msToWind } from './app.js';
 import { chart } from './charts.js';
-import { normals, normalFor } from './api.js';
+import { normals, normalFor, getJSON } from './api.js';
 
 const $ = (id) => document.getElementById(id);
 const SRV = window.__WD_SRV || '';
@@ -32,9 +32,7 @@ async function load() {
   // The browser's own offset, because the process has no timezone and "a day" has to mean the
   // day the user lived through.
   const tz = -new Date().getTimezoneOffset();
-  const r = await fetch(`${SRV}/history/daily?tz=${tz}`, { signal: expires(10000) });
-  if (!r.ok) throw new Error(`${r.status}`);
-  days = (await r.json()).map(toDisplay);
+  days = (await getJSON(`${SRV}/history/daily?tz=${tz}`)).map(toDisplay);
 }
 
 const note = (msg) => {
@@ -177,9 +175,10 @@ export async function normalToday() {
   return normalFor(normalDays);
 }
 
+window.addEventListener('wd:section', (e) => { if (e.detail === 'data') refreshAlmanac(); });
+
 export function initAlmanac() {
   $('btn-explore').onclick = drawExplore;
-  window.addEventListener('wd:section', (e) => { if (e.detail === 'data') refreshAlmanac(); });
   every('almanac', 3600, () => {
     if ($('data').classList.contains('active')) refreshAlmanac();
   });

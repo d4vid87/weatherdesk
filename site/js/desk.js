@@ -63,8 +63,19 @@ export async function refreshDesk() {
 
 // A forecast is fetched every few minutes; the station reports every few seconds. Repaint the
 // cached payload with the new reading so the gauges show the garden, not the model.
+// A backgrounded tab still gets every 3-second websocket frame; repainting a page nobody is
+// looking at is the whole cost. Hold the last one and replay it when the tab comes back.
+let pendingObs = null;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !pendingObs) return;
+  const o = pendingObs;
+  pendingObs = null;
+  window.dispatchEvent(new CustomEvent('wd:ws-obs', { detail: o }));
+});
+
 window.addEventListener('wd:ws-obs', (e) => {
   if (!latestForecast) return;
+  if (document.hidden) { pendingObs = e.detail; return; }
   api.overlayStation(latestForecast.current_conditions, e.detail, latestForecast.elevation);
   renderCurrent(latestForecast.current_conditions);
   window.dispatchEvent(new CustomEvent('wd:forecast', { detail: latestForecast }));

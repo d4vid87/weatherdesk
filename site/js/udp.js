@@ -81,9 +81,10 @@ function apply(j) {
 // Everything the server hears, pushed as it arrives: a gust shows up in the same second the hub
 // broadcast it instead of up to three seconds later. The poll stays as the fallback — a static
 // self-host has no /events route, and neither does a v2 desktop app on the LAN.
+let es = null;
 function stream() {
   if (!('EventSource' in window)) return;
-  let es;
+  try { es?.close(); } catch { /* already gone */ }
   try { es = new EventSource(`${SRV}/events`); } catch { return; }
   es.addEventListener('udp', (e) => {
     let p;

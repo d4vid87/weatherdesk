@@ -5,7 +5,7 @@
 // keep on screen all day.
 import { settings, coords, U, num, notify, every, stamp, expires } from './app.js';
 import { forecast as deskForecast } from './desk.js';
-import { OBS } from './api.js';
+import { OBS, getJSON } from './api.js';
 import { toDisplay } from './almanac.js';
 
 const $ = (id) => document.getElementById(id);
@@ -151,11 +151,10 @@ export function renderSolar() {
 // thirteen months as well as one that has been up for ten years.
 async function renderLastYear() {
   const tz = -new Date().getTimezoneOffset();
-  const r = await fetch(`${window.__WD_SRV || ''}/history/daily?tz=${tz}`, { signal: expires(10000) });
-  if (!r.ok) throw new Error(`${r.status}`);
+  const daily = await getJSON(`${window.__WD_SRV || ''}/history/daily?tz=${tz}`);
   const now = new Date();
   const md = `-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const rows = (await r.json())
+  const rows = daily
     .filter((d) => d.day.endsWith(md) && d.day.slice(0, 4) !== String(now.getFullYear()))
     .sort((a, b) => b.day.localeCompare(a.day))
     .slice(0, 6)
@@ -348,10 +347,11 @@ window.addEventListener('wd:device-status', (e) => {
   healthAlerts(lastStatus);
 });
 
+window.addEventListener('wd:forecast', renderSky);
+window.addEventListener('wd:forecast', renderSolar);
+
 export function initEnv() {
   renderHealth(lastStatus);
-  window.addEventListener('wd:forecast', renderSky);
-  window.addEventListener('wd:forecast', renderSolar);
   renderSky();
   renderSolar();
   every('env-lastyear', 21600, () => renderLastYear().catch(() => {}));

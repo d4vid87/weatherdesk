@@ -202,9 +202,11 @@ async function drawOutlook() {
   }
 }
 
+// history is heavy; refresh on tab entry and hourly, not on the desk cadence. Module level so a
+// re-init doesn't stack listeners.
+window.addEventListener('wd:section', (e) => { if (e.detail === 'data') refreshBoards().catch(() => {}); });
+
 export function initBoards() {
-  // history is heavy; refresh on tab entry and hourly, not on the desk cadence
-  window.addEventListener('wd:section', (e) => { if (e.detail === 'data') refreshBoards().catch(() => {}); });
   every('boards', 3600, () => {
     if (document.getElementById('data').classList.contains('active')) refreshBoards();
   });

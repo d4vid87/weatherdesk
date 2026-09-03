@@ -9,7 +9,7 @@
 // is no native code here for them, and there shouldn't be.
 
 import { settings, every, stamp, stormMode, expires, msToWind } from './app.js';
-import { OBS } from './api.js';
+import { OBS, getJSON } from './api.js';
 import { mqtt } from './mqtt.js';
 
 const $ = (id) => document.getElementById(id);
@@ -187,7 +187,7 @@ function event(name, payload) {
 // listener open.
 async function serverPublishing() {
   try {
-    const d = await (await fetch(`${window.__WD_SRV || ''}/diag`, { signal: expires(4000) })).json();
+    const d = await getJSON(`${window.__WD_SRV || ''}/diag`);
     return !!d.mqtt?.ok;
   } catch { return false; }
 }

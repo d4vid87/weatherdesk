@@ -4,15 +4,24 @@
 // Canvas can't read CSS variables, so the theme has to be handed to it. Read per draw: a chart
 // is redrawn whenever anything changes, and a cached palette would be the one thing still dark
 // after a switch to the light theme.
-const css = (name, fallback) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+// One style read per draw, not one per colour: getComputedStyle forces style recalc, and the
+// hover path redraws on every pointer frame.
+const readCss = () => {
+  const s = getComputedStyle(document.documentElement);
+  const v = (n, f) => s.getPropertyValue(n).trim() || f;
+  return { MUTED: v('--muted', '#8ea0b5'), LINE: v('--line', '#253141'),
+    PANEL2: v('--panel2', '#111820'), TEXT: v('--text', '#e8eef6') };
+};
 
 export function chart(canvas, series, opts = {}) {
-  const MUTED = css('--muted', '#8ea0b5'), LINE = css('--line', '#253141');
+  const { MUTED, LINE, PANEL2, TEXT } = readCss();
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth || 300, h = canvas.clientHeight || 140;
-  canvas.width = w * dpr; canvas.height = h * dpr;
+  // Assigning width/height reallocates the backing store and clears it even when the size did
+  // not change — which is every hover frame.
+  const cw = Math.round(w * dpr), ch = Math.round(h * dpr);
   const c = canvas.getContext('2d');
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, w, h);
 
@@ -118,10 +127,10 @@ export function chart(canvas, series, opts = {}) {
     const text = `${stamp}  ${lines.join('  ')}`;
     const tw = c.measureText(text).width + 8;
     const tx = Math.min(Math.max(gx - tw / 2, padL), w - padR - tw);
-    c.fillStyle = css('--bg-2', '#111820');
+    c.fillStyle = PANEL2;
     c.fillRect(tx, padT, tw, 16);
     c.strokeStyle = LINE; c.strokeRect(tx + 0.5, padT + 0.5, tw, 16);
-    c.fillStyle = css('--fg', '#e8eef6');
+    c.fillStyle = TEXT;
     c.fillText(text, tx + 4, padT + 12);
   }
 }
@@ -133,9 +142,12 @@ function bindHover(canvas, series, opts) {
   canvas._wdDraw = () => chart(canvas, series, opts);
   if (canvas._wdBound || opts.hover === false) return;
   canvas._wdBound = true;
+  // One redraw per frame however fast the pointer reports.
+  let raf = 0;
   const move = (e) => {
     canvas._wdHover = e.clientX - canvas.getBoundingClientRect().left;
-    canvas._wdDraw();
+    if (raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; canvas._wdDraw(); });
   };
   const clear = () => {
     if (canvas._wdHover == null) return;
@@ -146,6 +158,15 @@ function bindHover(canvas, series, opts) {
   canvas.addEventListener('pointerdown', move);
   canvas.addEventListener('pointerleave', clear);
   canvas.addEventListener('pointercancel', clear);
+  // Drawn while its panel was hidden, or resized after: the bitmap keeps whatever size it was
+  // baked at (the `|| 300` fallback) until something redraws it.
+  if ('ResizeObserver' in window) {
+    let first = true;
+    new ResizeObserver(() => {
+      if (first) { first = false; return; }
+      canvas._wdDraw();
+    }).observe(canvas);
+  }
 }
 
 if (typeof window !== 'undefined' && location.search.includes('selftest')) {

@@ -329,9 +329,11 @@
 
   /* radar beside the numbers, the way the reference reads */
   #desk-radar { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; min-height: 420px;
-    height: 100%; background: var(--panel); display: flex; align-items: center; justify-content: center; }
+    position: relative; height: 100%; background: var(--panel); display: flex; align-items: center; justify-content: center; }
   #desk-radar-frame { width: 100%; height: 100%; border: 0; display: none; }
   #desk-radar.loaded > #desk-radar-frame { display: block; }
+  #desk-radar.unreachable::after { content: 'Radar unreachable'; position: absolute; inset: auto 0 0 0;
+    padding: 6px 10px; font-size: 13px; color: var(--muted); background: var(--panel2); }
   /* Loaded in HookEcho's `?embed` mode: chromeless, and holding one frame a minute until it is
      touched. Without that it repaints ten times a second, and the desktop app's WebKit webview
      redraws the whole Desk on every one of those frames — enough to peg a core. */

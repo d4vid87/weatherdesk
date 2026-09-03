@@ -44,7 +44,26 @@ function foreignStation(url) {
 const etags = new Map();
 const cacheable = (url) => url.startsWith('https://api.weather.gov/');
 
-async function getJSON(url, opts) {
+// Several panels ask for the same URL within a second of each other (two models pulls, the
+// station obs on the desk and in the gauges, /history/daily from three cards). One short memo
+// collapses those into one request; anything older than 30 s is refetched.
+const memo = new Map();
+const MEMO_MS = 30000;
+
+export async function getJSON(url, opts) {
+  const key = !opts || (!opts.method && !opts.headers && !opts.body) ? url : null;
+  if (key) {
+    const m = memo.get(key);
+    if (m && Date.now() - m.t < MEMO_MS) return m.p.then(structuredClone);
+    const p = fetchJSON(url, opts);
+    memo.set(key, { t: Date.now(), p });
+    p.catch(() => memo.delete(key));
+    return p.then(structuredClone);
+  }
+  return fetchJSON(url, opts);
+}
+
+async function fetchJSON(url, opts) {
   // A wall tablet on a dropped Wi-Fi link otherwise leaves a fetch hanging for minutes and the
   // panel's next refresh never fires.
   let r;

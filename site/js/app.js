@@ -109,8 +109,17 @@ export function load(key, fallback) {
   } catch { return structuredClone(fallback); }
 }
 
+// Callers re-store the same payload constantly (the cached forecast on every obs, the forecast
+// snapshot list on every fetch). Serialising is cheap; the write and its disk flush are not.
+const written = new Map();
+
 export function store(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); }
+  try {
+    const json = JSON.stringify(value);
+    if (written.get(key) === json) return;
+    localStorage.setItem(key, json);
+    written.set(key, json);
+  }
   catch (e) { console.warn('localStorage full', key, e); }
 }
 
