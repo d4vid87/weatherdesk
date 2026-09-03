@@ -52,9 +52,6 @@ function build() {
     + '<div id="detail-stats" class="kv-rows"></div><p id="detail-blurb" class="muted"></p>';
   document.body.appendChild(el);
   $('detail-close').onclick = close;
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && el.classList.contains('open')) close();
-  });
 }
 
 function close() {
@@ -65,9 +62,14 @@ function close() {
   returnTo = null;
 }
 
+// Click two metrics quickly and the slower archive read used to land last, painting the first
+// metric's chart under the second one's title.
+let gen = 0;
+
 export async function openDetail(metric) {
   const m = METRICS[metric];
   if (!m) return;
+  const mine = ++gen;
   build();
   const el = $('detail');
   returnTo = document.activeElement;
@@ -80,6 +82,7 @@ export async function openDetail(metric) {
   $('detail-close').focus();
   try {
     const obs = (await api.localObs(48)).obs || [];
+    if (mine !== gen) return;
     const pts = obs.map((o) => ({ x: o[I.time] * 1000, y: o[m.idx] })).filter((p) => p.y != null);
     if (!pts.length) { $('detail-now').textContent = 'nothing in the archive for the last 48 h'; return; }
     const ys = pts.map((p) => p.y);
@@ -94,9 +97,23 @@ export async function openDetail(metric) {
          ['Mean · 48 h', fmt(ys.reduce((a, b) => a + b, 0) / ys.length)]];
     $('detail-stats').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join('');
   } catch (e) {
+    if (mine !== gen) return;
     $('detail-now').textContent = `no archive to read — ${e.message}`;
   }
 }
+
+const hit = (e) => e.target.closest?.('[data-metric]');
+// Module level: initDetail() runs again after a settings save, and duplicated delegates opened
+// the slide-over twice per click.
+document.addEventListener('click', (e) => { const t = hit(e); if (t) openDetail(t.dataset.metric); });
+document.addEventListener('keydown', (e) => {
+  const open = $('detail')?.classList.contains('open');
+  // boot.js's shortcut handler skips Escape while this is open, so one press closes one thing.
+  if (e.key === 'Escape') { if (open) close(); return; }
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = hit(e);
+  if (t) { e.preventDefault(); openDetail(t.dataset.metric); }
+});
 
 export function initDetail() {
   // One delegated listener, not one per value. A clickable value is a real keyboard target.
@@ -105,13 +122,6 @@ export function initDetail() {
     el.setAttribute('tabindex', '0');
     el.title = 'Click for the last 48 hours';
   }
-  const hit = (e) => e.target.closest?.('[data-metric]');
-  document.addEventListener('click', (e) => { const t = hit(e); if (t) openDetail(t.dataset.metric); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    const t = hit(e);
-    if (t) { e.preventDefault(); openDetail(t.dataset.metric); }
-  });
 }
 
 // ponytail-lite self-check: every data-metric in the page resolves, so a typo fails loudly

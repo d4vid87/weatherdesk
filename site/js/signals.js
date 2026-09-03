@@ -140,18 +140,21 @@ export function connectWs() {
   const s = settings();
   if (!s.token || !s.deviceId) return;
   wantOpen = true;
-  try { ws?.close(); } catch { /* already gone */ }
+  // Detach the old socket's handlers before closing it: its onclose would otherwise schedule a
+  // second reconnect timer, and saving settings a few times left a socket per save.
+  const old = ws;
+  if (old) { old.onclose = old.onerror = old.onmessage = old.onopen = null; try { old.close(); } catch { /* already gone */ } }
   setWsState('connecting…', false);
-  ws = new WebSocket(`wss://ws.weatherflow.com/swd/data?token=${encodeURIComponent(s.token)}`);
+  const sock = ws = new WebSocket(`wss://ws.weatherflow.com/swd/data?token=${encodeURIComponent(s.token)}`);
 
-  ws.onopen = () => {
+  sock.onopen = () => {
     backoff = 1000;
     setWsState('live', true);
-    ws.send(JSON.stringify({ type: 'listen_start', device_id: +s.deviceId, id: 'wd' }));
-    ws.send(JSON.stringify({ type: 'listen_rapid_start', device_id: +s.deviceId, id: 'wd-rapid' }));
+    sock.send(JSON.stringify({ type: 'listen_start', device_id: +s.deviceId, id: 'wd' }));
+    sock.send(JSON.stringify({ type: 'listen_rapid_start', device_id: +s.deviceId, id: 'wd-rapid' }));
   };
 
-  ws.onmessage = (ev) => {
+  sock.onmessage = (ev) => {
     lastMsg = Date.now();
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
@@ -163,13 +166,13 @@ export function connectWs() {
     else if (m.type === 'obs_st' && m.obs?.[0]) window.dispatchEvent(new CustomEvent('wd:ws-obs', { detail: m.obs[0] }));
   };
 
-  ws.onclose = () => {
+  sock.onclose = () => {
+    if (ws !== sock || !wantOpen) return;
     setWsState('reconnecting…', false);
-    if (!wantOpen) return;
     setTimeout(connectWs, backoff);
     backoff = Math.min(backoff * 2, 60000);
   };
-  ws.onerror = () => { try { ws.close(); } catch { /* onclose handles retry */ } };
+  sock.onerror = () => { try { sock.close(); } catch { /* onclose handles retry */ } };
 }
 
 export function disconnectWs() {
@@ -178,6 +181,7 @@ export function disconnectWs() {
 }
 
 export function renderRapid(mps, dir) {
+  if (document.hidden) return;   // 3-second frames into a tab nobody is watching
   const v = msToWind(mps);   // rapid_wind is always m/s
   $('live-wind').textContent = num(v, 1);
   $('live-wind-unit').textContent = U.wind();

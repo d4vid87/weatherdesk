@@ -8,6 +8,72 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-09-03
+
+### Added
+- **Motion, as a setting.** Settings → Motion picks `Auto`, `Full`, `Lite` or `Off`. Auto is Full
+  on a desktop and Lite on the hardware eco mode already calls slow (a wall tablet, a 4 GB
+  Chromebook). `prefers-reduced-motion` and the e-ink palette force Off, and `?motion=` overrides
+  everything for one page load. Eco mode is now only about polling rate.
+- **The hero is a sky.** The gradient behind the numbers is interpolated from the station's own
+  sunrise and sunset rather than snapped between five presets, and at Full a sun or a phased moon
+  rides its real arc across the panel.
+- **Vendored Meteocons** (MIT, Bas Milius) for every condition glyph — animated at Full, static
+  at Lite and Off.
+- **Barlow Semi Condensed**, bundled, for the clock, the hero temperature and every gauge readout.
+  Tabular figures, so a counting number does not shuffle the line it sits on.
+- **Broadcast choreography.** Numbers count to their new value and flash as they land, gauge
+  needles swing (the short way round), panels swoosh in behind a band of light on a tab change,
+  and rearranging the layout animates instead of jumping.
+- **A severe-weather crawl.** Under a Severe or Extreme warning the signal ticker becomes the red
+  alert crawl, carrying the event and its headline.
+- **Severe and emergency alerts are read aloud**, on by default. Only Severe and Extreme (and any
+  headline carrying the word *emergency*) — the routine advisories that used to be read out are
+  not. If the browser refuses to speak before the page has been touched, the announcement is held
+  and made on the first tap.
+
+### Changed
+- Gauges, day cards and the hero are built once and updated in place. The 48-hour chart and the
+  ticker skip writes that would produce identical markup.
+- `Eco mode` in Settings is labelled "slower polling"; the animation half of it moved to Motion.
+- Static assets carry an `ETag` and a cache policy: fonts and icons for a week, code and markup
+  always revalidated.
+
+### Fixed
+- Saving settings repeatedly left a WebSocket (and a reconnect timer) per save, and `/events`
+  left an `EventSource` per init.
+- Several panels registered their event listeners again on every settings save, so one
+  observation triggered several renders.
+- The detail slide-over raced itself when two metrics were opened quickly, and its Escape key
+  also dropped the dashboard out of kiosk mode.
+- Charts read two CSS variables that do not exist (`--bg-2`, `--fg`), reallocated their bitmap on
+  every hover frame, and kept a stale bitmap after a resize.
+- The 10-day board compared NWS periods against the wrong day whenever the forecast started with
+  "Tonight"; the 7-day precipitation outlook plotted every bar a day early west of Greenwich.
+- The Fire card printed millimetres under an inches label; forecast snapshots and verifications
+  are now tagged with the units they were recorded in.
+- The AQI card showed midnight's value after 23:00; a single missing hour blanked the 48-hour
+  temperature line; muggy wording and the day-card arc were pinned to °F.
+- Layout presets could permanently hide the severe, winter and tropical cards.
+- A negative refresh interval was accepted and became a busy loop.
+- The Home Assistant panel kept polling after its entity list was cleared, and two quick saves
+  could leave an orphaned MQTT client publishing.
+- The service worker's "never cache" list missed `/api`, `/ha`, `/alerts` and `/discover`.
+- The radar panel says so when the viewer is unreachable, and its camera is persisted on a 5 s
+  debounce instead of once a second.
+
+### Performance
+- Repainting the Desk from a station observation (the common case, once per `refreshSec`):
+  **8.4 ms → 7.4 ms** per render, measured headless over 120 renders at Lite. Full motion costs
+  about 1.5 ms more per render than Lite by design — that is what the setting is for.
+- One in-flight/30-second memo in front of `getJSON`, so the panels that ask for the same URL at
+  the same moment share one request.
+- `localStorage` writes are skipped when the payload is byte-identical.
+- Boot no longer blocks the whole module graph on a config fetch, and the graph is `modulepreload`ed.
+- Server: one kept-open SQLite writer instead of a fresh connection per reading, a cached settings
+  file, `MIN/MAX(ts)` instead of `COUNT(*)` behind `/history/daily`, and a 5 s deadline on
+  `/ha/states`.
+
 ## [3.2.3] - 2026-08-31
 
 ### Fixed

@@ -81,9 +81,10 @@ function apply(j) {
 // Everything the server hears, pushed as it arrives: a gust shows up in the same second the hub
 // broadcast it instead of up to three seconds later. The poll stays as the fallback — a static
 // self-host has no /events route, and neither does a v2 desktop app on the LAN.
+let es = null;
 function stream() {
   if (!('EventSource' in window)) return;
-  let es;
+  try { es?.close(); } catch { /* already gone */ }
   try { es = new EventSource(`${SRV}/events`); } catch { return; }
   es.addEventListener('udp', (e) => {
     let p;
@@ -116,4 +117,9 @@ if (location.search.includes('selftest')) {
   console.assert(num(1.5, 1) === '1.5', 'udp: app.js helpers imported');
   console.assert(now - (now - 60) < OBS_FRESH_SEC, 'udp: minute-old obs_st still counts');
   console.assert(!(now - (now - 600) < OBS_FRESH_SEC), 'udp: ten-minute-old obs_st is stale');
+  if ('EventSource' in window) {
+    stream(); stream();
+    console.assert(es && es.readyState !== 2, 'udp: a second stream() leaves exactly one open EventSource');
+    es.close();
+  }
 }

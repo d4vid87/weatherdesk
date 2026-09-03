@@ -69,23 +69,30 @@ pub fn meta_set(conn: &Connection, key: &str, value: &str) {
     );
 }
 
-fn insert_sql() -> String {
-    let cols = FIELDS.join(", ");
-    let holes = (1..=19).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
-    format!("INSERT OR IGNORE INTO obs (ts, {cols}, src) VALUES ({holes}, {{src}})")
+/// Built once. The string never changes, and formatting it per row was work done on the ingest
+/// path a few times a second.
+fn insert_sql() -> &'static str {
+    static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SQL.get_or_init(|| {
+        let cols = FIELDS.join(", ");
+        let holes = (1..=20).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        format!("INSERT OR IGNORE INTO obs (ts, {cols}, src) VALUES ({holes})")
+    })
 }
 
 /// One raw SI tuple, exactly as the hub broadcast it. `INSERT OR IGNORE` on the timestamp
 /// primary key is what makes the import, the backfill and a re-broadcasting hub all idempotent.
 pub fn insert(conn: &Connection, obs: &[Option<f64>], src: i64) -> bool {
     let Some(Some(ts)) = obs.first().copied() else { return false };
-    let sql = insert_sql().replace("{src}", &src.to_string());
-    let mut vals: Vec<Option<f64>> = Vec::with_capacity(19);
+    let mut vals: Vec<Option<f64>> = Vec::with_capacity(20);
     vals.push(Some(ts));
     for i in 1..=FIELDS.len() {
         vals.push(obs.get(i).copied().flatten());
     }
-    conn.execute(&sql, params_from_iter(vals)).map(|n| n > 0).unwrap_or(false)
+    vals.push(Some(src as f64));
+    // prepare_cached: the statement is parsed once per connection instead of once per reading.
+    let Ok(mut stmt) = conn.prepare_cached(insert_sql()) else { return false };
+    stmt.execute(params_from_iter(vals)).map(|n| n > 0).unwrap_or(false)
 }
 
 /// Every tuple in the v2 JSONL log, oldest file first. Lines that don't parse are skipped rather
@@ -185,9 +192,17 @@ pub fn tuples_json(conn: &Connection, hours: i64) -> String {
     format!("{{\"obs\":[{}]}}", body.join(","))
 }
 
+/// MIN/MAX over the primary key are index lookups; COUNT(*) was a full scan of an archive that
+/// is meant to hold years, run on every /history/daily request.
+/// ponytail: the aggregate itself is still recomputed whenever a new row lands — split it into a
+/// cached head plus today's bucket if the archive ever makes that visible.
 pub fn stamp(conn: &Connection) -> (i64, i64) {
-    conn.query_row("SELECT COUNT(*), COALESCE(MAX(ts), 0) FROM obs", [], |r| Ok((r.get(0)?, r.get(1)?)))
-        .unwrap_or((0, 0))
+    conn.query_row(
+        "SELECT COALESCE(MIN(ts), 0), COALESCE(MAX(ts), 0) FROM obs",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or((0, 0))
 }
 
 /// What the almanac needs to say "records since <date>".
@@ -306,6 +321,7 @@ pub fn backfill(conn: &Connection, token: &str, device_id: &str) {
         return; // nothing heard yet — no idea where the station's history ends
     }
     let mut empty = 0;
+    let mut retries = 0;
     while empty < 3 {
         let start = cursor - chunk;
         let url = format!(
@@ -314,17 +330,25 @@ pub fn backfill(conn: &Connection, token: &str, device_id: &str) {
         let body = match ureq::get(&url).timeout(std::time::Duration::from_secs(30)).call() {
             Ok(r) => r.into_string().unwrap_or_default(),
             Err(ureq::Error::Status(code, _)) => {
-                if code == 429 || code >= 500 {
-                    eprintln!("weatherdesk: backfill paused on HTTP {code}, retrying in 60s");
+                if (code == 429 || code >= 500) && retries < 5 {
+                    retries += 1;
+                    eprintln!("weatherdesk: backfill paused on HTTP {code}, retrying in 60s ({retries}/5)");
                     std::thread::sleep(std::time::Duration::from_secs(60));
                     continue;
                 }
                 eprintln!("weatherdesk: backfill stopped on HTTP {code}");
                 break;
             }
-            Err(_) => {
-                eprintln!("weatherdesk: backfill paused (network), retrying in 60s");
+            Err(_) if retries < 5 => {
+                retries += 1;
+                eprintln!("weatherdesk: backfill paused (network), retrying in 60s ({retries}/5)");
                 std::thread::sleep(std::time::Duration::from_secs(60));
+                continue;
+            }
+            Err(_) => {
+                eprintln!("weatherdesk: backfill gave up on this chunk after 5 retries; skipping it");
+                cursor -= chunk;
+                retries = 0;
                 continue;
             }
         };
@@ -356,6 +380,33 @@ pub fn backfill(conn: &Connection, token: &str, device_id: &str) {
 // silently drops a field, and a day boundary that puts yesterday's high on the wrong row.
 #[cfg(test)]
 mod tests {
+
+    /// The writer's insert has to keep working now that `src` is a bound parameter rather than
+    /// a formatted-in literal, and stay idempotent on the timestamp key.
+    #[test]
+    fn insert_binds_src_and_ignores_duplicates() {
+        let conn = open(std::path::Path::new(":memory:")).unwrap();
+        let mut obs = vec![None; 19];
+        obs[0] = Some(1_700_000_000.0);
+        obs[7] = Some(21.5);
+        assert!(insert(&conn, &obs, 3));
+        assert!(!insert(&conn, &obs, 3), "same timestamp inserts once");
+        let src: i64 = conn.query_row("SELECT src FROM obs", [], |r| r.get(0)).unwrap();
+        assert_eq!(src, 3);
+    }
+
+    /// The cache key for /history/daily: no COUNT(*), and it still moves when the archive does.
+    #[test]
+    fn stamp_is_the_range_not_a_count() {
+        let conn = open(std::path::Path::new(":memory:")).unwrap();
+        assert_eq!(stamp(&conn), (0, 0));
+        let mut obs = vec![None; 19];
+        obs[0] = Some(100.0);
+        insert(&conn, &obs, 0);
+        obs[0] = Some(500.0);
+        insert(&conn, &obs, 0);
+        assert_eq!(stamp(&conn), (100, 500));
+    }
     use super::*;
 
     fn mem() -> Connection {

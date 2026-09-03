@@ -53,12 +53,15 @@ const DEFAULTS = {
   // 'auto' | 'on' | 'off' — see ecoOn(). Auto is the point of the setting: the tablet on the wall
   // should not need anyone to know it is the slow machine.
   eco: 'auto',
+  // 'auto' | 'full' | 'lite' | 'off' — see motion.js. Auto means Full on a desktop and Lite on
+  // the same hardware eco mode calls slow.
+  motion: 'auto',
   // Quiet hours, 'HH:MM' each, both empty = off. Suppresses the chime and every push channel;
   // a Severe or Extreme alert still comes through, because that is what the setting is for.
   quietStart: '', quietEnd: '',
-  // Kiosk speech: read severe alerts aloud. Off by default — a dashboard that talks without
-  // being asked is a dashboard someone unplugs.
-  speakAlerts: false,
+  // Read Severe and Extreme alerts aloud. On by default: a tornado warning on a wall panel
+  // across the room is the one thing worth saying out loud. Nothing else ever speaks.
+  speakAlerts: true,
   // Browser notifications, secure origins only. Off until asked for: the permission prompt is
   // rude unprompted, and the desktop app already raises real ones through Tauri.
   webNotif: false,
@@ -109,12 +112,31 @@ export function load(key, fallback) {
   } catch { return structuredClone(fallback); }
 }
 
+// Callers re-store the same payload constantly (the cached forecast on every obs, the forecast
+// snapshot list on every fetch). Serialising is cheap; the write and its disk flush are not.
+const written = new Map();
+
 export function store(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); }
+  try {
+    const json = JSON.stringify(value);
+    if (written.get(key) === json) return;
+    localStorage.setItem(key, json);
+    written.set(key, json);
+  }
   catch (e) { console.warn('localStorage full', key, e); }
 }
 
 if (location.search.includes('selftest')) {
+  const spoken = (e) => shouldSpeak(e, { speakAlerts: true });
+  console.assert(spoken({ category: 'severe', severity: 'Extreme', title: 'Tornado Warning' }), 'speak: Extreme is read out');
+  console.assert(spoken({ category: 'severe', severity: 'Severe', title: 'Severe Thunderstorm Warning' }), 'speak: Severe is read out');
+  console.assert(!spoken({ category: 'severe', severity: 'Minor', title: 'Dense Fog Advisory' }), 'speak: a Minor advisory is not');
+  console.assert(spoken({ category: 'severe', severity: 'Moderate', title: 'Flood Warning', headline: 'FLASH FLOOD EMERGENCY' }),
+    'speak: an emergency inside a lesser severity still speaks');
+  console.assert(!shouldSpeak({ category: 'severe', severity: 'Extreme', title: 'x' }, { speakAlerts: false }),
+    'speak: nothing at all when the setting is off');
+  console.assert(!spoken({ category: 'info', severity: 'Extreme', title: 'x' }), 'speak: only the severe channel talks');
+
   const noon = new Date(2020, 0, 1, 13, 5).getTime() / 1000;
   console.assert(timeStr(noon, { clock24: '24' }).startsWith('13'), 'app: 24-hour clock reads 13:05');
   console.assert(/1:05/.test(timeStr(noon, { clock24: '12' })), 'app: 12-hour clock reads 1:05');
@@ -201,13 +223,13 @@ export function inQuiet(s = _settings, now = new Date()) {
   return from <= to ? at >= from && at < to : at >= from || at < to;
 }
 
-export function notify({ id, category = 'info', title, body }) {
+export function notify({ id, category = 'info', title, body, severity = '', headline = '' }) {
   if (id) {
     if (seen.has(id)) return;
     seen.add(id);
   }
   if (category !== 'info' && _settings.notif[category] === false) return;
-  const entry = { t: Date.now(), id, category, title, body };
+  const entry = { t: Date.now(), id, category, title, body, severity, headline };
   notifLog.unshift(entry);
   notifLog.splice(100);
   store('wd.notifLog', notifLog);
@@ -226,6 +248,10 @@ export function notify({ id, category = 'info', title, body }) {
   el.querySelector('.notif-body').textContent = body || '';
   el.querySelector('.notif-x').onclick = () => el.remove();
   wrap.prepend(el);
+  if (document.documentElement.dataset.motion !== 'off') {
+    try { el.animate([{ opacity: 0, transform: 'translateX(24px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' }); }
+    catch { /* no WAAPI */ }
+  }
   // A dashboard is left running for days, and nothing here ever took a banner down: an overnight
   // run of forecast changes buried the screen. Severe alerts stay until dismissed by hand.
   if (category !== 'severe') setTimeout(() => el.remove(), 30000);
@@ -256,11 +282,39 @@ export function dismissStale(category, liveIds) {
 }
 
 // A wall panel across the room can't be read, and the person it matters to isn't holding it.
-// Severe only, and only when asked: `speakAlerts`.
-function speak({ category, title }) {
-  if (!_settings.speakAlerts || category !== 'severe' || !('speechSynthesis' in window)) return;
-  try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(title)); }
-  catch { /* no voices installed; the banner is still there */ }
+//
+// Severe and Extreme only. NWS tags plenty of routine advisories as `category: 'severe'` here
+// (that is the notification channel, not the warning's severity), and a dashboard that reads out
+// every Dense Fog Advisory is one nobody leaves on. A Tornado or Flash Flood Emergency rides
+// inside an ordinary Warning, so the word itself is a trigger too.
+export function shouldSpeak({ category, severity, title, headline }, s = _settings) {
+  if (!s.speakAlerts || category !== 'severe') return false;
+  if (['Severe', 'Extreme'].includes(severity)) return true;
+  return /emergency/i.test(`${title || ''} ${headline || ''}`);
+}
+
+// Chrome and the Android WebView refuse to speak before the page has been touched (the utterance
+// errors with `not-allowed`). Hold it and say it on the first tap rather than losing it.
+let held = null;
+const replay = () => {
+  if (!held || Date.now() - held.at > 600000) { held = null; return; }
+  const u = held.utter;
+  held = null;
+  try { window.speechSynthesis.speak(u); } catch { /* still no */ }
+};
+window.addEventListener('pointerdown', replay);
+window.addEventListener('keydown', replay);
+
+function speak(entry) {
+  if (!shouldSpeak(entry) || !('speechSynthesis' in window)) return;
+  const words = `${entry.severity === 'Extreme' ? 'Emergency. ' : ''}${entry.title}. ${entry.headline || entry.body || ''}`;
+  try {
+    const utter = new SpeechSynthesisUtterance(words);
+    utter.lang = navigator.language || 'en-US';
+    utter.onerror = (e) => { if (e.error === 'not-allowed') held = { utter: new SpeechSynthesisUtterance(words), at: Date.now() }; };
+    // After the chime, not over it.
+    setTimeout(() => window.speechSynthesis.speak(utter), 300);
+  } catch { /* no voices installed; the banner is still there */ }
 }
 
 // An in-page banner is no use behind another window. Desktop only, and only when this window
@@ -554,6 +608,27 @@ export function initNav() {
     // The ticker is a 60s transform animation: composited every frame, forever. Only let it run
     // while the Desk is the section on screen.
     document.body.classList.toggle('ticker-live', id === 'desk');
+    // The broadcast page turn: the incoming section swooshes in behind a band of light. Read
+    // straight off the attribute so app.js keeps importing nothing.
+    const level = document.documentElement.dataset.motion;
+    const sec = document.getElementById(id);
+    if (level && level !== 'off' && sec?.animate) {
+      try {
+        sec.animate(
+          level === 'full'
+            ? [{ opacity: 0, transform: 'translateX(28px)' }, { opacity: 1, transform: 'none' }]
+            : [{ opacity: 0 }, { opacity: 1 }],
+          { duration: 280, easing: 'cubic-bezier(.2,.9,.3,1)' });
+      } catch { /* no WAAPI */ }
+      if (level === 'full') {
+        const main = document.querySelector('main');
+        main?.classList.remove('wipe');
+        // Reading offsetWidth is what lets the class be re-added in the same frame.
+        void main?.offsetWidth;
+        main?.classList.add('wipe');
+        main?.addEventListener('animationend', () => main.classList.remove('wipe'), { once: true });
+      }
+    }
     window.dispatchEvent(new CustomEvent('wd:section', { detail: id }));
   };
   tabs.forEach((t) => (t.onclick = () => show(t.dataset.section)));

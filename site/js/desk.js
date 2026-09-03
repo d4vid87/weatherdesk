@@ -1,5 +1,6 @@
 // 01 Desk — current conditions, near-term forecast, alerts, AQI.
 import * as api from './api.js';
+import { wx } from './icons.js';
 import { settings, coords, configured, hasSource, hasLocation, U, num, timeStr, dayStr, notify, dismissStale, every, stamp, store, load, setStorm } from './app.js';
 
 // Last-good copies of the two payloads the Desk can't render without. An outage that spans a
@@ -21,11 +22,16 @@ async function cached(key, fetcher) {
 // dedupes ids forever, so the first failure would silence every later one.
 let toldFcFail = false;
 
+// What the ticker turns into while something serious is out — see pro.js renderTicker().
+let severe = [];
+export const severeAlerts = () => severe;
+
 let latestForecast = null;
 export const forecast = () => latestForecast;
 
 const $ = (id) => document.getElementById(id);
 
+// ponytail: one emoji fallback stays for the plain-text places (document title, MQTT payloads).
 const ICON = {
   'clear-day': '☀️', 'clear-night': '🌙', 'cloudy': '☁️', 'foggy': '🌫️',
   'partly-cloudy-day': '⛅', 'partly-cloudy-night': '☁️', 'possibly-rainy-day': '🌦️',
@@ -34,7 +40,7 @@ const ICON = {
   'possibly-thunderstorm-night': '⛈️', 'rainy': '🌧️', 'sleet': '🌨️', 'snow': '❄️',
   'thunderstorm': '⛈️', 'windy': '💨',
 };
-export const icon = (k) => ICON[k] || '·';
+export const icon = (k) => wx(k, 20, true) || ICON[k] || '·';
 
 export async function refreshDesk() {
   // Not `configured()`: an Ecowitt or a Davis has no Tempest forecast, and `api.betterForecast`
@@ -63,8 +69,19 @@ export async function refreshDesk() {
 
 // A forecast is fetched every few minutes; the station reports every few seconds. Repaint the
 // cached payload with the new reading so the gauges show the garden, not the model.
+// A backgrounded tab still gets every 3-second websocket frame; repainting a page nobody is
+// looking at is the whole cost. Hold the last one and replay it when the tab comes back.
+let pendingObs = null;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !pendingObs) return;
+  const o = pendingObs;
+  pendingObs = null;
+  window.dispatchEvent(new CustomEvent('wd:ws-obs', { detail: o }));
+});
+
 window.addEventListener('wd:ws-obs', (e) => {
   if (!latestForecast) return;
+  if (document.hidden) { pendingObs = e.detail; return; }
   api.overlayStation(latestForecast.current_conditions, e.detail, latestForecast.elevation);
   renderCurrent(latestForecast.current_conditions);
   window.dispatchEvent(new CustomEvent('wd:forecast', { detail: latestForecast }));
@@ -107,6 +124,11 @@ export async function refreshAlerts() {
       }).join('')
     : '<div class="muted">No active alerts</div>';
   stamp('alerts', 300);
+  // Set before setStorm(): that dispatches wd:storm synchronously, and the ticker re-renders as
+  // the crawl on the strength of it — with nothing to crawl if this ran after.
+  severe = feats
+    .filter((f) => ['Severe', 'Extreme'].includes(f.properties?.severity))
+    .map((f) => [f.properties.event, f.properties.headline || f.properties.areaDesc || '']);
   // Storm mode: while something serious is out, every panel goes back to full rate whatever eco
   // and the hour say. This is the one time the dashboard is being watched.
   setStorm(feats.some((f) => ['Severe', 'Extreme'].includes(f.properties?.severity)));
@@ -117,6 +139,7 @@ export async function refreshAlerts() {
   feats.forEach((f) => notify({
     id: key(f.properties), category: 'severe',
     title: f.properties.event, body: f.properties.headline || '',
+    severity: f.properties.severity, headline: f.properties.headline || '',
   }));
   dismissStale('severe', new Set(feats.map((f) => key(f.properties))));
 }
@@ -124,12 +147,14 @@ export async function refreshAlerts() {
 export async function refreshAqi() {
   if (coords().lat == null) return;
   const j = await api.aqi();
-  const i = j.hourly.time.findIndex((t) => new Date(t) > new Date()) - 1;
-  const v = j.hourly.us_aqi[Math.max(i, 0)];
+  const idx = j.hourly.time.findIndex((t) => new Date(t) > new Date());
+  // No future hour left in the payload means the last one is the current one.
+  const i = Math.min(Math.max(idx === -1 ? j.hourly.time.length - 1 : idx - 1, 0), j.hourly.time.length - 1);
+  const v = j.hourly.us_aqi[i];
   $('aqi-val').textContent = num(v);
   $('aqi-label').textContent = aqiLabel(v);
   $('aqi-val').className = `aqi-${aqiBand(v)}`;
-  $('aqi-detail').textContent = `PM2.5 ${num(j.hourly.pm2_5[Math.max(i, 0)], 1)} µg/m³`;
+  $('aqi-detail').textContent = `PM2.5 ${num(j.hourly.pm2_5[i], 1)} µg/m³`;
   stamp('aqi-val', 1800);
 }
 

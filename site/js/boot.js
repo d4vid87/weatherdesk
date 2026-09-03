@@ -10,11 +10,12 @@ import { initRules, renderRules } from './rules.js';
 import { initEnv } from './env.js';
 import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
-import { initLayout, snapshot, restore, hiddenPanels, unhide, panelIds, tabOf, setTab, TABS } from './layout.js';
+import { initLayout, snapshot, restore, hiddenPanels, unhide, panelIds, tabOf, setTab, TABS, NEVER_HIDE } from './layout.js';
 import { initUdp } from './udp.js';
 import { initHome } from './home.js';
 import { initOutlook } from './outlook.js';
 import { initDetail } from './detail.js';
+import { applyMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -146,6 +147,7 @@ function fillDrawer() {
   $('set-nearby-radius').value = s.nearbyRadius ?? 0;
   $('set-desk-radar').checked = !!s.deskRadar;
   $('set-eco').value = s.eco || 'auto';
+  $('set-motion').value = s.motion || 'auto';
   $('set-storm-auto').checked = !!s.stormAuto;
   $('set-theme').value = s.theme || 'dark';
   $('set-accent').value = s.accent || '#4fb8ff';
@@ -206,8 +208,7 @@ function fillDrawer() {
 function renderDiag() {
   const el = $('ingest-diag');
   if (!el) return;
-  fetch(`${SRV}/diag`)
-    .then((r) => r.json())
+  api.getJSON(`${SRV}/diag`)
     .then((d) => {
       const rows = Object.entries(d).map(([src, v]) => {
         const ago = Math.max(0, Math.round(Date.now() / 1000 - v.at));
@@ -227,7 +228,7 @@ function renderDiag() {
 // because /diag is a LAN-server route and app.js has no idea whether it is talking to one.
 async function probeServerAlerts() {
   try {
-    const d = await (await fetch(`${SRV}/diag`, { signal: expires(5000) })).json();
+    const d = await api.getJSON(`${SRV}/diag`);
     setServerAlerts(!!d.alerts?.ok);
   } catch {
     setServerAlerts(false);
@@ -409,7 +410,7 @@ $('btn-refresh').onclick = refreshAll;
 $('btn-save').onclick = async () => {
   // A new radar site means the saved camera belongs to the old one — drop it so the fresh
   // site-only link recenters.
-  if ($('set-radar-site').value !== (settings().radarSite || '')) store('wd.radar', null);
+  if ($('set-radar-site').value !== (settings().radarSite || '')) { radarView = null; store('wd.radar', null); }
   saveSettings({
     radarSite: $('set-radar-site').value,
     token: $('set-token').value.trim(),
@@ -417,12 +418,13 @@ $('btn-save').onclick = async () => {
     deviceId: $('set-device').value.trim(),
     units: $('set-units').value,
     clock24: $('set-clock').value,
-    refreshSec: +$('set-refresh').value || 60,
+    refreshSec: Math.min(3600, Math.max(5, +$('set-refresh').value || 60)),
     windGustAlert: +$('set-gust').value || 30,
     windUnit: $('set-wind-unit').value,
     nearbyRadius: +$('set-nearby-radius').value || 0,
     deskRadar: $('set-desk-radar').checked,
     eco: $('set-eco').value,
+    motion: $('set-motion').value,
     stormAuto: $('set-storm-auto').checked,
     theme: $('set-theme').value,
     // The picker cannot express "no accent", so the default colour means the default.
@@ -430,7 +432,7 @@ $('btn-save').onclick = async () => {
     fontScale: +$('set-font').value || 1,
     density: $('set-density').value,
     bigNumbers: $('set-big-numbers').checked,
-    kioskCycleSec: +$('set-kiosk').value || 0,
+    kioskCycleSec: Math.max(0, Math.min(3600, +$('set-kiosk').value || 0)),
     nightDim: $('set-night-dim').checked,
     speakAlerts: $('set-speak').checked,
     webNotif: $('set-web-notif').checked,
@@ -740,8 +742,8 @@ function changelog() {
   if (!seen) return; // a fresh install has nothing to be new since
   notify({
     title: `WeatherDesk ${APP_VERSION}`,
-    body: 'New: eco mode, observation log + almanac, custom alert rules with phone push, themes, '
-      + 'kiosk cycling, sun/moon and garden cards, station health, and a read-only /public page.',
+    body: 'New: broadcast-style motion with a live sky and animated icons, a Motion setting '
+      + '(Auto/Full/Lite/Off), severe alerts read aloud, and a faster Desk.',
   });
 }
 
@@ -776,6 +778,7 @@ function renderStations() {
 async function switchStation(s) {
   saveSettings({ stationId: String(s.id), deviceId: s.deviceId || '', lat: s.lat, lon: s.lon, stationName: s.name });
   // The radar camera belongs to the station we just left.
+  radarView = null;
   store('wd.radar', null);
   await hydrateStation();
   refreshAll();
@@ -869,6 +872,7 @@ function applyPreset(name) {
   const st = {};
   for (const id of panelIds().filter(isDeskPanel)) {
     const i = keep.indexOf(id);
+    if (NEVER_HIDE.includes(id)) continue;
     if (i === -1) st[id] = { hidden: true };
     else st[id] = { order: i };
   }
@@ -1063,7 +1067,7 @@ function radarSite() {
 // cannot remember anything for us — the saved view lives here and rides in on the deep link.
 // That is what stops the site and the camera resetting on every launch.
 export function radarUrl(zoom, embed = true) {
-  const s = settings(), v = load('wd.radar', null);
+  const s = settings(), v = radarView ?? load('wd.radar', null);
   const site = v?.site || radarSite();
   const lon = v ? v.lon : s.lon, lat = v ? v.lat : s.lat;
   if (lat == null && !site) return RADAR;
@@ -1080,12 +1084,37 @@ export function radarUrl(zoom, embed = true) {
 
 // The embedded viewer posts its view back once a second; persist it, but deliberately not through
 // saveSettings — a pan would fire `wd:settings` (and a full re-init) every second.
+// Held in memory and flushed every few seconds: a pan posts once a second, and a localStorage
+// write per frame is the panning stutter.
+let radarView = null, radarFlush = 0;
+
 window.addEventListener('message', (e) => {
   if (e.origin !== new URL(RADAR).origin) return;
   let v = e.data;
   try { v = typeof v === 'string' ? JSON.parse(v) : v; } catch { return; }
-  if (v && v.hookecho === 1) store('wd.radar', v);
+  if (!v || v.hookecho !== 1) return;
+  radarView = v;
+  radarAlive();
+  if (radarFlush) return;
+  radarFlush = setTimeout(() => { radarFlush = 0; store('wd.radar', radarView); }, 5000);
 });
+window.addEventListener('pagehide', () => { if (radarView) store('wd.radar', radarView); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && radarView) store('wd.radar', radarView);
+});
+
+// The viewer is a third-party origin behind a tunnel: when it is down the iframe just stays blank
+// and the panel looks broken. No camera message within 20 s of loading it means unreachable.
+let radarWatch = 0;
+function radarAlive() {
+  clearTimeout(radarWatch);
+  radarWatch = 0;
+  $('desk-radar')?.classList.remove('unreachable');
+}
+function radarWatchdog() {
+  clearTimeout(radarWatch);
+  radarWatch = setTimeout(() => $('desk-radar')?.classList.add('unreachable'), 20000);
+}
 
 // Storm mode: a warning out is the one time the radar earns its cost, and exactly when nobody is
 // at the machine to switch it on. In-memory override only — never written to settings. It used to
@@ -1139,7 +1168,7 @@ function loadDeskRadar() {
   loadDeskRadar.armed = true;
 
   const start = () => {
-    if (!f.src) f.src = radarUrl(6.5);
+    if (!f.src) { f.src = radarUrl(6.5); radarWatchdog(); }
     panel.classList.add('loaded');
   };
   const whenIdle = () => (window.requestIdleCallback
@@ -1155,7 +1184,10 @@ function loadDeskRadar() {
   io.observe(panel);
 }
 
-await pullConfig();
+// Not awaited at the top level: the whole module graph used to stall behind a 2-second config
+// fetch before a single pixel was painted. Wire the chrome now, re-run the parts the config can
+// change once it lands.
+const pulled = pullConfig();
 
 // A viewer cannot open the drawer, so a viewer cannot see or change anything the owner set. The
 // token is not in this page to begin with — the server never sent it.
@@ -1170,6 +1202,7 @@ if (PUBLIC) {
 }
 
 applyEco();
+applyMotion();
 initKiosk();
 initRules();
 initNav();
@@ -1180,6 +1213,8 @@ initNav();
 // Never while typing: the token field is one keystroke from being a tab switch otherwise.
 document.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
+  // The detail slide-over owns Escape while it is open, or one press closed it and left kiosk.
+  if (e.key === 'Escape' && document.getElementById('detail')?.classList.contains('open')) return;
   const el = document.activeElement;
   if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
     if (e.key === 'Escape') el.blur();
@@ -1209,6 +1244,22 @@ renderLayouts();
 
 changelog();
 
+// Anything the pulled config decides: the wizard (showing it before the pull flashed it on an
+// install that is configured on the server), and the settings-driven chrome.
+pulled.then(() => {
+  applyEco();
+  applyMotion();
+  initKiosk();
+  applyLock();
+  showWizard();
+  hydrateStation().then(() => {
+    loadDeskRadar();
+    initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initDetail(); initUdp(); initHome();
+    every('server-alerts', 300, probeServerAlerts);
+  });
+});
+
+function showWizard() {
 if (!hasSource() && !PUBLIC) {
   $('wizard').hidden = false;
   // No autofocus on the token field: it put a cursor in a Tempest-only box for people who own
@@ -1228,12 +1279,7 @@ if (!hasSource() && !PUBLIC) {
     }
   }
 }
-// lat/lon must land before the open-meteo/NWS jobs start (resolves immediately when unconfigured)
-hydrateStation().then(() => {
-  loadDeskRadar();
-  initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initDetail(); initUdp(); initHome();
-  every('server-alerts', 300, probeServerAlerts);
-});
+}
 
 // ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.
 if (location.search.includes('selftest')) {

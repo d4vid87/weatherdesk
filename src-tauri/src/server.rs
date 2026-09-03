@@ -38,8 +38,12 @@ pub struct State {
     pub packets: Mutex<HashMap<String, String>>,
     pub cfg_path: PathBuf,
     pub data_dir: PathBuf,
-    /// (tz, row count, newest ts, body) — see `/history/daily`.
+    /// (tz, oldest ts, newest ts, body) — see `/history/daily`.
     daily: Mutex<Option<(i64, i64, i64, String)>>,
+    /// The ingest path's connection, opened once and kept. Every reading used to open a fresh
+    /// SQLite handle (file open, WAL header read, pragmas, schema check) a few times a second.
+    /// ponytail: one writer mutex; per-thread connections if ingest ever exceeds a few rows/s.
+    writer: Mutex<Option<rusqlite::Connection>>,
     sse: Mutex<Vec<SyncSender<String>>>,
     sse_n: AtomicUsize,
     pub backfill: Mutex<&'static str>,
@@ -52,6 +56,7 @@ impl State {
             cfg_path,
             data_dir,
             daily: Mutex::new(None),
+            writer: Mutex::new(None),
             sse: Mutex::new(Vec::new()),
             sse_n: AtomicUsize::new(0),
             backfill: Mutex::new("off"),
@@ -69,6 +74,15 @@ impl State {
 
     pub fn db(&self) -> Option<rusqlite::Connection> {
         store::open(&store::db_path(&self.data_dir)).ok()
+    }
+
+    /// Run one write against the kept-open writer connection, opening it on first use.
+    pub fn with_db<T>(&self, f: impl FnOnce(&rusqlite::Connection) -> T) -> Option<T> {
+        let mut slot = self.writer.lock().ok()?;
+        if slot.is_none() {
+            *slot = store::open(&store::db_path(&self.data_dir)).ok();
+        }
+        slot.as_ref().map(f)
     }
 }
 
@@ -287,6 +301,36 @@ fn asset(path: &str) -> Option<(Vec<u8>, &'static str)> {
     Some((bytes, mime))
 }
 
+/// Version plus length: the site is baked into the binary, so a file can only change when the
+/// binary does — and a length catches a `WD_SITE_DIR` edit during development.
+pub fn etag(len: usize) -> String {
+    format!("\"{}-{}\"", env!("CARGO_PKG_VERSION"), len)
+}
+
+/// Fonts and icons never change under a given URL and a week is invisible to anyone. Code and
+/// markup must always be revalidated, or a fixed bug would stay fixed only on the machines that
+/// happened to go offline.
+pub fn cache_policy(mime: &str) -> &'static str {
+    match mime {
+        "font/woff2" | "image/png" | "image/x-icon" | "image/jpeg" => "public, max-age=604800",
+        _ => "no-cache",
+    }
+}
+
+fn if_none_match(req: &tiny_http::Request) -> Option<String> {
+    req.headers()
+        .iter()
+        .find(|h| h.field.equiv("If-None-Match"))
+        .map(|h| h.value.as_str().to_string())
+}
+
+fn not_modified(tag: &str, mime: &str) -> ResponseBox {
+    Response::empty(304)
+        .with_header(header("ETag", tag))
+        .with_header(header("Cache-Control", cache_policy(mime)))
+        .boxed()
+}
+
 /// The one place the running version comes from. Injected into every page we serve, and into
 /// the desktop window separately (`gui.rs`) — that window loads the site over Tauri's asset
 /// protocol and never touches this server.
@@ -432,12 +476,22 @@ fn handle(state: &Arc<State>, mut req: Request) {
         "/history/daily" => {
             let tz = query(&url, "tz").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
             let Some(conn) = state.db() else { return drop(req.respond(Response::empty(503))) };
-            let (count, max) = store::stamp(&conn);
-            let mut cache = state.daily.lock().unwrap();
-            if cache.as_ref().map(|(t, c, m, _)| (*t, *c, *m)) != Some((tz, count, max)) {
-                *cache = Some((tz, count, max, store::daily_json(&conn, tz)));
-            }
-            json(cache.as_ref().unwrap().3.clone())
+            let (min, max) = store::stamp(&conn);
+            // The lock is not held across the query: a slow aggregate would otherwise block
+            // every other screen asking the same question.
+            let hit = {
+                let cache = state.daily.lock().unwrap();
+                match cache.as_ref() {
+                    Some((t, c, m, body)) if (*t, *c, *m) == (tz, min, max) => Some(body.clone()),
+                    _ => None,
+                }
+            };
+            let body = hit.unwrap_or_else(|| {
+                let fresh = store::daily_json(&conn, tz);
+                *state.daily.lock().unwrap() = Some((tz, min, max, fresh.clone()));
+                fresh
+            });
+            json(body)
         }
         // The raw archive, SI, in `store::FIELDS` order. `/history/daily` answers the almanac's
         // question; this one answers the Data tab's, which for a non-Tempest station is the only
@@ -530,9 +584,29 @@ fn handle(state: &Arc<State>, mut req: Request) {
                     "<head>",
                     &format!("<head><script>{}{}</script>", srv_script(&req), ver_script()),
                 );
-                Response::from_string(page).with_header(header("Content-Type", "text/html")).boxed()
+                let tag = etag(page.len());
+                if if_none_match(&req).as_deref() == Some(tag.as_str()) {
+                    not_modified(&tag, "text/html")
+                } else {
+                    Response::from_string(page)
+                        .with_header(header("Content-Type", "text/html"))
+                        .with_header(header("ETag", &tag))
+                        .with_header(header("Cache-Control", cache_policy("text/html")))
+                        .boxed()
+                }
             }
-            Some((bytes, mime)) => Response::from_data(bytes).with_header(header("Content-Type", mime)).boxed(),
+            Some((bytes, mime)) => {
+                let tag = etag(bytes.len());
+                if if_none_match(&req).as_deref() == Some(tag.as_str()) {
+                    not_modified(&tag, mime)
+                } else {
+                    Response::from_data(bytes)
+                        .with_header(header("Content-Type", mime))
+                        .with_header(header("ETag", &tag))
+                        .with_header(header("Cache-Control", cache_policy(mime)))
+                        .boxed()
+                }
+            }
             None => Response::empty(404).boxed(),
         },
     };
@@ -646,6 +720,67 @@ pub fn start_backfill(state: Arc<State>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The header contract, end to end: a real request over a real socket, because the etag and
+    /// the cache policy are only worth anything if they reach the wire.
+    #[test]
+    fn assets_carry_an_etag_and_answer_304() {
+        use std::io::{BufRead, BufReader, Write};
+        let dir = std::env::temp_dir().join(format!("wd-test-{}", std::process::id()));
+        let state = State::new(dir.clone(), dir.join("config.json"));
+        let port = serve(state, 0);
+        assert!(port > 0, "no port available for the test server");
+
+        let get = |extra: &str| -> (String, Vec<String>) {
+            let mut sock = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(sock, "GET /js/motion.js HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{extra}\r\n").unwrap();
+            let mut r = BufReader::new(sock);
+            let mut status = String::new();
+            r.read_line(&mut status).unwrap();
+            let mut headers = Vec::new();
+            loop {
+                let mut line = String::new();
+                if r.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                    break;
+                }
+                headers.push(line.trim().to_string());
+            }
+            (status, headers)
+        };
+
+        let (status, headers) = get("");
+        assert!(status.contains("200"), "{status}");
+        let tag = headers
+            .iter()
+            .find_map(|h| h.strip_prefix("ETag: "))
+            .expect("no ETag on a served asset")
+            .to_string();
+        assert!(headers.iter().any(|h| h == "Cache-Control: no-cache"), "{headers:?}");
+
+        let (status, _) = get(&format!("If-None-Match: {tag}\r\n"));
+        assert!(status.contains("304"), "a matching etag should be answered 304, got {status}");
+    }
+
+    /// The etag is keyed on what can actually change: the binary's version, and the file's
+    /// length for a WD_SITE_DIR edit during development.
+    #[test]
+    fn etag_keyed_on_version_and_length() {
+        assert_eq!(etag(10), etag(10));
+        assert_ne!(etag(10), etag(11));
+        assert!(etag(10).starts_with(&format!("\"{}-", env!("CARGO_PKG_VERSION"))));
+    }
+
+    /// Code and markup are always revalidated; only immutable assets get a long life.
+    #[test]
+    fn cache_policy_by_mime() {
+        assert_eq!(cache_policy("font/woff2"), "public, max-age=604800");
+        assert_eq!(cache_policy("image/png"), "public, max-age=604800");
+        assert_eq!(cache_policy("text/html"), "no-cache");
+        assert_eq!(cache_policy("text/javascript"), "no-cache");
+        // An animated icon is an SVG, and SVGs are also how the site draws its own gauges —
+        // revalidating them costs one conditional request and keeps a fix deployable.
+        assert_eq!(cache_policy("image/svg+xml"), "no-cache");
+    }
 
     #[test]
     fn utc_day_and_time() {

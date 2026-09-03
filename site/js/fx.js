@@ -1,8 +1,18 @@
 // Weather in the hero: rain, snow, drifting cloud and lightning drawn on one canvas behind the
 // numbers. Pure decoration — every path here is allowed to do nothing.
-import { ecoOn } from './app.js';
+import { motionLevel } from './motion.js';
 
-let ctx = null, parts = [], regime = '', raf = 0, flash = 0;
+let ctx = null, parts = [], regime = '', raf = 0, flash = 0, lastKey = '', onDesk = true;
+
+// A canvas painting rain behind a tab nobody is on is pure heat. The hero only exists on the
+// Desk, so anywhere else the loop stops entirely.
+window.addEventListener('wd:section', (e) => {
+  onDesk = e.detail === 'desk';
+  if (!onDesk) stop();
+  else if (lastKey) setScene(lastKey);
+});
+// Full → Lite has to kill a running loop, not wait for the next weather change.
+window.addEventListener('wd:settings', () => { if (lastKey) setScene(lastKey); });
 
 // Which particle regime an icon key means. Anything unlisted (clear, fog, wind) draws nothing.
 function regimeFor(key = '') {
@@ -82,9 +92,9 @@ function sizeTo(hero) {
 
 // Called from the hero render with the current conditions icon key.
 export function setScene(iconKey) {
-  // Eco is a promise about the machine, not a preference about looks: the wall tablet gets none
-  // of this. ponytail: no per-effect setting until someone asks for one.
-  if (ecoOn()) return stop();
+  lastKey = iconKey || '';
+  // Particles are the most expensive thing on the page: full motion only, Desk only.
+  if (motionLevel() !== 'full' || !onDesk) { regime = ''; return stop(); }
   const hero = document.getElementById('hero');
   if (!hero) return;
   if (!ctx) {

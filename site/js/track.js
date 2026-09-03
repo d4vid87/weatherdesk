@@ -1,6 +1,11 @@
 // Forecast snapshots, change diffs, and forecast-vs-actual verification.
 // All localStorage; no server, no history API needed.
-import { load, store, U, num } from './app.js';
+import { load, store, settings, U, num } from './app.js';
+
+// Which unit system an entry was recorded under. Comparing an °F forecast against a °C reading
+// is not a forecast error, it is a units error — those entries are skipped rather than converted,
+// because a converted history implies a precision it never had.
+const units = () => (settings().units === 'metric' ? 'm' : 'i');
 
 const SNAP_KEY = 'wd.snap', VERIFY_KEY = 'wd.verify';
 const SNAP_MIN_GAP_H = 3, SNAP_CAP = 60, VERIFY_CAP = 200;
@@ -15,6 +20,7 @@ const verifies = () => load(VERIFY_KEY, []);
 function condense(fc) {
   return {
     t: Date.now(),
+    u: units(),
     daily: (fc.forecast.daily || []).slice(0, 7).map((d) => ({
       key: new Date(d.day_start_local * 1000).toDateString(),
       label: new Date(d.day_start_local * 1000).toLocaleDateString([], { weekday: 'short' }),
@@ -23,12 +29,17 @@ function condense(fc) {
   };
 }
 
+// Cheap gate before the parse: snapshots are 3 h apart, and this runs on every forecast fetch.
+let lastSnapT = 0;
+
 export function snapshot(fc) {
+  if (lastSnapT && Date.now() - lastSnapT < SNAP_MIN_GAP_H * H) return snaps();
   const list = snaps();
   const last = list[list.length - 1];
-  if (last && Date.now() - last.t < SNAP_MIN_GAP_H * H) return list;
+  if (last && Date.now() - last.t < SNAP_MIN_GAP_H * H) { lastSnapT = last.t; return list; }
   list.push(condense(fc));
   while (list.length > SNAP_CAP) list.shift();
+  lastSnapT = list[list.length - 1].t;
   store(SNAP_KEY, list);
   return list;
 }
@@ -37,7 +48,7 @@ export function snapshot(fc) {
 export function changes(fc) {
   const list = snaps();
   const cutoff = Date.now() - COMPARE_MIN_AGE_H * H;
-  const old = [...list].reverse().find((s) => s.t <= cutoff);
+  const old = [...list].reverse().find((s) => s.t <= cutoff && (s.u || units()) === units());
   if (!old) return { age: null, items: [] };
 
   const now = condense(fc);
@@ -59,14 +70,20 @@ export function changes(fc) {
 
 // --- verification: record what was forecast for a future hour, score it when that hour arrives ---
 
+// The 24-hour-out hour only changes once an hour; the forecast is fetched every five minutes.
+let lastTargetHour = 0;
+
 export function recordForecast(fc) {
   const hourly = fc.forecast.hourly || [];
+  const t = hourly.find((h) => h.time * 1000 > Date.now() + 24 * H);
+  if (t && t.time === lastTargetHour) return;
+  if (t) lastTargetHour = t.time;
   const list = verifies();
   // one prediction per fetch: the hour 24h out
-  const target = hourly.find((h) => h.time * 1000 > Date.now() + 24 * H);
+  const target = t;
   if (target && !list.some((v) => v.targetHour === target.time)) {
     list.push({
-      targetHour: target.time, leadH: 24,
+      targetHour: target.time, leadH: 24, u: units(),
       fTemp: target.air_temperature, fPop: target.precip_probability,
       obsTemp: null, obsPrecip: null,
     });
@@ -83,6 +100,7 @@ export function scoreForecast(obs) {
   let dirty = false;
   for (const v of list) {
     if (v.obsTemp != null) continue;
+    if ((v.u || units()) !== units()) continue;
     if (Math.abs(v.targetHour * 1000 - now) < 30 * 60e3) {
       v.obsTemp = obs.air_temperature;
       v.obsPrecip = (obs.precip_accum_last_1hr || 0) > 0;
@@ -93,7 +111,7 @@ export function scoreForecast(obs) {
 }
 
 export function accuracy() {
-  const scored = verifies().filter((v) => v.obsTemp != null);
+  const scored = verifies().filter((v) => v.obsTemp != null && (v.u || units()) === units());
   const errs = scored.map((v) => Math.abs(v.fTemp - v.obsTemp));
   return {
     n: scored.length,

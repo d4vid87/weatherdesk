@@ -202,9 +202,12 @@ if (location.search.includes('selftest')) {
     'intel: trust badge thresholds');
 }
 
+// Module level, not inside initIntel(): the settings wizard calls the init functions again
+// after a save, and a second listener means a second render per event.
+window.addEventListener('wd:forecast', () => { renderStory(); renderTrack(); renderEdge(); });
+window.addEventListener('wd:obs', (e) => scoreForecast(e.detail));
+
 export function initIntel() {
   every('intel-models', 900, refreshModels);
   every('intel-nowcast', 600, refreshNowcast);
-  window.addEventListener('wd:forecast', () => { renderStory(); renderTrack(); renderEdge(); });
-  window.addEventListener('wd:obs', (e) => scoreForecast(e.detail));
 }
