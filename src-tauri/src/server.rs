@@ -721,6 +721,46 @@ pub fn start_backfill(state: Arc<State>) {
 mod tests {
     use super::*;
 
+    /// The header contract, end to end: a real request over a real socket, because the etag and
+    /// the cache policy are only worth anything if they reach the wire.
+    #[test]
+    fn assets_carry_an_etag_and_answer_304() {
+        use std::io::{BufRead, BufReader, Write};
+        let dir = std::env::temp_dir().join(format!("wd-test-{}", std::process::id()));
+        let state = State::new(dir.clone(), dir.join("config.json"));
+        let port = serve(state, 0);
+        assert!(port > 0, "no port available for the test server");
+
+        let get = |extra: &str| -> (String, Vec<String>) {
+            let mut sock = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(sock, "GET /js/motion.js HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{extra}\r\n").unwrap();
+            let mut r = BufReader::new(sock);
+            let mut status = String::new();
+            r.read_line(&mut status).unwrap();
+            let mut headers = Vec::new();
+            loop {
+                let mut line = String::new();
+                if r.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                    break;
+                }
+                headers.push(line.trim().to_string());
+            }
+            (status, headers)
+        };
+
+        let (status, headers) = get("");
+        assert!(status.contains("200"), "{status}");
+        let tag = headers
+            .iter()
+            .find_map(|h| h.strip_prefix("ETag: "))
+            .expect("no ETag on a served asset")
+            .to_string();
+        assert!(headers.iter().any(|h| h == "Cache-Control: no-cache"), "{headers:?}");
+
+        let (status, _) = get(&format!("If-None-Match: {tag}\r\n"));
+        assert!(status.contains("304"), "a matching etag should be answered 304, got {status}");
+    }
+
     /// The etag is keyed on what can actually change: the binary's version, and the file's
     /// length for a WD_SITE_DIR edit during development.
     #[test]
