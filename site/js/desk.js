@@ -1,5 +1,6 @@
 // 01 Desk — current conditions, near-term forecast, alerts, AQI.
 import * as api from './api.js';
+import { wx } from './icons.js';
 import { settings, coords, configured, hasSource, hasLocation, U, num, timeStr, dayStr, notify, dismissStale, every, stamp, store, load, setStorm } from './app.js';
 
 // Last-good copies of the two payloads the Desk can't render without. An outage that spans a
@@ -30,6 +31,7 @@ export const forecast = () => latestForecast;
 
 const $ = (id) => document.getElementById(id);
 
+// ponytail: one emoji fallback stays for the plain-text places (document title, MQTT payloads).
 const ICON = {
   'clear-day': '☀️', 'clear-night': '🌙', 'cloudy': '☁️', 'foggy': '🌫️',
   'partly-cloudy-day': '⛅', 'partly-cloudy-night': '☁️', 'possibly-rainy-day': '🌦️',
@@ -38,7 +40,7 @@ const ICON = {
   'possibly-thunderstorm-night': '⛈️', 'rainy': '🌧️', 'sleet': '🌨️', 'snow': '❄️',
   'thunderstorm': '⛈️', 'windy': '💨',
 };
-export const icon = (k) => ICON[k] || '·';
+export const icon = (k) => wx(k, 20, true) || ICON[k] || '·';
 
 export async function refreshDesk() {
   // Not `configured()`: an Ecowitt or a Davis has no Tempest forecast, and `api.betterForecast`

@@ -346,8 +346,9 @@ function renderDays(fc) {
 // An icon written only when the key actually changed: assigning the same markup (or the same
 // <img src>) restarts the animation, and the hero used to do that once a minute.
 function setWx(box, key, size) {
-  if (!box || box.dataset.wx === key) return;
-  box.dataset.wx = key || '';
+  const want = `${key}|${document.documentElement.dataset.motion}`;
+  if (!box || box.dataset.wx === want) return;
+  box.dataset.wx = want;
   box.innerHTML = icon.wx(key, size);
 }
 

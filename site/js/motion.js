@@ -123,6 +123,12 @@ export function enter(nodes, { stagger = 50 } = {}) {
   });
 }
 
+// Arriving on a tab: its panels come in behind the page wipe app.js plays.
+window.addEventListener('wd:section', (e) => {
+  const sec = document.getElementById(e.detail);
+  if (sec) enter(sec.querySelectorAll(':scope > [data-panel], :scope > * > [data-panel]'));
+});
+
 export function leave(el) {
   if (motionLevel() === 'off' || document.hidden || !el.animate) return Promise.resolve();
   try { return el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160 }).finished.catch(() => {}); }

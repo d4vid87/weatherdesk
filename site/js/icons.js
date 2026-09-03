@@ -54,8 +54,43 @@ const DEFS = `<defs>
 // Tempest's icon strings, grouped by what they should look like.
 const has = (icon, ...words) => words.some((w) => (icon || '').includes(w));
 
-/** Condition glyph. `icon` is a Tempest `better_forecast` icon string. */
-export function wx(icon, size = 44) {
+// Meteocons (MIT, Bas Milius — see icons/LICENSE), keyed to the exact vocabulary the forecast
+// payloads use. Vendored twice: `anim/` carries the SMIL animation, `static/` is the same file
+// with the animation elements stripped.
+//
+// ponytail: loaded through <img>, not inlined. Every file reuses gradient ids `a`..`e`, so two
+// inline copies on one page collide and the second draws with the first one's colours. SMIL runs
+// inside <img> on every engine here, and sw.js already cache-firsts image requests.
+const METEO = {
+  'clear-day': 'clear-day', 'clear-night': 'clear-night',
+  cloudy: 'overcast', foggy: 'fog',
+  'partly-cloudy-day': 'partly-cloudy-day', 'partly-cloudy-night': 'partly-cloudy-night',
+  'possibly-rainy-day': 'partly-cloudy-day-rain', 'possibly-rainy-night': 'partly-cloudy-night-rain',
+  'possibly-sleet-day': 'partly-cloudy-day-sleet', 'possibly-sleet-night': 'partly-cloudy-night-sleet',
+  'possibly-snow-day': 'partly-cloudy-day-snow', 'possibly-snow-night': 'partly-cloudy-night-snow',
+  'possibly-thunderstorm-day': 'thunderstorms-day', 'possibly-thunderstorm-night': 'thunderstorms-night',
+  rainy: 'rain', sleet: 'sleet', snow: 'snow', thunderstorm: 'thunderstorms-rain', windy: 'wind',
+};
+
+/** Path to the vendored glyph, animated only at Full motion. */
+export function wxSrc(key, still = false) {
+  const name = METEO[key];
+  if (!name) return '';
+  const dir = !still && document.documentElement.dataset.motion === 'full' ? 'anim' : 'static';
+  return `icons/${dir}/${name}.svg`;
+}
+
+/**
+ * Condition glyph. `icon` is a Tempest `better_forecast` icon string. Falls back to the
+ * hand-drawn SVG below for anything the vendored set has no name for.
+ */
+export function wx(icon, size = 44, still = false) {
+  const src = wxSrc(icon, still);
+  if (src) return `<img class="wx" src="${src}" width="${size}" height="${size}" alt="" decoding="async">`;
+  return wxDrawn(icon, size);
+}
+
+function wxDrawn(icon, size = 44) {
   const night = has(icon, 'night');
   const body = (() => {
     if (has(icon, 'thunder')) return CLOUD(3, 8, 1.2, 'url(#darkCloud)') + BOLT(16, 26, 1.1);

@@ -12,11 +12,34 @@
 <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>WeatherDesk</title>
+<!-- The display face the numbers are set in. Bundled, not fetched from a CDN: a wall panel on a
+     LAN with no route out still has to render. -->
+<link rel="preload" as="font" type="font/woff2" href="fonts/barlow-semi-condensed-600.woff2" crossorigin>
+<!-- The module graph, so the browser fetches it in parallel with boot.js parsing rather than
+     discovering each import one round trip at a time. -->
+<link rel="modulepreload" href="js/app.js">
+<link rel="modulepreload" href="js/api.js">
+<link rel="modulepreload" href="js/desk.js">
+<link rel="modulepreload" href="js/pro.js">
+<link rel="modulepreload" href="js/layout.js">
+<link rel="modulepreload" href="js/icons.js">
+<link rel="modulepreload" href="js/motion.js">
+<link rel="modulepreload" href="js/sky.js">
 <style>
+  @font-face { font-family: 'Barlow SC'; font-style: normal; font-weight: 500; font-display: swap;
+    src: url(fonts/barlow-semi-condensed-500.woff2) format('woff2'); }
+  @font-face { font-family: 'Barlow SC'; font-style: normal; font-weight: 600; font-display: swap;
+    src: url(fonts/barlow-semi-condensed-600.woff2) format('woff2'); }
   :root {
     --bg: #0b0f14; --panel: #131a22; --panel2: #1a232d; --line: #253141;
     --text: #e6edf5; --muted: #8ea0b5; --accent: #4fb8ff; --warn: #ffb84f; --bad: #ff5f56; --good: #4fdc8b;
     --gap: 12px;
+    /* Condensed and tabular: a broadcast number counts up without the line shuffling sideways. */
+    --num: 'Barlow SC', system-ui, sans-serif;
+  }
+  #clock-time, #hero-temp, .ginner b, .dc-temp b, .dc-temp span, #t-model, .tick b, #aqi-val,
+  .now-temp, #trends .warm, #trends .cool {
+    font-family: var(--num); font-variant-numeric: tabular-nums;
   }
   /* Light theme is the same palette inverted, not a second stylesheet — every rule below reads
      these six variables and nothing else knows a theme exists. */
@@ -295,7 +318,7 @@
     border: 1px solid var(--line); }
   #hero-clock { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px;
     font-variant-numeric: tabular-nums; }
-  #clock-time { font-size: 56px; font-weight: 700; line-height: 1; }
+  #clock-time { font-size: 56px; font-weight: 600; line-height: 1; }
   #clock-date { font-size: 18px; }
   .hero-top { display: flex; justify-content: space-between; font-size: 14px; }
   .hero-right { text-align: right; }
@@ -312,7 +335,7 @@
     background: radial-gradient(circle, #ffe9a855, transparent 70%); }
   #hero-feels { margin-top: 20px; font-size: 15px; }
   .hero-now { display: flex; align-items: baseline; gap: 16px; }
-  #hero-temp { font-size: 84px; font-weight: 300; line-height: .95; }
+  #hero-temp { font-size: 84px; font-weight: 500; line-height: .95; }
   #hero-cond { font-size: 30px; font-weight: 600; }
   #hero-hilo { font-size: 16px; }
   .live { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: #0f1c2b; color: #fff;
@@ -647,7 +670,7 @@
   <div id="notif-stack"></div>
 <div id="wizard" hidden>
   <div class="wizard-box">
-    <img src="icon-512.png" alt="" style="display:block;width:180px;max-width:60%;margin:0 auto 10px">
+    <img src="icon-512.png" alt="" loading="lazy" style="display:block;width:180px;max-width:60%;margin:0 auto 10px">
     <h2 style="margin-top:0;text-align:center">Welcome to WeatherDesk</h2>
     <p class="muted" style="font-size:13px">Pick the brand of station in the garden. Every brand
       except Tempest needs no token and no account — the readings come from your own sensors, the
