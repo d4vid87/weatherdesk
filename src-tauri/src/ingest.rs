@@ -332,9 +332,7 @@ fn take(state: &Arc<State>, f: &Fields, raw_ts: f64, src: i64, origin: &'static 
     drop(all);
     note(origin, true, "stored", true);
 
-    if let Some(conn) = state.db() {
-        store::insert(&conn, &t, src);
-    }
+    state.with_db(|conn| store::insert(conn, &t, src));
     if let (Some(d), Some(c)) = (t[14], t[15]) {
         if c > 0.0 {
             publish(

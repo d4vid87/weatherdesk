@@ -377,6 +377,7 @@ fn session(data_dir: &std::path::Path, cfg_path: &std::path::Path, c: &Conf) {
         }
         last_ts = ts;
         publish_row(&client, c, &vals, was);
+        crate::ingest::note("mqtt", true, "publishing", true);
     }
 }
 

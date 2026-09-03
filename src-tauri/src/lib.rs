@@ -59,11 +59,25 @@ pub fn default_config_dir() -> PathBuf {
 /// schema, and mirroring it here would be a second copy to keep in step.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn setting(cfg_path: &std::path::Path, key: &str) -> Option<String> {
-    let text = std::fs::read_to_string(cfg_path).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    static CACHE: std::sync::Mutex<Option<(std::path::PathBuf, std::time::SystemTime, u64, serde_json::Value)>> =
+        std::sync::Mutex::new(None);
+    let meta = std::fs::metadata(cfg_path).ok()?;
+    let (mtime, len) = (meta.modified().ok()?, meta.len());
+    let mut slot = CACHE.lock().ok()?;
+    let fresh = slot
+        .as_ref()
+        .map(|(p, m, l, _)| p == cfg_path && *m == mtime && *l == len)
+        .unwrap_or(false);
+    if !fresh {
+        let text = std::fs::read_to_string(cfg_path).ok()?;
+        let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+        *slot = Some((cfg_path.to_path_buf(), mtime, len, v));
+    }
+    let v = &slot.as_ref()?.3;
     let at = v.pointer(&format!("/settings/{key}"))?;
     Some(at.as_str().map(String::from).unwrap_or_else(|| at.to_string()))
 }
+
 
 /// The UDP listener, the archive and the LAN server — everything that runs whether or not there
 /// is a window. Returns the port the dashboard ended up on.

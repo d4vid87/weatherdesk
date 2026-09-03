@@ -187,9 +187,12 @@ pub fn ha_states(cfg: &std::path::Path) -> String {
         return r#"{"error":"no Home Assistant URL set"}"#.to_string();
     }
     let base = url.trim_end_matches('/');
+    // Five seconds, not twenty: a Home Assistant that is switched off must not hold one of the
+    // four worker threads while every screen in the house asks again. The 15 s cache above is
+    // what keeps the poll cheap when it does answer.
     let body = match ureq::get(&format!("{base}/api/states"))
         .set("Authorization", &format!("Bearer {token}"))
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(5))
         .call()
     {
         Ok(r) => r.into_string().unwrap_or_default(),
