@@ -15,6 +15,7 @@ import { initUdp } from './udp.js';
 import { initHome } from './home.js';
 import { initOutlook } from './outlook.js';
 import { initDetail } from './detail.js';
+import { applyMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -146,6 +147,7 @@ function fillDrawer() {
   $('set-nearby-radius').value = s.nearbyRadius ?? 0;
   $('set-desk-radar').checked = !!s.deskRadar;
   $('set-eco').value = s.eco || 'auto';
+  $('set-motion').value = s.motion || 'auto';
   $('set-storm-auto').checked = !!s.stormAuto;
   $('set-theme').value = s.theme || 'dark';
   $('set-accent').value = s.accent || '#4fb8ff';
@@ -422,6 +424,7 @@ $('btn-save').onclick = async () => {
     nearbyRadius: +$('set-nearby-radius').value || 0,
     deskRadar: $('set-desk-radar').checked,
     eco: $('set-eco').value,
+    motion: $('set-motion').value,
     stormAuto: $('set-storm-auto').checked,
     theme: $('set-theme').value,
     // The picker cannot express "no accent", so the default colour means the default.
@@ -1180,7 +1183,10 @@ function loadDeskRadar() {
   io.observe(panel);
 }
 
-await pullConfig();
+// Not awaited at the top level: the whole module graph used to stall behind a 2-second config
+// fetch before a single pixel was painted. Wire the chrome now, re-run the parts the config can
+// change once it lands.
+const pulled = pullConfig();
 
 // A viewer cannot open the drawer, so a viewer cannot see or change anything the owner set. The
 // token is not in this page to begin with — the server never sent it.
@@ -1195,6 +1201,7 @@ if (PUBLIC) {
 }
 
 applyEco();
+applyMotion();
 initKiosk();
 initRules();
 initNav();
@@ -1236,6 +1243,22 @@ renderLayouts();
 
 changelog();
 
+// Anything the pulled config decides: the wizard (showing it before the pull flashed it on an
+// install that is configured on the server), and the settings-driven chrome.
+pulled.then(() => {
+  applyEco();
+  applyMotion();
+  initKiosk();
+  applyLock();
+  showWizard();
+  hydrateStation().then(() => {
+    loadDeskRadar();
+    initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initDetail(); initUdp(); initHome();
+    every('server-alerts', 300, probeServerAlerts);
+  });
+});
+
+function showWizard() {
 if (!hasSource() && !PUBLIC) {
   $('wizard').hidden = false;
   // No autofocus on the token field: it put a cursor in a Tempest-only box for people who own
@@ -1255,12 +1278,7 @@ if (!hasSource() && !PUBLIC) {
     }
   }
 }
-// lat/lon must land before the open-meteo/NWS jobs start (resolves immediately when unconfigured)
-hydrateStation().then(() => {
-  loadDeskRadar();
-  initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initDetail(); initUdp(); initHome();
-  every('server-alerts', 300, probeServerAlerts);
-});
+}
 
 // ponytail-lite self-check: `?selftest` asserts the site maths and the link the viewer is handed.
 if (location.search.includes('selftest')) {

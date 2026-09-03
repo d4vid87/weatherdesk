@@ -21,6 +21,10 @@ async function cached(key, fetcher) {
 // dedupes ids forever, so the first failure would silence every later one.
 let toldFcFail = false;
 
+// What the ticker turns into while something serious is out — see pro.js renderTicker().
+let severe = [];
+export const severeAlerts = () => severe;
+
 let latestForecast = null;
 export const forecast = () => latestForecast;
 
@@ -118,6 +122,11 @@ export async function refreshAlerts() {
       }).join('')
     : '<div class="muted">No active alerts</div>';
   stamp('alerts', 300);
+  // Set before setStorm(): that dispatches wd:storm synchronously, and the ticker re-renders as
+  // the crawl on the strength of it — with nothing to crawl if this ran after.
+  severe = feats
+    .filter((f) => ['Severe', 'Extreme'].includes(f.properties?.severity))
+    .map((f) => [f.properties.event, f.properties.headline || f.properties.areaDesc || '']);
   // Storm mode: while something serious is out, every panel goes back to full rate whatever eco
   // and the hour say. This is the one time the dashboard is being watched.
   setStorm(feats.some((f) => ['Severe', 'Extreme'].includes(f.properties?.severity)));
@@ -128,6 +137,7 @@ export async function refreshAlerts() {
   feats.forEach((f) => notify({
     id: key(f.properties), category: 'severe',
     title: f.properties.event, body: f.properties.headline || '',
+    severity: f.properties.severity, headline: f.properties.headline || '',
   }));
   dismissStale('severe', new Set(feats.map((f) => key(f.properties))));
 }

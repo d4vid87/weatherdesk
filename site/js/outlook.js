@@ -80,6 +80,7 @@ async function refreshSevere() {
       category: 'severe',
       title: `SPC ${name.toLowerCase()} today`,
       body: 'Severe thunderstorms are expected in your area.',
+      severity: 'Severe', headline: 'Severe thunderstorms are expected in your area.',
     });
   }
 }

@@ -155,8 +155,11 @@
     /* the drawer scrolls to the bottom edge of the window, so the gesture bar sits on its last
        control unless the inset is paid here too */
     padding: var(--gap) var(--gap) calc(var(--gap) + env(safe-area-inset-bottom));
-    transform: translateX(100%); transition: transform .18s ease; z-index: 20;
+    transform: translateX(100%); transition: transform .18s ease; z-index: 1000;
   }
+  /* Above the notification stack (z 30) and the night dim (999): a drawer half-covered by a
+     banner is a drawer with an unreachable Save button. */
+  html[data-motion="full"] #drawer { transition: transform .38s cubic-bezier(.2, .9, .3, 1.12); }
   #drawer.open { transform: none; }
   /* the detail slide-over: same dialog contract as the drawer, same look */
   #detail {
@@ -165,7 +168,8 @@
     padding: var(--gap) var(--gap) calc(var(--gap) + env(safe-area-inset-bottom));
     transform: translateX(100%); transition: transform .2s;
   }
-  #detail.open { transform: none; }
+  html[data-motion="full"] #detail { transition: transform .38s cubic-bezier(.2, .9, .3, 1.12); }
+  #detail.open { transform: none; box-shadow: -24px 0 60px #0008; }
   #detail #detail-close { float: right; }
   [data-metric] { cursor: pointer; }
   #drawer label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
@@ -269,10 +273,23 @@
   /* The grip and the resize handles are excluded on purpose: three id selectors outrank
      `.grip { position: absolute }`, so without this the furniture fell into the flow and the grip
      painted as a black chip over the clock. They carry their own z-index, above the canvas. */
-  #hero > *:not(#hero-fx):not(#hero-icon):not(.grip):not(.rz) { position: relative; z-index: 1; }
-  #hero > #hero-icon { z-index: 1; }
+  #hero > *:not(#hero-fx):not(#hero-sky):not(#hero-orb):not(.grip):not(.rz) { position: relative; z-index: 1; }
   #hero { padding: 16px 20px 20px; color: var(--hero-text, #fff); overflow: hidden; border-radius: 12px;
-    background: linear-gradient(160deg, #1f6fb8, #7fb6e6); }
+    background: linear-gradient(160deg, var(--sky-a, #1f6fb8), var(--sky-b, #7fb6e6)); }
+  /* The live sky: two stacked layers so a colour change crossfades instead of snapping, and one
+     disc for the sun or the moon on its real arc across the panel. Full motion only — at every
+     other level the gradient above is the whole sky. */
+  #hero-sky { position: absolute; inset: -10% 0 -10% 0; pointer-events: none; display: none; }
+  #hero-sky .sky-l { position: absolute; inset: 0; opacity: 0; transition: opacity 2s linear; }
+  #hero-sky .sky-l.on { opacity: 1; }
+  #hero-orb { position: absolute; left: 0; top: 0; width: 64px; height: 64px; margin: -32px 0 0 -32px;
+    border-radius: 50%; pointer-events: none; display: none;
+    background: radial-gradient(circle at 40% 38%, #fff6d0, #ffcf5e 55%, #ffab2e 100%);
+    box-shadow: 0 0 60px 18px #ffdf9a55; }
+  #hero-orb.night { background: none; box-shadow: 0 0 44px 12px #cfe0ff33; }
+  #hero-orb.glide { transition: transform 60s linear; }
+  html[data-motion="full"] #hero-sky, html[data-motion="full"] #hero-orb { display: block; }
+  html[data-palette="eink"] #hero-sky, html[data-palette="eink"] #hero-orb { display: none; }
   /* e-ink kills background-image, so the gradient goes and white-on-white would follow. */
   html[data-palette="eink"] #hero { --hero-text: var(--text); background-color: var(--bg);
     border: 1px solid var(--line); }
@@ -285,8 +302,14 @@
   .hero-dim { opacity: .78; }
   #hero-place { font-size: 22px; font-weight: 600; }
   #hero-sun { font-size: 17px; font-weight: 500; }
-  #hero-icon { position: absolute; right: 34%; top: 4px; opacity: .95; pointer-events: none; }
-  #hero-icon svg { filter: drop-shadow(0 0 26px #ffe9a877); }
+  /* Beside the temperature, not floating over the middle of the panel: with a live sky behind
+     it, an absolutely positioned glyph sat wherever the sun happened to be. */
+  #hero-icon { position: relative; width: 96px; height: 96px; opacity: .95; pointer-events: none; flex: none; }
+  #hero-icon svg, #hero-icon img { width: 96px; height: 96px; }
+  /* A radial glow behind the glyph rather than a 26px drop-shadow filter on it: the filter
+     re-rasterised the whole icon on every repaint. */
+  html[data-motion="full"] #hero-icon::before { content: ''; position: absolute; inset: -18%;
+    background: radial-gradient(circle, #ffe9a855, transparent 70%); }
   #hero-feels { margin-top: 20px; font-size: 15px; }
   .hero-now { display: flex; align-items: baseline; gap: 16px; }
   #hero-temp { font-size: 84px; font-weight: 300; line-height: .95; }
@@ -295,6 +318,9 @@
   .live { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: #0f1c2b; color: #fff;
     display: inline-flex; align-items: center; gap: 5px; }
   .live.on { color: #7dffb0; }
+  /* Ambient life: the live badge breathes while the station is reporting. Opacity only. */
+  html[data-motion="full"] .live.on { animation: breathe 2.4s ease-in-out infinite alternate; }
+  @keyframes breathe { from { opacity: .72; } to { opacity: 1; } }
 
   /* ticker */
 #src-health { display: flex; gap: 5px; align-items: center; }
@@ -311,15 +337,53 @@
      never scrolls away for good. */
   @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   #ticker-track.still { animation: none; }
-  /* Eco: the ticker is a composited transform running forever, and every transition here is a
-     repaint on a machine that has none to spare. Reduced-motion gets the same treatment for the
-     reason it asks for it. */
-  body.eco #ticker-track, body.eco #ticker-track.paused { animation: none; }
-  body.eco * { transition: none !important; }
+  /* The page turn: a band of light across the whole content area as a section arrives. */
+  main.wipe { position: relative; }
+  main.wipe::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 40;
+    background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,.10) 50%, transparent 60%);
+    animation: wipe .55s ease-out forwards; }
+  @keyframes wipe { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  /* The 48-hour line draws itself on when it changes (pathLength=1, so this is unit-free). */
+  html[data-motion="full"] #c48-temp path.draw { stroke-dasharray: 1; stroke-dashoffset: 1;
+    animation: draw 1s ease-out forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  /* The text does not just stop at the panel edge, it fades out of it. */
+  #ticker-track { -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
+  /* Under a Severe or Extreme warning the strip becomes the red crawl. The glow is drawn inside
+     with an inset shadow — [data-panel] clips its overflow, so an outer glow would be invisible. */
+  #ticker.alert { background: #3a0d0d; border-color: #a3231d; box-shadow: inset 0 0 24px #ff3b2f44; }
+  #ticker.alert .tick { color: #ffe9e7; font-weight: 600; }
+  #ticker.alert .tick b { background: #a3231d; border-color: #ff6a5e; color: #fff; }
+  #ticker.alert #ticker-track { animation-duration: 30s; }
+  html[data-motion="full"] #ticker.alert { animation: alertPulse 1.8s ease-in-out infinite alternate; }
+  @keyframes alertPulse { from { box-shadow: inset 0 0 18px #ff3b2f33; } to { box-shadow: inset 0 0 34px #ff3b2f77; } }
+  /* Motion off: the ticker is a composited transform running forever, and every transition here
+     is a repaint on a machine that has none to spare. Eco no longer implies this — eco is about
+     polling rate, the Motion setting is about movement (and defaults to Lite on eco hardware).
+     Reduced-motion gets the same treatment for the reason it asks for it. */
+  html[data-motion="off"] #ticker-track, html[data-motion="off"] #ticker-track.paused { animation: none; }
+  html[data-motion="off"] * { transition: none !important; animation: none !important; }
   @media (prefers-reduced-motion: reduce) {
     #ticker-track, body.ticker-live #ticker-track { animation: none; }
     * { transition: none !important; }
   }
+  /* Gauge faces move as objects: needles swing with a little overshoot, dashed arcs do not (an
+     arc that overshoots draws past its own end). */
+  html:not([data-motion="off"]) :is([data-needle], [data-dot], [data-fill], [data-len]) {
+    transition: transform .7s cubic-bezier(.34, 1.5, .64, 1);
+  }
+  html:not([data-motion="off"]) [data-arc] {
+    transition: stroke-dasharray .7s cubic-bezier(.2, .8, .2, 1), stroke-dashoffset .7s cubic-bezier(.2, .8, .2, 1);
+  }
+  [data-needle], [data-dot], [data-len] { transform-box: view-box; transform-origin: 50% 50%; }
+  [data-fill] { transform-box: fill-box; transform-origin: 50% 100%; }
+  /* The entrance sweep: a band of light crossing a panel as it arrives. */
+  .streak { position: relative; }
+  .streak::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+    background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,.14) 50%, transparent 65%);
+    animation: streak .55s ease-out forwards; }
+  @keyframes streak { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
   .tick { font-size: 15px; }
   .tick b { background: #1a2432; border: 1px solid var(--line); color: var(--warn); font-size: 11px;
     letter-spacing: .1em; padding: 3px 8px; border-radius: 5px; margin-right: 9px; }
@@ -499,8 +563,8 @@
     #clock-time { font-size: 40px; }
     /* 150px of sun beside a 40px clock is 150px of sun on top of it. Small enough to sit in the
        corner the stacked hero leaves empty. */
-    #hero-icon { right: 8px; top: 8px; }
-    #hero-icon svg { width: 84px; height: 84px; }
+    #hero-icon { width: 64px; height: 64px; }
+    #hero-icon svg, #hero-icon img { width: 64px; height: 64px; }
     #hero-temp { font-size: 64px; }
     #hero-cond { font-size: 22px; }
     .hero-now { gap: 12px; }
@@ -635,6 +699,8 @@
   <section class="page" id="desk">
     <div id="desk-stack">
     <div id="hero" data-panel="hero">
+      <div id="hero-sky"><div class="sky-l"></div><div class="sky-l"></div></div>
+      <div id="hero-orb"></div>
       <div id="hero-clock"><span id="clock-time">--:--:--</span> <span id="clock-date" class="hero-dim"></span></div>
       <div class="hero-top">
         <div>
@@ -647,9 +713,9 @@
           <div><span id="hero-live" class="live">● --</span> <span id="hero-batt" class="hero-dim"></span></div>
         </div>
       </div>
-      <div id="hero-icon"></div>
       <div id="hero-feels" class="hero-dim"></div>
       <div class="hero-now">
+        <div id="hero-icon"></div>
         <div id="hero-temp" data-metric="temp">--°</div>
         <div>
           <div id="hero-cond"></div>
@@ -945,14 +1011,21 @@
     <h2 style="font-size:13px;margin-top:18px">Kiosk</h2>
     <label>Cycle tabs every (seconds, 0 = off)</label><input id="set-kiosk" type="number" min="0" step="5">
     <label><input id="set-night-dim" type="checkbox"> Dim the screen overnight</label>
-    <label><input id="set-speak" type="checkbox"> Read severe alerts aloud</label>
+    <label><input id="set-speak" type="checkbox"> Read severe and emergency alerts aloud</label>
     <label><input id="set-web-notif" type="checkbox"> Browser notifications (https only)</label>
 
-    <label style="margin-top:14px">Eco mode (slower polling, no animation)</label>
+    <label style="margin-top:14px">Eco mode (slower polling)</label>
     <select id="set-eco">
       <option value="auto">Auto — on for slow hardware</option>
       <option value="on">Always on</option>
       <option value="off">Off</option>
+    </select>
+    <label style="margin-top:14px">Motion</label>
+    <select id="set-motion">
+      <option value="auto">Auto — full on capable hardware</option>
+      <option value="full">Full — live sky, animated icons</option>
+      <option value="lite">Lite — movement only, no effects</option>
+      <option value="off">Off — nothing moves</option>
     </select>
     <h2 style="font-size:13px;margin-top:18px">This computer</h2>
     <label>LAN dashboard port (blank = 8088; restart to apply)</label>

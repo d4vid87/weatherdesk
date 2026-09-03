@@ -1,3 +1,4 @@
+import { flip, enter, leave } from './motion.js';
 // Move and resize anything on the Desk.
 //
 // Reorder is HTML5 drag-and-drop between siblings; resize is three pointer-driven handles (right
@@ -187,13 +188,16 @@ function applyOrder(container) {
     console.warn('layout: non-panel child in', container.id, '— leaving order alone');
     return;
   }
-  kids
+  const sorted = kids
     .slice()
     .sort((a, b) => {
       const oa = state[a.dataset.panel]?.order, ob = state[b.dataset.panel]?.order;
       return (oa ?? kids.indexOf(a) + 1000) - (ob ?? kids.indexOf(b) + 1000);
-    })
-    .forEach((k) => container.appendChild(k));
+    });
+  // Already in this order: appending every panel to reassert it costs a full relayout of the
+  // container, and this runs on every render.
+  if (sorted.every((k, i) => k === kids[i])) return;
+  flip(container, () => sorted.forEach((k) => container.appendChild(k)));
 }
 
 function recordOrder(container) {
@@ -308,8 +312,11 @@ function resizeHandle(el, dir) {
 
 function wire(container) {
   [...container.children].filter((c) => c.dataset.panel).forEach((el) => {
-    applySaved(el);
+    // Below the grip check: a panel that is already wired had its saved size applied when it was,
+    // and restore()/drop() re-apply explicitly. Re-reading and re-writing every panel's inline
+    // size on each wire() pass was a layout thrash for nothing.
     if (el.querySelector(':scope > .grip')) return;
+    applySaved(el);
 
     // A panel that holds other panels (the gauges block, the Desk grid, the day cards) is dragged
     // as a unit by its own grip — but that grip sat at the top right, exactly where the last panel
@@ -368,7 +375,7 @@ function wire(container) {
       const box = containerAt(e.clientX, e.clientY) || ph.parentElement;
       if (box !== ph.parentElement) ph.style.gridColumn = ''; // the old span means nothing in a new grid
       const before = insertPoint(box, e.clientX, e.clientY);
-      if (before !== ph || box !== ph.parentElement) box.insertBefore(ph, before);
+      if (before !== ph || box !== ph.parentElement) flip(box, () => box.insertBefore(ph, before));
     });
 
     const drop = (e) => {
@@ -415,7 +422,7 @@ function wire(container) {
     hide.title = 'Hide this panel — restore it under Settings';
     hide.onclick = () => {
       entry(el.dataset.panel).hidden = true;
-      el.classList.add('panel-hidden');
+      Promise.resolve(leave(el)).then(() => el.classList.add('panel-hidden'));
       save();
     };
     el.appendChild(hide);
@@ -428,7 +435,8 @@ export const hiddenPanels = () => Object.keys(state).filter((id) => state[id].hi
 
 export function unhide(id) {
   delete entry(id).hidden;
-  document.querySelector(`[data-panel="${id}"]`)?.classList.remove('panel-hidden');
+  const el = document.querySelector(`[data-panel="${id}"]`);
+  if (el) { el.classList.remove('panel-hidden'); enter([el]); }
   save();
 }
 
