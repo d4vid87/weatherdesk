@@ -10,7 +10,7 @@ import { initRules, renderRules } from './rules.js';
 import { initEnv } from './env.js';
 import { initPlaces, renderPlaces } from './places.js';
 import { initPro } from './pro.js';
-import { initLayout, snapshot, restore, hiddenPanels, unhide, panelIds, tabOf, setTab, TABS } from './layout.js';
+import { initLayout, snapshot, restore, hiddenPanels, unhide, panelIds, tabOf, setTab, TABS, NEVER_HIDE } from './layout.js';
 import { initUdp } from './udp.js';
 import { initHome } from './home.js';
 import { initOutlook } from './outlook.js';
@@ -418,7 +418,7 @@ $('btn-save').onclick = async () => {
     deviceId: $('set-device').value.trim(),
     units: $('set-units').value,
     clock24: $('set-clock').value,
-    refreshSec: +$('set-refresh').value || 60,
+    refreshSec: Math.min(3600, Math.max(5, +$('set-refresh').value || 60)),
     windGustAlert: +$('set-gust').value || 30,
     windUnit: $('set-wind-unit').value,
     nearbyRadius: +$('set-nearby-radius').value || 0,
@@ -432,7 +432,7 @@ $('btn-save').onclick = async () => {
     fontScale: +$('set-font').value || 1,
     density: $('set-density').value,
     bigNumbers: $('set-big-numbers').checked,
-    kioskCycleSec: +$('set-kiosk').value || 0,
+    kioskCycleSec: Math.max(0, Math.min(3600, +$('set-kiosk').value || 0)),
     nightDim: $('set-night-dim').checked,
     speakAlerts: $('set-speak').checked,
     webNotif: $('set-web-notif').checked,
@@ -872,6 +872,7 @@ function applyPreset(name) {
   const st = {};
   for (const id of panelIds().filter(isDeskPanel)) {
     const i = keep.indexOf(id);
+    if (NEVER_HIDE.includes(id)) continue;
     if (i === -1) st[id] = { hidden: true };
     else st[id] = { order: i };
   }

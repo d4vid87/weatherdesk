@@ -8,7 +8,7 @@
 // HomeKit, Alexa and Google are reached through Home Assistant's own bridges — see README. There
 // is no native code here for them, and there shouldn't be.
 
-import { settings, every, stamp, stormMode, expires, msToWind } from './app.js';
+import { settings, every, clearJob, stamp, stormMode, expires, msToWind } from './app.js';
 import { OBS, getJSON } from './api.js';
 import { mqtt } from './mqtt.js';
 
@@ -192,11 +192,16 @@ async function serverPublishing() {
   } catch { return false; }
 }
 
+// initHome() awaits /diag before it decides whether to connect; two settings saves in quick
+// succession got through that gate together and left an orphaned client publishing forever.
+let homeGen = 0;
+
 export async function initHome() {
+  const mine = ++homeGen;
   client?.close();
   client = null;
   const s = settings();
-  if (s.mqttUrl && s.stationId && !(await serverPublishing())) {
+  if (s.mqttUrl && s.stationId && !(await serverPublishing()) && mine === homeGen) {
     client = mqtt({
       url: s.mqttUrl, user: s.mqttUser, pass: s.mqttPass,
       clientId: `weatherdesk-${s.stationId}-${Math.random().toString(16).slice(2, 8)}`,
@@ -310,7 +315,7 @@ function initHaPanel() {
   const s = settings();
   const ids = s.haEntities.split(/[\s,]+/).filter(Boolean);
   panel.style.display = s.haUrl && ids.length ? '' : 'none';
-  if (!s.haUrl || !ids.length) return;
+  if (!s.haUrl || !ids.length) { clearJob('ha-states'); return; }
   every('ha-states', 30, async () => {
     const rows = await haRows(ids);
     // Home Assistant's own text, written in rather than interpolated: a friendly name is

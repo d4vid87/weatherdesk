@@ -147,12 +147,14 @@ export async function refreshAlerts() {
 export async function refreshAqi() {
   if (coords().lat == null) return;
   const j = await api.aqi();
-  const i = j.hourly.time.findIndex((t) => new Date(t) > new Date()) - 1;
-  const v = j.hourly.us_aqi[Math.max(i, 0)];
+  const idx = j.hourly.time.findIndex((t) => new Date(t) > new Date());
+  // No future hour left in the payload means the last one is the current one.
+  const i = Math.min(Math.max(idx === -1 ? j.hourly.time.length - 1 : idx - 1, 0), j.hourly.time.length - 1);
+  const v = j.hourly.us_aqi[i];
   $('aqi-val').textContent = num(v);
   $('aqi-label').textContent = aqiLabel(v);
   $('aqi-val').className = `aqi-${aqiBand(v)}`;
-  $('aqi-detail').textContent = `PM2.5 ${num(j.hourly.pm2_5[Math.max(i, 0)], 1)} µg/m³`;
+  $('aqi-detail').textContent = `PM2.5 ${num(j.hourly.pm2_5[i], 1)} µg/m³`;
   stamp('aqi-val', 1800);
 }
 

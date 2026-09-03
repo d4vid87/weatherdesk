@@ -174,8 +174,11 @@ async function drawOfficial() {
     const nws = await (await fetch(p.properties.forecast, { signal: expires(15000) })).json();
     const periods = nws.properties.periods.slice(0, 6);
     const tempestDaily = fc?.forecast?.daily || [];
-    $('official').innerHTML = periods.map((pd, i) => {
-      const mine = tempestDaily[Math.floor(i / 2)];
+    // Match on the period's own date, not its position: an afternoon load starts the list at
+    // "Tonight", and every row after it compared against the wrong day.
+    const dayOf = (t) => new Date(t).toDateString();
+    $('official').innerHTML = periods.map((pd) => {
+      const mine = tempestDaily.find((d) => dayOf(d.day_start_local * 1000) === dayOf(pd.startTime));
       const ref = pd.isDaytime ? mine?.air_temp_high : mine?.air_temp_low;
       const d = ref == null ? null : pd.temperature - ref;
       return `<div><span>${pd.name}</span><span>NWS ${pd.temperature}° · Tempest ${num(ref)}°`
@@ -193,7 +196,9 @@ async function drawOutlook() {
     const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${s.lat}&longitude=${s.lon}`
       + `&daily=precipitation_sum,precipitation_probability_max&forecast_days=7&timezone=auto`
       + (imperial ? '&precipitation_unit=inch' : ''), { signal: expires(15000) })).json();
-    const data = j.daily.time.map((t, i) => ({ x: new Date(t).getTime(), y: j.daily.precipitation_sum[i] }));
+    // 'YYYY-MM-DD' parses as UTC midnight, which is the previous day west of Greenwich — noon
+    // local is the same trick almanac.js uses.
+    const data = j.daily.time.map((t, i) => ({ x: new Date(`${t}T12:00`).getTime(), y: j.daily.precipitation_sum[i] }));
     chart($('c-qpf'), [{ data, type: 'bar', color: '#4fb8ff' }], { yMin: 0, digits: 2 });
     const total = data.reduce((a, b) => a + (b.y || 0), 0);
     $('board-qpf').textContent = `7-day precip outlook — ${num(total, 2)} ${U.precip()} total`;

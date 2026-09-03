@@ -260,12 +260,12 @@ async function loadGarden() {
 // goes back to spring. No log (browser or Android install) simply leaves the row off.
 async function loadSeason() {
   const tz = -new Date().getTimezoneOffset();
-  const r = await fetch(`${window.__WD_SRV || ''}/history/daily?tz=${tz}`, { signal: expires(10000) });
-  if (!r.ok) throw new Error(`${r.status}`);
-  const days = await r.json(); // SI
+  const daysSI = await getJSON(`${window.__WD_SRV || ''}/history/daily?tz=${tz}`);
   const yearStart = `${new Date().getFullYear()}-01-01`;
-  garden.gddC = gdd(days.filter((d) => d.day >= yearStart));
-  dryness = drynessFrom(days);
+  // Growing degree days are defined in °C, so they read the archive as it is stored…
+  garden.gddC = gdd(daysSI.filter((d) => d.day >= yearStart));
+  // …while the Fire card prints rain next to U.precip(), so it needs the display units.
+  dryness = drynessFrom(daysSI.map(toDisplay));
   renderGarden();
   renderFire();
 }

@@ -41,6 +41,10 @@ const zoom = () => +getComputedStyle(document.documentElement).zoom || 1;
 // visible, so nothing safety-relevant is off-screen.
 // DEFAULT is data, not code: to redesign it, drag the dashboard into shape and copy
 // `snapshot()` out of the console.
+// Their cards are display:none until the weather that fills them exists — a hidden flag would
+// keep them hidden when it does, which is the one thing safety panels must not do.
+export const NEVER_HIDE = ['severe', 'winter', 'tropical', 'alerts'];
+
 export const DEFAULT = {
   hero: { order: 0 },
   gauges: { order: 1 },
