@@ -127,6 +127,16 @@ export function store(key, value) {
 }
 
 if (location.search.includes('selftest')) {
+  const spoken = (e) => shouldSpeak(e, { speakAlerts: true });
+  console.assert(spoken({ category: 'severe', severity: 'Extreme', title: 'Tornado Warning' }), 'speak: Extreme is read out');
+  console.assert(spoken({ category: 'severe', severity: 'Severe', title: 'Severe Thunderstorm Warning' }), 'speak: Severe is read out');
+  console.assert(!spoken({ category: 'severe', severity: 'Minor', title: 'Dense Fog Advisory' }), 'speak: a Minor advisory is not');
+  console.assert(spoken({ category: 'severe', severity: 'Moderate', title: 'Flood Warning', headline: 'FLASH FLOOD EMERGENCY' }),
+    'speak: an emergency inside a lesser severity still speaks');
+  console.assert(!shouldSpeak({ category: 'severe', severity: 'Extreme', title: 'x' }, { speakAlerts: false }),
+    'speak: nothing at all when the setting is off');
+  console.assert(!spoken({ category: 'info', severity: 'Extreme', title: 'x' }), 'speak: only the severe channel talks');
+
   const noon = new Date(2020, 0, 1, 13, 5).getTime() / 1000;
   console.assert(timeStr(noon, { clock24: '24' }).startsWith('13'), 'app: 24-hour clock reads 13:05');
   console.assert(/1:05/.test(timeStr(noon, { clock24: '12' })), 'app: 12-hour clock reads 1:05');

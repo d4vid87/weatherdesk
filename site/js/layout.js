@@ -433,6 +433,18 @@ function wire(container) {
   });
 }
 
+if (location.search.includes('selftest')) {
+  const box = document.createElement('div');
+  box.innerHTML = '<div data-panel="a"></div><div data-panel="b"></div>';
+  let moves = 0;
+  const real = box.appendChild.bind(box);
+  box.appendChild = (n) => { moves++; return real(n); };
+  state.a = { order: 0 }; state.b = { order: 1 };
+  applyOrder(box);
+  console.assert(moves === 0, `layout: an already-sorted container is not rebuilt (got ${moves} moves)`);
+  delete state.a; delete state.b;
+}
+
 export const snapshot = () => structuredClone(state);
 
 export const hiddenPanels = () => Object.keys(state).filter((id) => state[id].hidden);

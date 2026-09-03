@@ -117,4 +117,9 @@ if (location.search.includes('selftest')) {
   console.assert(num(1.5, 1) === '1.5', 'udp: app.js helpers imported');
   console.assert(now - (now - 60) < OBS_FRESH_SEC, 'udp: minute-old obs_st still counts');
   console.assert(!(now - (now - 600) < OBS_FRESH_SEC), 'udp: ten-minute-old obs_st is stale');
+  if ('EventSource' in window) {
+    stream(); stream();
+    console.assert(es && es.readyState !== 2, 'udp: a second stream() leaves exactly one open EventSource');
+    es.close();
+  }
 }

@@ -112,11 +112,18 @@ Any alert can leave the machine:
 None of these ever carry your Tempest token, station ID or broker password — title, body and
 category only.
 
-## Eco mode and pacing
+## Motion, eco mode and pacing
 
-Settings → **Eco mode** halves how often everything polls, stops the ticker and drops the seconds
-from the clock. On *Auto* it turns itself on when the browser reports four cores or fewer, which
-covers the tablets and old laptops this is often left running on. Overnight (sunset+1h to
+Settings → **Motion** decides how much the dashboard moves: *Full* is the live sky, animated
+icons, particle weather and the full broadcast choreography; *Lite* keeps the movement that
+carries meaning (counting numbers, swinging needles, sliding panels, the alert crawl) and drops
+the effects; *Off* is a still page. *Auto* — the default — picks Full on a desktop and Lite on
+the hardware eco mode calls slow. Asking your OS for reduced motion, or picking the e-ink
+palette, forces Off. `?motion=full|lite|off` overrides it for one page load.
+
+Settings → **Eco mode** halves how often everything polls and drops the seconds from the clock.
+On *Auto* it turns itself on when the browser reports four cores or fewer, which covers the
+tablets and old laptops this is often left running on. Overnight (sunset+1h to
 sunrise−1h) everything slows further on its own, and an active Severe or Extreme NWS alert puts
 the whole dashboard back to full speed — and brings the radar panel up if it was hidden.
 

@@ -302,6 +302,13 @@ export function update(svg, { frac, deg, on, color } = {}) {
 }
 
 if (location.search.includes('selftest')) {
+  for (const k of Object.keys(METEO)) {
+    console.assert(wxSrc(k).endsWith('.svg'), `icons: ${k} has no vendored glyph`);
+  }
+  console.assert(wx('haze', 20).startsWith('<svg'), 'icons: an unmapped key falls back to the drawn glyph');
+  console.assert(wx('rainy', 20).startsWith('<img'), 'icons: a mapped key is a vendored image');
+  console.assert(wxSrc('rainy', true).includes('/static/'), 'icons: still means static');
+
   const box = document.createElement('div');
   box.innerHTML = compass(350, 0.5);
   const svg = box.firstElementChild;

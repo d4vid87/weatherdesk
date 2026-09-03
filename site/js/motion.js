@@ -43,7 +43,10 @@ const ease = (t) => 1 - (1 - t) ** 3;
 function frame(now) {
   raf = 0;
   for (const [el, a] of running) {
-    const t = Math.min(1, (now - a.t0) / a.dur);
+    // Clamped both ways: the rAF timestamp and performance.now() are the same clock in a normal
+    // page, but not under headless virtual time — a negative t ran the easing curve backwards and
+    // the number drifted off to nonsense instead of landing.
+    const t = Math.max(0, Math.min(1, (now - a.t0) / a.dur));
     el.textContent = a.fmt(a.from + (a.to - a.from) * ease(t));
     if (t >= 1) running.delete(el);
   }
@@ -62,7 +65,7 @@ export function tweenNumber(el, to, fmt = (v) => num(v), dur = 600) {
     return;
   }
   if (from === to) return;
-  running.set(el, { from, to, t0: performance.now(), dur, fmt });
+  running.set(el, { from, to, t0: null, dur, fmt });
   if (level === 'full') flash(el);
   if (!raf) raf = requestAnimationFrame(frame);
 }

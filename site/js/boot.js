@@ -742,8 +742,8 @@ function changelog() {
   if (!seen) return; // a fresh install has nothing to be new since
   notify({
     title: `WeatherDesk ${APP_VERSION}`,
-    body: 'New: eco mode, observation log + almanac, custom alert rules with phone push, themes, '
-      + 'kiosk cycling, sun/moon and garden cards, station health, and a read-only /public page.',
+    body: 'New: broadcast-style motion with a live sky and animated icons, a Motion setting '
+      + '(Auto/Full/Lite/Off), severe alerts read aloud, and a faster Desk.',
   });
 }
 

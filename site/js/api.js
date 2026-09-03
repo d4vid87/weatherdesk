@@ -89,6 +89,24 @@ async function fetchJSON(url, opts) {
   return body;
 }
 
+if (location.search.includes('selftest')) {
+  const realFetch = window.fetch;
+  let calls = 0;
+  const u = 'https://example.invalid/memo-selftest';
+  window.fetch = (url, opts) => {
+    if (String(url) !== u) return realFetch(url, opts);
+    calls++;
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ok: 1 }) });
+  };
+  Promise.all([getJSON(u), getJSON(u)]).then(([a, b]) => {
+    console.assert(calls === 1, `api: two getJSON calls for one url share one fetch (got ${calls})`);
+    console.assert(a.ok === 1 && b.ok === 1, 'api: both callers get the body');
+    a.ok = 2;
+    console.assert(b.ok === 1, 'api: callers get their own copy');
+    memo.delete(u);
+  }).finally(() => { window.fetch = realFetch; });
+}
+
 // --- WeatherFlow Tempest ---
 
 export function station(id = settings().stationId) {
