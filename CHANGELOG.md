@@ -8,6 +8,53 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-09-03
+
+### Fixed
+- **Blank window on Linux.** The AppImage always runs under XWayland, and there an Intel iGPU
+  (a Chromebook's UHD 600) painted nothing at all even with the DMABUF renderer off. Rendering is
+  now a setting — Settings → Window rendering, `Auto` / `Safe` / `GPU` — overridable per launch
+  with `WD_RENDER=safe` or `--render safe`, and `Auto` turns software compositing on for exactly
+  that combination. The app prints one line at startup saying what it picked. Because the setting
+  syncs from any browser on the LAN, a machine showing a blank window can be fixed from a phone.
+
+### Added
+- **Continuous integration.** `cargo test` and a headless-browser run of the whole site — three
+  motion levels by three screen sizes, failing on any self-check — now run on every pull request,
+  with a screenshot of each combination kept as an artifact. `bash .github/ci/selftest.sh` runs
+  the same thing locally.
+- **A one-column phone pass.** Held upright, the tabs and the settings gear move to the bottom of
+  the screen where a thumb reaches them, every control is at least 44 px tall, text inputs no
+  longer zoom the page when focused, and Save stays pinned to the bottom of the drawer.
+- **The overnight dim follows the sun.** It now ramps over the hour after sunset and the hour
+  before sunrise, a minute at a time, instead of stepping to 45% at some point in the next quarter
+  of an hour.
+- **Tap the hero icon to hear the day** — the current reading, the high and low, the 24-hour story
+  and the alert state, read aloud. Settings → Kiosk can also schedule one spoken briefing a day at
+  a fixed time.
+- **Rate-of-change and forecast alert rules.** Seven new metrics to build rules on: temperature,
+  pressure and humidity change over the last hour, and the forecast low over 18 hours, rain chance
+  over six, peak gust over a day and tomorrow's high. A forecast rule is evaluated the moment a
+  new forecast lands rather than waiting for the next station report.
+- **Click a point on a chart** on the Boards or in the almanac explorer to open the detail panel
+  on that moment, not on the last 48 hours.
+- **A still radar image on weak hardware.** Anything running Lite motion or eco mode gets one
+  radar PNG every five minutes instead of the live wasm viewer; tapping it opens the full map.
+  Motion → Full puts the live map back.
+- **US Drought Monitor** on the Fire card: the county's class and how much of it is in that class,
+  fetched by the app's own server (neither the Drought Monitor nor the county lookup it needs
+  serves CORS headers).
+- **Archive retention.** Settings → Keep history for: forever (the default), or 1, 2, 5 or 10
+  years. Deletion runs hourly, a week at a time, so it never blocks an incoming reading.
+- `/history/tuples` accepts `from` and `to` as well as `hours`.
+
+### Changed
+- **The rain and lightning counters survive a restart.** They are stored alongside every reading,
+  so rain that fell while the app was down is scored once when it comes back — unless it was down
+  more than a day, in which case the counter is started cold rather than trusted.
+- **`/history/daily` no longer rescans the whole archive per request.** Everything before today is
+  aggregated once and cached; only today's rows, an index range, are recomputed.
+
 ## [3.3.0] - 2026-09-03
 
 ### Added

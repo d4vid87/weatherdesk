@@ -5,6 +5,7 @@
 // keep on screen all day.
 import { settings, coords, U, num, notify, every, stamp, expires } from './app.js';
 import { forecast as deskForecast } from './desk.js';
+import * as api from './api.js';
 import { OBS, getJSON } from './api.js';
 import { toDisplay } from './almanac.js';
 
@@ -171,10 +172,10 @@ async function renderLastYear() {
 // Red flag comes out of the NWS alert feed the Desk already polls — a second request for the
 // same JSON would be a second chance to be rate-limited.
 //
-// ponytail: no US Drought Monitor. Its county API sends no Access-Control-Allow-Origin (checked
-// 2026-08-17) and the one CORS-enabled file it publishes is a 27 MB national GeoJSON, which is
-// not something a 2013 tablet is going to parse. Dryness here is measured from this station's
-// own rain log instead, which is the number that actually applies to this garden.
+// The US Drought Monitor's county API sends no Access-Control-Allow-Origin, so it comes through
+// the app's own server (api::drought) and only appears on an install that has one. Dryness is
+// still measured from this station's own rain log alongside it — that is the number that applies
+// to this garden, where the county class is the one everyone else is quoting.
 let dryness = null;
 export function drynessFrom(days) {
   if (!days.length) return null;
@@ -184,6 +185,27 @@ export function drynessFrom(days) {
   for (let i = days.length - 1; i >= 0 && !(days[i].rain > 0); i--) since++;
   return { total, since, days: last30.length };
 }
+
+// The worst class with any of the county in it, which is how the Monitor itself is quoted. The
+// percentages are cumulative — d1 includes everything in d2 — so d0 alone means "abnormally dry".
+const DROUGHT_WORDS = [
+  ['d4', 'D4 exceptional'], ['d3', 'D3 extreme'], ['d2', 'D2 severe'],
+  ['d1', 'D1 moderate'], ['d0', 'D0 abnormally dry'],
+];
+export function droughtWord(d) {
+  const hit = DROUGHT_WORDS.find(([k]) => (d[k] || 0) > 0);
+  if (!hit) return 'none · county is clear';
+  const [key, word] = hit;
+  // The service dates a map either "9/1/2026" or as a full ISO stamp, depending on the endpoint's
+  // mood. Both parse; anything that doesn't is printed as it came.
+  const at = new Date(d.date);
+  const when = Number.isNaN(at.getTime())
+    ? d.date || ''
+    : at.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${word} · ${num(d[key], 0)}% of county · ${when}`;
+}
+
+let drought = null;
 
 function renderFire() {
   const alerts = [...document.querySelectorAll('#alerts .alert-head')]
@@ -196,6 +218,7 @@ function renderFire() {
     rows.push([`Rain · last ${dryness.days} days`, `${num(dryness.total, 2)} ${U.precip()}`]);
     rows.push(['Days since rain', num(dryness.since)]);
   }
+  if (drought) rows.push(['Drought (USDM)', droughtWord(drought)]);
   $('fire').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join('');
 }
 
@@ -266,6 +289,10 @@ async function loadSeason() {
   garden.gddC = gdd(daysSI.filter((d) => d.day >= yearStart));
   // …while the Fire card prints rain next to U.precip(), so it needs the display units.
   dryness = drynessFrom(daysSI.map(toDisplay));
+  // No server (static host, Android) simply leaves the row off, the same way the tropical card
+  // does — see api.droughtMonitor.
+  drought = await api.droughtMonitor().catch(() => null);
+  if (drought?.error) drought = null;
   renderGarden();
   renderFire();
 }
@@ -390,6 +417,11 @@ if (location.search.includes('selftest')) {
   console.assert(gdd([{ tempMin: null, tempMax: 30 }]) === 0, 'env: partial day skipped');
   const dry = drynessFrom([{ rain: 5 }, { rain: 0 }, { rain: 0 }]);
   console.assert(dry.since === 2 && dry.total === 5, 'env: dryness counts back to the last rain');
+  // Drought classes are cumulative, so the worst one with any county in it is the headline.
+  console.assert(/D2 severe · 19% of county · Sep 2/.test(
+    droughtWord({ d0: 19, d1: 19, d2: 18.6, d3: 0, d4: 0, date: '2025-09-02T00:00:00' })),
+    'env: drought reports the worst class present');
+  console.assert(/^none/.test(droughtWord({ d0: 0, d1: 0, d2: 0, d3: 0, d4: 0 })), 'env: a clear county says so');
   console.assert(faults(0) .length === 0, 'env: clean status has no faults');
   console.assert(faults(0x40).includes('wind sensor failed'), 'env: wind fault decoded');
 }

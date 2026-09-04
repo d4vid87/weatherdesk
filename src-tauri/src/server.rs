@@ -38,7 +38,8 @@ pub struct State {
     pub packets: Mutex<HashMap<String, String>>,
     pub cfg_path: PathBuf,
     pub data_dir: PathBuf,
-    /// (tz, oldest ts, newest ts, body) — see `/history/daily`.
+    /// (tz, oldest ts, local midnight, everything before today) — see `/history/daily`. Today's
+    /// row is appended per request; the head only changes when the day turns or history is pruned.
     daily: Mutex<Option<(i64, i64, i64, String)>>,
     /// The ingest path's connection, opened once and kept. Every reading used to open a fresh
     /// SQLite handle (file open, WAL header read, pragmas, schema check) a few times a second.
@@ -274,6 +275,24 @@ pub fn query(url: &str, key: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// The archive window a `/history/tuples` request is asking for.
+///
+/// `hours` is the old contract and still the default; `from`+`to` is what a click on a chart
+/// point sends. A week is the cap either way — the page draws pixels, not a data dump — and an
+/// explicit range keeps its `to` end, because that is the moment the viewer clicked. Without a
+/// `to` there is no upper bound at all: a hub whose clock runs a few seconds fast would otherwise
+/// lose the newest row it just wrote.
+pub fn window(url: &str, now: u64) -> (i64, i64) {
+    let n = |k| query(url, k).and_then(|v| v.parse::<i64>().ok());
+    match (n("from"), n("to")) {
+        (Some(from), Some(to)) => (to.saturating_sub(168 * 3600).max(from), to),
+        _ => {
+            let hours = n("hours").unwrap_or(3).clamp(1, 168);
+            (now as i64 - hours * 3600, i64::MAX)
+        }
+    }
+}
+
 fn asset(path: &str) -> Option<(Vec<u8>, &'static str)> {
     let rel = path.trim_start_matches('/');
     let rel = if rel.is_empty() { "index.html" } else { rel };
@@ -473,33 +492,43 @@ fn handle(state: &Arc<State>, mut req: Request) {
                 None => Response::empty(502).with_header(header("Access-Control-Allow-Origin", "*")).boxed(),
             }
         }
+        // The US Drought Monitor, via the FCC's county lookup. Neither serves CORS headers, and
+        // the coordinates in both URLs are the house — see api::drought.
+        "/proxy/drought" => json(crate::api::drought(&state.cfg_path)),
         "/history/daily" => {
-            let tz = query(&url, "tz").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+            // Clamped: a hostile `tz` must not overflow the day arithmetic and panic a worker,
+            // and a panicked worker is never replaced. ±14 h is the widest real offset.
+            let tz = query(&url, "tz").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0).clamp(-840, 840);
             let Some(conn) = state.db() else { return drop(req.respond(Response::empty(503))) };
-            let (min, max) = store::stamp(&conn);
+            let (min, _max) = store::stamp(&conn);
+            let ds = store::day_start(now() as i64, tz);
             // The lock is not held across the query: a slow aggregate would otherwise block
             // every other screen asking the same question.
             let hit = {
                 let cache = state.daily.lock().unwrap();
                 match cache.as_ref() {
-                    Some((t, c, m, body)) if (*t, *c, *m) == (tz, min, max) => Some(body.clone()),
+                    Some((t, c, d, head)) if (*t, *c, *d) == (tz, min, ds) => Some(head.clone()),
                     _ => None,
                 }
             };
-            let body = hit.unwrap_or_else(|| {
-                let fresh = store::daily_json(&conn, tz);
-                *state.daily.lock().unwrap() = Some((tz, min, max, fresh.clone()));
+            // The head is every day but today: a full-table aggregate, and one that cannot change
+            // until midnight or a prune. Today's row is a primary-key range scan, cheap enough to
+            // redo per request — which is what keeps the archive's growth off this endpoint.
+            let head = hit.unwrap_or_else(|| {
+                let fresh = store::daily_head_json(&conn, tz, ds);
+                *state.daily.lock().unwrap() = Some((tz, min, ds, fresh.clone()));
                 fresh
             });
+            let body = store::daily_join(&head, store::daily_today_row(&conn, tz, ds).as_deref());
             json(body)
         }
         // The raw archive, SI, in `store::FIELDS` order. `/history/daily` answers the almanac's
         // question; this one answers the Data tab's, which for a non-Tempest station is the only
         // way to draw a trend — there is no cloud to ask.
         "/history/tuples" => {
-            let hours = query(&url, "hours").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3).clamp(1, 168);
+            let (from, to) = window(&url, now());
             let Some(conn) = state.db() else { return drop(req.respond(Response::empty(503))) };
-            json(store::tuples_json(&conn, hours))
+            json(store::tuples_json(&conn, from, to))
         }
         "/history/coverage" => {
             let Some(conn) = state.db() else { return drop(req.respond(Response::empty(503))) };
@@ -720,6 +749,21 @@ pub fn start_backfill(state: Arc<State>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window a history request asks for: the old `hours` contract, and the explicit range a
+    /// click on a chart point sends — capped, but from the end the viewer clicked.
+    #[test]
+    fn tuples_window_defaults_to_hours_and_caps_an_explicit_range() {
+        let now = 1_700_000_000u64;
+        assert_eq!(window("/history/tuples", now), (now as i64 - 3 * 3600, i64::MAX));
+        assert_eq!(window("/history/tuples?hours=48", now), (now as i64 - 48 * 3600, i64::MAX));
+        // Out of range and nonsense both fall back inside the clamp rather than scanning the archive.
+        assert_eq!(window("/history/tuples?hours=100000", now), (now as i64 - 168 * 3600, i64::MAX));
+        assert_eq!(window("/history/tuples?hours=x", now), (now as i64 - 3 * 3600, i64::MAX));
+        assert_eq!(window("/history/tuples?from=100&to=200", now), (100, 200));
+        let (from, to) = window("/history/tuples?from=0&to=1000000000", now);
+        assert_eq!((from, to), (1_000_000_000 - 168 * 3600, 1_000_000_000));
+    }
 
     /// The header contract, end to end: a real request over a real socket, because the etag and
     /// the cache policy are only worth anything if they reach the wire.

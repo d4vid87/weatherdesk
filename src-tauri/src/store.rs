@@ -138,16 +138,66 @@ pub fn migrate_jsonl(conn: &mut Connection, log_dir: &Path) {
 /// offset because the process has no notion of a timezone and "yesterday" has to mean the same
 /// day the user saw.
 pub fn daily_json(conn: &Connection, tz_off_min: i64) -> String {
-    let mut stmt = match conn.prepare(
+    let ds = day_start(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+        tz_off_min,
+    );
+    daily_join(&daily_head_json(conn, tz_off_min, ds), daily_today_row(conn, tz_off_min, ds).as_deref())
+}
+
+/// Midnight local, as an epoch second. `div_euclid` rather than `/`: a negative offset west of
+/// Greenwich would otherwise round towards zero and land the boundary a day out.
+pub fn day_start(now: i64, tz_off_min: i64) -> i64 {
+    let off = tz_off_min * 60;
+    (now + off).div_euclid(86400) * 86400 - off
+}
+
+/// Everything before today. This is the expensive half — a full-table GROUP BY of every reading
+/// the archive holds — and it is also the half that cannot change any more, so the server caches
+/// it across requests and only today's row is recomputed.
+pub fn daily_head_json(conn: &Connection, tz_off_min: i64, day_start: i64) -> String {
+    rows_json(
+        conn,
         "SELECT strftime('%Y-%m-%d', ts + ?1, 'unixepoch'),
                 MIN(temp), MAX(temp), MAX(wind_gust), SUM(rain), SUM(strikes), MIN(battery)
-         FROM obs GROUP BY 1 ORDER BY 1",
-    ) {
-        Ok(s) => s,
-        Err(_) => return "[]".into(),
-    };
+         FROM obs WHERE ts < ?2 GROUP BY 1 ORDER BY 1",
+        tz_off_min,
+        day_start,
+    )
+    .map(|v| format!("[{}]", v.join(",")))
+    .unwrap_or_else(|| "[]".into())
+}
+
+/// Today, over the primary key range — an index lookup rather than a scan. `None` on a day with
+/// no readings yet, which is what the `GROUP BY` returns for an empty range.
+pub fn daily_today_row(conn: &Connection, tz_off_min: i64, day_start: i64) -> Option<String> {
+    rows_json(
+        conn,
+        "SELECT strftime('%Y-%m-%d', ts + ?1, 'unixepoch'),
+                MIN(temp), MAX(temp), MAX(wind_gust), SUM(rain), SUM(strikes), MIN(battery)
+         FROM obs WHERE ts >= ?2 GROUP BY 1 ORDER BY 1",
+        tz_off_min,
+        day_start,
+    )?
+    .pop()
+}
+
+/// Glue the cached head and today's row back into one array, without parsing either.
+pub fn daily_join(head: &str, today: Option<&str>) -> String {
+    match today {
+        None => head.to_string(),
+        Some(row) if head == "[]" => format!("[{row}]"),
+        Some(row) => format!("{},{row}]", head.trim_end_matches(']')),
+    }
+}
+
+fn rows_json(conn: &Connection, sql: &str, tz_off_min: i64, day_start: i64) -> Option<Vec<String>> {
+    let mut stmt = conn.prepare(sql).ok()?;
     let n = |v: Option<f64>| v.map(|x| x.to_string()).unwrap_or_else(|| "null".into());
-    let rows = stmt.query_map([tz_off_min * 60], |r| {
+    let rows = stmt.query_map([tz_off_min * 60, day_start], |r| {
         Ok(format!(
             "{{\"day\":\"{}\",\"tempMin\":{},\"tempMax\":{},\"gustMax\":{},\"rain\":{},\"strikes\":{},\"battMin\":{}}}",
             r.get::<_, String>(0)?,
@@ -159,26 +209,40 @@ pub fn daily_json(conn: &Connection, tz_off_min: i64) -> String {
             n(r.get(6)?)
         ))
     });
-    let body: Vec<String> = match rows {
-        Ok(it) => it.flatten().collect(),
-        Err(_) => return "[]".into(),
-    };
-    format!("[{}]", body.join(","))
+    rows.ok().map(|it| it.flatten().collect())
+}
+
+/// Delete the oldest week of readings that is older than `cutoff`, and say how many went.
+///
+/// A week at a time on purpose: two connections write to this file (the ingest path and the UDP
+/// listener, which gives up after its ten-second busy timeout and silently drops the reading), so
+/// nothing here may hold the write lock for longer than milliseconds. The caller loops until it
+/// returns 0.
+///
+/// ponytail: no VACUUM — it holds the whole file and balloons the WAL. Freed pages are reused, so
+/// the file plateaus rather than shrinks; `sqlite3 weatherdesk.db VACUUM` with the app stopped is
+/// the escape hatch if the size ever actually matters.
+pub fn prune(conn: &Connection, cutoff: i64) -> usize {
+    conn.execute(
+        "DELETE FROM obs WHERE ts < MIN(?1, (SELECT MIN(ts) FROM obs) + 7*86400)",
+        [cutoff],
+    )
+    .unwrap_or(0)
 }
 
 /// Cheap cache key for the aggregate above: the table is append-only in practice, so a row
 /// count and the newest timestamp change whenever the answer would.
 /// Recent rows, whole tuples, newest last — the shape `api.js` already reads for a Tempest's
 /// cloud history, so the page's trend code needs no second parser.
-pub fn tuples_json(conn: &Connection, hours: i64) -> String {
+pub fn tuples_json(conn: &Connection, from: i64, to: i64) -> String {
     let cols = FIELDS.join(", ");
     let mut stmt = match conn.prepare(&format!(
-        "SELECT ts, {cols} FROM obs WHERE ts >= strftime('%s','now') - ?1 ORDER BY ts"
+        "SELECT ts, {cols} FROM obs WHERE ts >= ?1 AND ts <= ?2 ORDER BY ts"
     )) {
         Ok(s) => s,
         Err(_) => return "{\"obs\":[]}".into(),
     };
-    let rows = stmt.query_map([hours * 3600], |r| {
+    let rows = stmt.query_map([from, to], |r| {
         let mut out = vec![r.get::<_, i64>(0)?.to_string()];
         for i in 1..=FIELDS.len() {
             out.push(r.get::<_, Option<f64>>(i)?.map(|v| v.to_string()).unwrap_or_else(|| "null".into()));
@@ -446,5 +510,72 @@ mod tests {
         insert(&c, &obs(1_700_020_800, 10.0, 1.0), SRC_UDP);
         assert!(daily_json(&c, 0).contains("2023-11-15"));
         assert!(daily_json(&c, -300).contains("2023-11-14"));
+    }
+
+    /// Retention deletes in week-sized bites so the write lock is never held long, and it stops
+    /// exactly at the cutoff rather than one bite past it.
+    #[test]
+    fn prune_walks_a_week_at_a_time_and_stops_at_the_cutoff() {
+        let c = open(std::path::Path::new(":memory:")).unwrap();
+        let day = 86_400i64;
+        for d in [0i64, 5, 10, 20, 30] {
+            insert(&c, &obs(d * day, 20.0, 0.0), SRC_UDP);
+        }
+        let cutoff = 25 * day;
+        let mut rounds = 0;
+        while prune(&c, cutoff) > 0 {
+            rounds += 1;
+            assert!(rounds < 10, "prune is not making progress");
+        }
+        // Days 0/5 go together (one week from the oldest), then 10, then 20 — three rounds.
+        assert_eq!(rounds, 3);
+        assert_eq!(stamp(&c), (30 * day, 30 * day), "only the rows past the cutoff are left");
+        assert_eq!(prune(&c, cutoff), 0, "a settled archive is a no-op");
+
+        let empty = open(std::path::Path::new(":memory:")).unwrap();
+        assert_eq!(prune(&empty, cutoff), 0, "an empty archive is not an error");
+    }
+
+    /// The expensive half of /history/daily is everything before today, and it must not change
+    /// when today's readings land — that is the whole basis for caching it.
+    #[test]
+    fn today_s_row_is_appended_without_recomputing_the_head() {
+        // 2023-11-15 00:00 UTC.
+        let midnight = 1_700_006_400i64;
+        assert_eq!(day_start(midnight + 3600, 0), midnight);
+        assert_eq!(day_start(midnight - 1, 0), midnight - 86400);
+        // Five hours west: local midnight is 05:00 UTC, so 02:00 UTC is still yesterday.
+        assert_eq!(day_start(midnight + 2 * 3600, -300), midnight - 86400 + 5 * 3600);
+
+        let c = open(std::path::Path::new(":memory:")).unwrap();
+        insert(&c, &obs(midnight - 3600, 10.0, 1.0), SRC_UDP);
+        let head = daily_head_json(&c, 0, midnight);
+        assert!(head.contains("2023-11-14"));
+        assert!(daily_today_row(&c, 0, midnight).is_none(), "an empty day has no row");
+
+        insert(&c, &obs(midnight + 3600, 20.0, 2.0), SRC_UDP);
+        assert_eq!(daily_head_json(&c, 0, midnight), head, "today's reading never touches the head");
+        let today = daily_today_row(&c, 0, midnight).unwrap();
+        assert!(today.contains("2023-11-15") && today.contains("\"tempMax\":20"));
+
+        let joined = daily_join(&head, Some(&today));
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&joined).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(daily_join("[]", None), "[]");
+        assert_eq!(daily_join("[]", Some("{\"day\":\"x\"}")), "[{\"day\":\"x\"}]");
+    }
+
+    /// Both ends of the window are honoured — the detail panel asks for a day either side of the
+    /// point that was clicked, which is the first caller that ever needed an upper bound.
+    #[test]
+    fn tuples_honour_both_ends_of_the_window() {
+        let c = open(std::path::Path::new(":memory:")).unwrap();
+        for t in [1_000i64, 2_000, 3_000] {
+            insert(&c, &obs(t, 20.0, 0.0), SRC_UDP);
+        }
+        let body = tuples_json(&c, 1_500, 2_500);
+        assert!(body.contains("[2000,"), "the row inside the window is there");
+        assert!(!body.contains("[1000,") && !body.contains("[3000,"), "the rows outside it are not");
+        assert_eq!(tuples_json(&c, 9_000, 9_999), "{\"obs\":[]}");
     }
 }

@@ -98,10 +98,13 @@ export function chart(canvas, series, opts = {}) {
   );
 
   if (canvas._wdHover != null) crosshair(c, canvas._wdHover);
+  // A time the caller wants marked whatever the pointer is doing — the detail panel opens on the
+  // point that was clicked and has to show which one that was.
+  else if (opts.markX != null) crosshair(c, px(opts.markX));
 
-  // The readout under the pointer: nearest real sample on each line, not an interpolation —
-  // a chart that invents a value between two readings is a chart that lies.
-  function crosshair(c, hx) {
+  // The nearest real sample on each line to a pixel x, or [] when the pointer is nowhere near
+  // one. Shared by the crosshair and the click handler so both agree on what was picked.
+  function nearest(hx) {
     const marks = [];
     for (const s of series) {
       if (s.type === 'band') continue;
@@ -113,6 +116,14 @@ export function chart(canvas, series, opts = {}) {
       }
       if (best && best.d < (w - padL - padR) / 4) marks.push({ p: best.p, color: s.color, name: s.name });
     }
+    return marks;
+  }
+  canvas._wdNearest = nearest;
+
+  // The readout under the pointer: nearest real sample on each line, not an interpolation —
+  // a chart that invents a value between two readings is a chart that lies.
+  function crosshair(c, hx) {
+    const marks = nearest(hx);
     if (!marks.length) return;
     const gx = px(marks[0].p.x);
     c.strokeStyle = MUTED; c.lineWidth = 1;
@@ -154,6 +165,15 @@ function bindHover(canvas, series, opts) {
     canvas._wdHover = null;
     canvas._wdDraw();
   };
+  // A click is a hover that stopped: `move` has already run, so the pick is whatever the readout
+  // is showing. Nothing to do on a chart nobody wired an `onPick` to.
+  canvas.addEventListener('click', (e) => {
+    if (!opts.onPick) return;
+    const hx = e.clientX - canvas.getBoundingClientRect().left;
+    const m = canvas._wdNearest?.(hx)?.[0];
+    if (m) opts.onPick(m.p, m.name);
+  });
+  canvas.style.cursor = opts.onPick ? 'pointer' : '';
   canvas.addEventListener('pointermove', move);
   canvas.addEventListener('pointerdown', move);
   canvas.addEventListener('pointerleave', clear);
@@ -181,6 +201,20 @@ if (typeof window !== 'undefined' && location.search.includes('selftest')) {
   cv._wdHover = 36;
   chart(cv, [{ data: [{ x: 0, y: 1 }, { x: 1, y: 5 }], color: '#f00' }], { label: 'test' });
   console.assert(cv.toDataURL() !== before, 'chart: hover draws a crosshair');
+  // Click to pick: the handler reads the same nearest-sample map the readout draws with.
+  {
+    const cv2 = document.createElement('canvas');
+    cv2.width = 200; cv2.height = 100;
+    let picked = null;
+    chart(cv2, [{ data: [{ x: 0, y: 1 }, { x: 100, y: 5 }], color: '#f00', name: 'a' }],
+      { onPick: (p, name) => { picked = { p, name }; } });
+    cv2._wdNearest = (hx) => (hx < 50 ? [{ p: { x: 0, y: 1 }, name: 'a' }] : []);
+    cv2.dispatchEvent(new MouseEvent('click', { clientX: 4 }));
+    console.assert(picked?.p.y === 1 && picked.name === 'a', 'chart: a click hands back the sample under it');
+    picked = null;
+    cv2.dispatchEvent(new MouseEvent('click', { clientX: 400 }));
+    console.assert(picked === null, 'chart: a click nowhere near a sample picks nothing');
+  }
   cv._wdHover = null;
   chart(cv, [{ type: 'band', data: [{ x: 0, lo: 1, hi: 9 }, { x: 1, lo: 2, hi: 8 }], color: '#0f0' }]);
   console.assert(/1 to 9/.test(cv.getAttribute('aria-label')), 'chart: a band sets the scale from lo and hi');

@@ -6,6 +6,7 @@
 // so rather than pretending the record is older than it is.
 import { settings, U, num, every, expires, msToWind } from './app.js';
 import { chart } from './charts.js';
+import { openDetail } from './detail.js';
 import { normals, normalFor, getJSON } from './api.js';
 
 const $ = (id) => document.getElementById(id);
@@ -144,6 +145,12 @@ function drawMonthly() {
 
 // --- explorer: any date range, any column ---
 
+// Which per-reading metric each daily column is a summary of. `battMin` is missing on purpose:
+// detail.js has no battery entry, and a chart of the chart is what the panel is not for.
+const EXPLORE_DETAIL = {
+  tempMin: 'temp', tempMax: 'temp', gustMax: 'windGust', rain: 'rain', strikes: 'strikes',
+};
+
 function drawExplore() {
   const from = $('ex-from').value || days[0]?.day;
   const to = $('ex-to').value || days[days.length - 1]?.day;
@@ -155,7 +162,13 @@ function drawExplore() {
     data: rows.map((d) => ({ x: new Date(`${d.day}T12:00:00`).getTime(), y: d[key] })),
     color: '#4fb8ff',
     type: key === 'rain' || key === 'strikes' ? 'bar' : 'line',
-  }], { digits, unit, label: $('ex-metric').selectedOptions[0].textContent, yMin: key === 'rain' ? 0 : undefined });
+  }], {
+    digits, unit, label: $('ex-metric').selectedOptions[0].textContent,
+    yMin: key === 'rain' ? 0 : undefined,
+    // A daily row is a summary of a day; the detail panel shows the readings behind it. Battery
+    // has no detail entry, so that column simply is not clickable.
+    onPick: EXPLORE_DETAIL[key] ? (p) => openDetail(EXPLORE_DETAIL[key], p.x) : undefined,
+  });
   if (!rows.length) { $('ex-summary').textContent = 'No observations in that range.'; return; }
   const vals = rows.map((d) => d[key]);
   const total = vals.reduce((a, b) => a + b, 0);

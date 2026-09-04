@@ -3,6 +3,7 @@
 import * as api from './api.js';
 import { settings, coords, configured, U, num, every, expires } from './app.js';
 import { chart } from './charts.js';
+import { openDetail } from './detail.js';
 import { accuracy } from './track.js';
 import { forecast as deskForecast } from './desk.js';
 
@@ -45,7 +46,9 @@ const pts = (idx, from = 0) =>
   history.filter((o) => o[I.time] >= from).map((o) => ({ x: o[I.time] * 1000, y: o[idx] }));
 
 function drawTemp() {
-  chart($('c-temp'), [{ data: pts(I.temp), color: '#4fb8ff' }], { digits: 0 });
+  // Clicking a point opens the same slide-over the gauges open, windowed on that moment.
+  chart($('c-temp'), [{ data: pts(I.temp), color: '#4fb8ff' }],
+    { digits: 0, onPick: (p) => openDetail('temp', p.x) });
   $('board-temp').textContent = `7-day air temperature (${U.temp()})`;
 }
 
@@ -61,7 +64,9 @@ function dailyRain() {
 
 function drawRain() {
   const d = dailyRain();
-  chart($('c-rain'), [{ data: d, type: 'bar', color: '#4fdc8b' }], { yMin: 0, digits: 2 });
+  // The bars are whole days; noon is the middle of the window the detail panel will read.
+  chart($('c-rain'), [{ data: d, type: 'bar', color: '#4fdc8b' }],
+    { yMin: 0, digits: 2, onPick: (p) => openDetail('rain', p.x + 12 * 3600 * 1000) });
   const total = d.reduce((a, b) => a + b.y, 0);
   $('board-rain').textContent = `7-day rain — ${num(total, 2)} ${U.precip()} total`;
 }
@@ -69,9 +74,9 @@ function drawRain() {
 function drawWind() {
   const from = Math.floor(Date.now() / 1000) - DAY;
   chart($('c-wind'), [
-    { data: pts(I.windGust, from), color: '#ffb84f' },
-    { data: pts(I.windAvg, from), color: '#4fb8ff' },
-  ], { yMin: 0, digits: 0 });
+    { data: pts(I.windGust, from), color: '#ffb84f', name: 'gust' },
+    { data: pts(I.windAvg, from), color: '#4fb8ff', name: 'avg' },
+  ], { yMin: 0, digits: 0, onPick: (p, name) => openDetail(name === 'avg' ? 'windAvg' : 'windGust', p.x) });
   $('board-wind').textContent = `24h wind (${U.wind()}) — gust amber, average blue`;
 }
 
@@ -122,7 +127,8 @@ function drawRose() {
 
 function drawPressure() {
   const from = Math.floor(Date.now() / 1000) - 2 * DAY;
-  chart($('c-press'), [{ data: pts(I.press, from), color: '#e6edf5' }], { digits: 2 });
+  chart($('c-press'), [{ data: pts(I.press, from), color: '#e6edf5' }],
+    { digits: 2, onPick: (p) => openDetail('press', p.x) });
   const p = pts(I.press, from);
   const delta = p.length > 1 ? p[p.length - 1].y - p[0].y : 0;
   $('board-press').textContent = `48h pressure (${U.press()}) — net ${delta >= 0 ? '+' : ''}${num(delta, 2)}`;

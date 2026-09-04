@@ -16,12 +16,33 @@ fn main() {
     if std::env::args().any(|a| a == "--headless") {
         return weatherdesk_lib::run_headless();
     }
-    // WebKitGTK's DMABUF renderer draws a blank window on some Wayland stacks (seen on
-    // Hyprland + Intel UHD 600, same class as the NVIDIA/Wayland Error 71 in dev). Disable
-    // it unless the user set the variable themselves; costs the GPU compositing path.
+    // WebKitGTK renderer knobs. Which ones depend on the box: the AppImage runs under XWayland
+    // and an Intel iGPU there draws a blank window unless compositing is software too. Mode comes
+    // from `WD_RENDER`, `--render <mode>`, then the saved setting, so a blank window can be fixed
+    // from any browser on the LAN. Only set what the user has not set themselves.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    {
+        let args: Vec<String> = std::env::args().collect();
+        let flag = args.iter().position(|a| a == "--render").and_then(|i| args.get(i + 1)).cloned();
+        let cfg = weatherdesk_lib::default_config_dir().join("config.json");
+        let mode = std::env::var("WD_RENDER")
+            .ok()
+            .or(flag)
+            .or_else(|| weatherdesk_lib::setting(&cfg, "render").map(|s| s.trim_matches('"').to_string()))
+            .unwrap_or_else(|| "auto".into());
+        let appimage = std::env::var_os("APPIMAGE").is_some();
+        let vendor = weatherdesk_lib::gpu_vendor();
+        let mut set = vec![];
+        for (k, v) in weatherdesk_lib::render_env(&mode, appimage, vendor.as_deref()) {
+            if std::env::var_os(k).is_none() {
+                std::env::set_var(k, v);
+                set.push(k);
+            }
+        }
+        eprintln!(
+            "weatherdesk: render={mode} appimage={appimage} gpu={} set={set:?}",
+            vendor.as_deref().unwrap_or("unknown")
+        );
     }
     #[cfg(feature = "gui")]
     weatherdesk_lib::run();

@@ -242,9 +242,146 @@ fn states_cache() -> &'static Mutex<Option<(u64, String)>> {
 /// on the panel while somebody is still standing next to it.
 const STATES_TTL: u64 = 15;
 
+// --- US Drought Monitor ---
+//
+// Two hops, neither of which a browser can make (no CORS on either): the FCC block API turns the
+// station's coordinates into a county FIPS code, then the Drought Monitor hands back that
+// county's weekly severity split. The page shows one line of it on the fire card.
+//
+// The whole result is cached rather than the two halves: a county's drought class changes once a
+// week, on a Thursday.
+pub fn drought(cfg: &std::path::Path) -> String {
+    let now = crate::server::epoch();
+    if let Ok(c) = drought_cache().lock() {
+        if let Some((expires, body)) = c.as_ref() {
+            if now < *expires {
+                return body.clone();
+            }
+        }
+    }
+    let get = |k: &str| {
+        crate::setting(cfg, k)
+            .and_then(|v| v.trim_matches('"').parse::<f64>().ok())
+    };
+    let (Some(lat), Some(lon)) = (get("lat"), get("lon")) else {
+        return r#"{"error":"no location set"}"#.to_string();
+    };
+    let (body, ok) = match fetch_drought(lat, lon) {
+        Ok(b) => (b, true),
+        Err(e) => (serde_json::json!({ "error": e }).to_string(), false),
+    };
+    if let Ok(mut c) = drought_cache().lock() {
+        // A dead upstream costs one worker one round trip every ten minutes, not one per screen
+        // per refresh.
+        *c = Some((now + if ok { DROUGHT_TTL } else { 600 }, body.clone()));
+    }
+    body
+}
+
+fn fetch_drought(lat: f64, lon: f64) -> Result<String, String> {
+    // Coordinates are the house. Never format the error — the URL is in it.
+    let fips_body = ureq::get(&format!(
+        "https://geo.fcc.gov/api/census/block/find?latitude={lat}&longitude={lon}&format=json"
+    ))
+    .timeout(Duration::from_secs(8))
+    .call()
+    .map_err(|e| match e {
+        ureq::Error::Status(code, _) => format!("county lookup HTTP {code}"),
+        _ => "county lookup unreachable".to_string(),
+    })?
+    .into_string()
+    .map_err(|_| "county lookup unreadable".to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&fips_body).map_err(|_| "county lookup unexpected".to_string())?;
+    let fips = v["County"]["FIPS"].as_str().unwrap_or_default().to_string();
+    if fips.len() != 5 {
+        return Err("no US county here".into());
+    }
+    // Six weeks back is enough to always contain a published map, whatever day it is asked on.
+    let ymd = |t: i64| {
+        let (y, m, d, ..) = crate::server::utc_ymdhms(t);
+        format!("{m}/{d}/{y}")
+    };
+    let now = crate::server::epoch() as i64;
+    // `Accept: application/json` is load-bearing: without it this endpoint answers CSV.
+    let body = ureq::get(&format!(
+        "https://usdmdataservices.unl.edu/api/CountyStatistics/GetDroughtSeverityStatisticsByAreaPercent\
+?aoi={fips}&startdate={}&enddate={}&statisticsType=1",
+        ymd(now - 42 * 86400),
+        ymd(now)
+    ))
+    .set("Accept", "application/json")
+    .timeout(Duration::from_secs(8))
+    .call()
+    .map_err(|e| match e {
+        ureq::Error::Status(code, _) => format!("drought monitor HTTP {code}"),
+        _ => "drought monitor unreachable".to_string(),
+    })?
+    .into_string()
+    .map_err(|_| "drought monitor unreadable".to_string())?;
+    newest_week(&body).ok_or_else(|| "no drought map published yet".to_string())
+}
+
+/// The most recent weekly row, by its map date rather than its position in the array — the order
+/// the service returns is not part of anything anybody documented.
+fn newest_week(body: &str) -> Option<String> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(body).ok()?;
+    let key = |r: &serde_json::Value| {
+        // "9/2/2025" — pad it into something that sorts.
+        let d = r["mapDate"].as_str().unwrap_or_default().to_string();
+        let p: Vec<&str> = d.split('/').collect();
+        if p.len() == 3 {
+            format!("{:0>4}{:0>2}{:0>2}", p[2], p[0], p[1])
+        } else {
+            d
+        }
+    };
+    let best = rows.iter().max_by_key(|r| key(r))?;
+    let pct = |k: &str| {
+        best[k]
+            .as_f64()
+            .or_else(|| best[k].as_str().and_then(|s| s.parse().ok()))
+            .unwrap_or(0.0)
+    };
+    Some(
+        serde_json::json!({
+            "date": best["mapDate"].as_str().unwrap_or_default(),
+            "county": best["county"].as_str().unwrap_or_default(),
+            "state": best["state"].as_str().unwrap_or_default(),
+            "none": pct("none"), "d0": pct("d0"), "d1": pct("d1"),
+            "d2": pct("d2"), "d3": pct("d3"), "d4": pct("d4"),
+        })
+        .to_string(),
+    )
+}
+
+fn drought_cache() -> &'static Mutex<Option<(u64, String)>> {
+    static C: OnceLock<Mutex<Option<(u64, String)>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(None))
+}
+
+/// The map is published once a week; six hours is "the same day, at most one extra fetch".
+const DROUGHT_TTL: u64 = 6 * 3600;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The published week is picked by its date, not by where it happens to sit in the array, and
+    /// the percentages survive whether the service quotes them or not.
+    #[test]
+    fn drought_picks_the_newest_week_by_date() {
+        let body = r#"[
+          {"mapDate":"8/19/2025","county":"Tarrant County","state":"TX","none":100,"d0":0,"d1":0,"d2":0,"d3":0,"d4":0},
+          {"mapDate":"9/2/2025","county":"Tarrant County","state":"TX","none":"81","d0":"19","d1":"19","d2":"19","d3":0,"d4":0},
+          {"mapDate":"8/26/2025","county":"Tarrant County","state":"TX","none":90,"d0":10,"d1":0,"d2":0,"d3":0,"d4":0}
+        ]"#;
+        let v: serde_json::Value = serde_json::from_str(&newest_week(body).unwrap()).unwrap();
+        assert_eq!(v["date"], "9/2/2025");
+        assert_eq!(v["d2"], 19.0);
+        assert_eq!(v["none"], 81.0);
+        assert!(newest_week("[]").is_none(), "no rows is no answer, not a zero week");
+        assert!(newest_week("not json").is_none());
+    }
 
     /// Named fields, and the derived pair alongside them — the whole point of the endpoint.
     #[test]

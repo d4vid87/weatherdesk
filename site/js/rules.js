@@ -23,6 +23,16 @@ export const METRICS = {
   uv: ['UV index', () => '', 1],
   strikes3h: ['Lightning strikes · 3h', () => '', 0],
   press3h: ['Pressure change · 3h', U.press, 2],
+  // Signed differences over the last hour: "falling fast" is a rule you write as `temp1h < -8`.
+  temp1h: ['Temp change · 1h', U.temp, 1],
+  press1h: ['Pressure change · 1h', U.press, 2],
+  rh1h: ['Humidity change · 1h', () => '%', 0],
+  // From the forecast, not the sensor — a warning that arrives when it is already freezing is
+  // not a warning. Refreshed on every wd:forecast, null until the first one lands.
+  low18h: ['Forecast low · 18h', U.temp, 0],
+  rain6h: ['Forecast rain chance · 6h', () => '%', 0],
+  gust24h: ['Forecast gust · 24h', U.wind, 0],
+  hiTomorrow: ['Forecast high · tomorrow', U.temp, 0],
 };
 
 export const OPS = { '>': 'above', '<': 'below' };
@@ -62,14 +72,49 @@ function fromTuple(t) {
 // here and neither should be able to grow it without limit.
 const ring = [];
 function derive(m) {
-  ring.push({ t: m._t, press: m._press, strikes: m._strikes });
+  ring.push({ t: m._t, press: m._press, strikes: m._strikes, temp: m.temp, rh: m.rh });
   const cutoff = m._t - 3 * 3600;
   while (ring.length && ring[0].t < cutoff) ring.shift();
   const first = ring.find((r) => r.press != null);
   m.press3h = first && m._press != null ? m._press - first.press : null;
   // Tempest reports strikes per interval, so 3h worth is a sum, not a difference.
   m.strikes3h = ring.reduce((a, r) => a + (r.strikes || 0), 0);
-  return m;
+  // An hour ago is the nearest sample to it, and null unless the ring actually reaches back that
+  // far — a dashboard opened ten minutes ago has no hour to compare against.
+  const hourAgo = nearest(m._t - 3600);
+  const delta = (key, now) => (hourAgo && hourAgo[key] != null && now != null ? now - hourAgo[key] : null);
+  m.temp1h = delta('temp', m.temp);
+  m.press1h = delta('press', m._press);
+  m.rh1h = delta('rh', m.rh);
+  return Object.assign(m, fcM);
+}
+
+// Nearest sample to a time, or null when the oldest one is still less than half an hour from it.
+function nearest(t) {
+  let best = null;
+  for (const r of ring) {
+    const d = Math.abs(r.t - t);
+    if (!best || d < best.d) best = { d, r };
+  }
+  return best && best.d <= 1800 ? best.r : null;
+}
+
+// Forecast-derived metrics, merged into every evaluation. Display units already: the built-in
+// frost rule below compares air_temp_low against 34 for the same reason.
+let fcM = {};
+export function forecastMetrics(fc) {
+  const hourly = fc?.forecast?.hourly || [];
+  const daily = fc?.forecast?.daily || [];
+  const now = Date.now() / 1000;
+  const within = (h) => hourly.filter((x) => x.time >= now && x.time <= now + h * 3600);
+  const max = (arr, key) => (arr.length ? Math.max(...arr.map((x) => x[key] || 0)) : null);
+  const next18 = within(18).map((x) => x.air_temperature).filter((v) => v != null);
+  return {
+    low18h: next18.length ? Math.min(...next18) : null,
+    rain6h: max(within(6), 'precip_probability'),
+    gust24h: max(within(24), 'wind_gust'),
+    hiTomorrow: daily[1]?.air_temp_high ?? null,
+  };
 }
 
 // --- evaluation ---
@@ -116,8 +161,17 @@ export function evaluate(m, rules = settings().rules || [], nowSec = Math.floor(
   return fired;
 }
 
+// The last derived reading, so a new forecast can re-evaluate without pushing a duplicate sample
+// into the ring.
+let lastM = null;
+
 function run(m) {
-  for (const { rule, value, index } of evaluate(derive(m))) {
+  lastM = derive(m);
+  fire(lastM);
+}
+
+function fire(m) {
+  for (const { rule, value, index } of evaluate(m)) {
     // home.js turns this into a per-rule binary sensor; the banner alone had no way to say
     // which rule it came from.
     window.dispatchEvent(new CustomEvent('wd:rule', { detail: { index, rule, value } }));
@@ -138,6 +192,10 @@ window.addEventListener('wd:ws-obs', (e) => run(fromTuple(e.detail)));
 // Not a rule the user has to think to write. The forecast low, not the reading: a warning that
 // arrives when it is already freezing is not a warning.
 window.addEventListener('wd:forecast', (e) => {
+  fcM = forecastMetrics(e.detail);
+  // A forecast rule that waited for the next station report would be up to ten minutes late on
+  // a REST source, and the whole point of these is lead time.
+  if (lastM) fire(Object.assign(lastM, fcM));
   const days = e.detail?.forecast?.daily?.slice(0, 2) || [];
   const limit = settings().units === 'metric' ? 1 : 34;
   for (const d of days) {
@@ -241,4 +299,39 @@ if (location.search.includes('selftest')) {
   console.assert(evaluate({ gust: 40 }, [{ metric: 'gust', op: '>', value: 30 }], 0).length === 1,
     'rules: a rule saved before v3 still fires');
   state.clear();
+
+  // Rate of change: an hour of samples in the ring, then the signed delta out of derive().
+  {
+    ring.length = 0;
+    const now = Math.floor(Date.now() / 1000);
+    ring.push({ t: now - 3600, press: 1010, strikes: 0, temp: 70, rh: 60 });
+    const m = derive({ temp: 65, rh: 75, _press: 1006, _strikes: 0, _t: now });
+    console.assert(m.temp1h === -5, 'rules: temp fell five in the hour');
+    console.assert(Math.abs(m.press1h + 4) < 1e-9, 'rules: pressure change is signed');
+    console.assert(m.rh1h === 15, 'rules: humidity change');
+    ring.length = 0;
+    console.assert(derive({ temp: 65, _t: now }).temp1h === null, 'rules: no hour of history, no delta');
+    ring.length = 0;
+  }
+
+  // Forecast metrics, off the same shape the Desk broadcasts.
+  {
+    const now = Date.now() / 1000;
+    const fc = { forecast: {
+      daily: [{ air_temp_high: 80 }, { air_temp_high: 91 }],
+      hourly: [
+        { time: now + 3600, air_temperature: 40, precip_probability: 20, wind_gust: 12 },
+        { time: now + 5 * 3600, air_temperature: 31, precip_probability: 80, wind_gust: 30 },
+        { time: now + 20 * 3600, air_temperature: 55, precip_probability: 10, wind_gust: 44 },
+      ],
+    } };
+    const m = forecastMetrics(fc);
+    console.assert(m.low18h === 31, 'rules: forecast low over the next 18h');
+    console.assert(m.rain6h === 80, 'rules: rain chance peak over six hours');
+    console.assert(m.gust24h === 44, 'rules: gust peak over the day');
+    console.assert(m.hiTomorrow === 91, 'rules: tomorrow high');
+    console.assert(evaluate(m, [{ metric: 'low18h', op: '<', value: 34 }], 0).length === 1,
+      'rules: a forecast rule fires on the forecast alone');
+    state.clear();
+  }
 }

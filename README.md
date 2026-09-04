@@ -32,7 +32,8 @@ bottom](docs/screenshot-national.png)
   station-vs-model trend strip, 48h temp/rain/wind chart, inline radar, six day cards with
   temperature arcs, eight dial gauges, 10-day list, alert center, weather story, model agreement,
   forecast changes, forecast accuracy, air quality, sun & moon detail (golden hour, day-length
-  change, moonrise/set), fire weather & dryness, and station health (battery, signal, sensor
+  change, moonrise/set), fire weather & dryness (including the county's US Drought Monitor class,
+  on installs that run the app's own server), and station health (battery, signal, sensor
   faults, time since the last report).
 - **Forecast Lab** — radar, embedded from [HookEcho](https://hookecho.io/).
 
@@ -82,6 +83,14 @@ Extreme warnings still come through, because that is what the setting is for. On
 severe alerts aloud** speaks them. On the desktop, an alert raised while the window is hidden
 becomes a real OS notification.
 
+**Tap the hero icon** and the dashboard reads the day out: what it is doing now, the high and low,
+the 24-hour story and whether anything is out. `Settings → Spoken briefing at` schedules the same
+thing once a day at a fixed time. Browsers refuse to speak before a page has been touched, so a
+briefing on a tablet nobody has touched since boot waits for the first tap.
+
+`Settings → Dim the screen overnight` fades a wall panel down over the hour after sunset and back
+up over the hour before sunrise, using the station's own sun times.
+
 `Settings → Panel catalog` moves any Desk panel to the Data or Local Signals tab; it keeps working
 where it lands. `Settings → Palette` adds OLED black, Solarized, high contrast and a flat e-ink
 mode on top of the light and dark themes.
@@ -92,11 +101,15 @@ always shows the address a tablet should open.
 ## Alert rules and push
 
 Settings → **Alert rules** builds thresholds on live readings: a metric (temperature, dew point,
-gust, wind, humidity, rain rate, UV, 3h lightning count, 3h pressure change), above or below, a
+gust, wind, humidity, rain rate, UV, 3h lightning count, 3h pressure change, the change in
+temperature / pressure / humidity over the last hour, and four straight off the forecast — the low
+over the next 18 hours, the rain chance over the next six, the peak gust over the next day and
+tomorrow's high), above or below, a
 value, and how long it has to hold. **+ AND** adds a second condition and then both have to hold —
 "gust above 25 AND humidity below 40" is a fire day; either half alone is a Tuesday. A rule fires
 once and re-arms when the reading falls back through 90% of its threshold, so a gust hovering on
-the line does not notify all afternoon.
+the line does not notify all afternoon. A forecast rule is checked the moment a new forecast
+lands rather than waiting for the next reading from the station, which is the whole point of one.
 
 Any alert can leave the machine:
 
@@ -120,6 +133,11 @@ carries meaning (counting numbers, swinging needles, sliding panels, the alert c
 the effects; *Off* is a still page. *Auto* — the default — picks Full on a desktop and Lite on
 the hardware eco mode calls slow. Asking your OS for reduced motion, or picking the e-ink
 palette, forces Off. `?motion=full|lite|off` overrides it for one page load.
+
+Anything below Full — so a wall tablet, an old Chromebook, or any box eco mode has picked up —
+gets a **still radar picture**, refreshed every five minutes, instead of the live radar viewer,
+which is megabytes of WebAssembly repainting itself. Tapping it opens the full map. Setting Motion
+to Full puts the live loop back on the Desk.
 
 Settings → **Eco mode** halves how often everything polls and drops the seconds from the clock.
 On *Auto* it turns itself on when the browser reports four cores or fewer, which covers the
@@ -152,6 +170,13 @@ again. Moving and hiding work there; resizing does not, because a phone gives ev
 width and its natural height anyway. That mode is per-device and lasts until the app is closed —
 the layout it writes is the shared one, so a panel moved on the phone moves on the wall tablet too.
 
+## Tests
+
+`cargo test --manifest-path src-tauri/Cargo.toml` covers the server, the archive and every unit
+conversion. `bash .github/ci/selftest.sh` loads the whole site in headless Chrome at three motion
+levels and three screen sizes, fails on any in-page self-check, and leaves a screenshot of each in
+`shots/` (`CHROME=chromium` if that is what you have). Both run on every pull request.
+
 ## Data sources
 
 | Feature | Endpoint |
@@ -163,6 +188,8 @@ the layout it writes is the shared one, so a panel moved on the phone moves on t
 | Multi-model agreement, 15-minute nowcast, AQI | `api.open-meteo.com` |
 | Radar | [HookEcho](https://hookecho.io/) at `hookecho.pages.dev` |
 | Place search | `photon.komoot.io` |
+| County drought class | `usdmdataservices.unl.edu` + `geo.fcc.gov` (via the app's own server) |
+| Still radar image | `img.hookecho.io` |
 | Other brands of station (see below) | your own LAN, `rt.ambientweather.net` |
 
 ## Other weather stations
@@ -418,6 +445,12 @@ history runs out. A station that has been up for years gets years of records on 
 and the almanac says how much it has and whether it is still fetching. The walk is resumable — kill
 the app halfway and it picks up from where it stopped.
 
+`Settings → Keep history for` sets how far back the archive goes: forever, which is the default,
+or 1, 2, 5 or 10 years. Anything older is deleted an hour after you save, a week at a time so an
+incoming reading never has to wait for it. There is no undo and most stations have no cloud to
+restore from, so it asks once before shortening the window. The file itself does not shrink — the
+freed space is reused — and `sqlite3 weatherdesk.db VACUUM` with the app stopped will reclaim it.
+
 `Settings → History CSV` hands the whole archive over as a spreadsheet, and `Backup archive`
 downloads a consistent snapshot of the database itself. To restore one: quit the app, copy the file
 over `<app data>/weatherdesk.db` (delete the `-wal` and `-shm` files beside it if they exist), and
@@ -562,6 +595,19 @@ viewport size. Start there — it separates "my token is wrong" from "NWS is dow
 
 On Windows, if the tablet can't load the LAN URL, it's the firewall prompt that was dismissed on
 first launch — allow WeatherDesk on private networks.
+
+**The window opens blank (Linux).** WebKitGTK's GPU paths do not survive every combination of
+driver and compositor — an Intel iGPU under the AppImage is the known-bad one. Start it once with
+the workarounds on:
+
+```sh
+WD_RENDER=safe ./WeatherDesk_*.AppImage      # or: ./WeatherDesk_*.AppImage --render safe
+```
+
+If that draws, make it permanent in `Settings → Window rendering → Safe`, which you can set from
+any browser on the LAN (`http://<that machine>:8088`) — a blank window is still a working server.
+The app prints one line at startup saying which mode it picked and what it set. The AUR build,
+which links the system WebKitGTK, generally does not need any of this.
 
 ## Security
 

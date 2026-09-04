@@ -1,6 +1,7 @@
 // Wire the shell: settings drawer, diagnostics, nav, section modules.
-import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs, setServerAlerts, alertsAreServerSide, every } from './app.js';
+import { settings, saveSettings, configured, hasSource, hasLocation, initNav, applyTabs, fullscreen, holdScreen, refreshAll, notify, load, store, applyEco, ecoOn, initKiosk, expires, num, U, msToWind, windToMs, setServerAlerts, alertsAreServerSide, every, clearJob } from './app.js';
 import * as api from './api.js';
+import { motionLevel } from './motion.js';
 import { initDesk, refreshDesk, refreshObs, refreshAlerts, refreshAqi } from './desk.js';
 import { initIntel, refreshModels, refreshNowcast } from './intel.js';
 import { initSignals, refreshSignals } from './signals.js';
@@ -148,6 +149,8 @@ function fillDrawer() {
   $('set-desk-radar').checked = !!s.deskRadar;
   $('set-eco').value = s.eco || 'auto';
   $('set-motion').value = s.motion || 'auto';
+  $('set-render').value = s.render || 'auto';
+  $('set-retention').value = String(s.retentionYears || 0);
   $('set-storm-auto').checked = !!s.stormAuto;
   $('set-theme').value = s.theme || 'dark';
   $('set-accent').value = s.accent || '#4fb8ff';
@@ -157,6 +160,7 @@ function fillDrawer() {
   $('set-kiosk').value = s.kioskCycleSec || 0;
   $('set-night-dim').checked = !!s.nightDim;
   $('set-speak').checked = !!s.speakAlerts;
+  $('set-brief-time').value = s.briefTime || '';
   $('set-web-notif').checked = !!s.webNotif;
   $('set-palette').value = s.palette || '';
   $('set-quiet-start').value = s.quietStart || '';
@@ -408,6 +412,15 @@ $('btn-full').onclick = fullscreen;
 $('btn-refresh').onclick = refreshAll;
 
 $('btn-save').onclick = async () => {
+  // Retention deletes readings for good and there is no undo, so a shorter window is confirmed
+  // once, here, rather than discovered as a hole in the archive.
+  const keep = +$('set-retention').value || 0;
+  const kept = +settings().retentionYears || 0;
+  if (keep && (!kept || keep < kept)
+      && !confirm(`Delete every reading older than ${keep} year${keep > 1 ? 's' : ''}? This cannot be undone.`)) {
+    $('set-retention').value = String(kept);
+    return;
+  }
   // A new radar site means the saved camera belongs to the old one — drop it so the fresh
   // site-only link recenters.
   if ($('set-radar-site').value !== (settings().radarSite || '')) { radarView = null; store('wd.radar', null); }
@@ -425,6 +438,8 @@ $('btn-save').onclick = async () => {
     deskRadar: $('set-desk-radar').checked,
     eco: $('set-eco').value,
     motion: $('set-motion').value,
+    render: $('set-render').value,
+    retentionYears: +$('set-retention').value || 0,
     stormAuto: $('set-storm-auto').checked,
     theme: $('set-theme').value,
     // The picker cannot express "no accent", so the default colour means the default.
@@ -435,6 +450,7 @@ $('btn-save').onclick = async () => {
     kioskCycleSec: Math.max(0, Math.min(3600, +$('set-kiosk').value || 0)),
     nightDim: $('set-night-dim').checked,
     speakAlerts: $('set-speak').checked,
+    briefTime: $('set-brief-time').value,
     webNotif: $('set-web-notif').checked,
     palette: $('set-palette').value,
     quietStart: $('set-quiet-start').value,
@@ -742,8 +758,8 @@ function changelog() {
   if (!seen) return; // a fresh install has nothing to be new since
   notify({
     title: `WeatherDesk ${APP_VERSION}`,
-    body: 'New: broadcast-style motion with a live sky and animated icons, a Motion setting '
-      + '(Auto/Full/Lite/Off), severe alerts read aloud, and a faster Desk.',
+    body: 'New: tap the hero to hear the day, forecast and rate-of-change alert rules, clickable '
+      + 'charts, drought on the Fire card, archive retention — and a fix for the blank window on Linux.',
   });
 }
 
@@ -1149,6 +1165,40 @@ window.addEventListener('wd:section', (e) => {
 // it with the page ate the same process the Settings drawer lives in — the window painted and then
 // accepted no input at all, so the token could never be typed in. Wait for setup to be done, for
 // the panel to actually be on screen, and for the main thread to go idle.
+// A live radar is megabytes of wasm repainting itself; on the boxes that already run Lite (a
+// wall tablet, a Celeron Chromebook) that is the single most expensive thing on the page. They
+// get a picture instead — same map, five minutes stale, one PNG. Motion=Full puts the live map
+// back on any box, which is why this needs no setting of its own.
+function stillRadar() {
+  return ecoOn() || motionLevel() !== 'full';
+}
+
+// HookEcho's snapshot renderer. `t` is a five-minute bucket: Cloudflare rewrites the browser TTL
+// to four hours, so without a changing URL the panel would show one frame all afternoon.
+function stillUrl() {
+  const v = radarView ?? load('wd.radar', null);
+  const q = new URLSearchParams({
+    site: v?.site || radarSite(), size: '768', zoom: String(v?.zoom ?? 6.5),
+    t: String(Math.floor(Date.now() / 300000)),
+  });
+  if (v?.basemap) q.set('basemap', v.basemap);
+  return `https://img.hookecho.io/snapshot.png?${q}`;
+}
+
+function showStill(panel) {
+  const img = $('desk-radar-still'), f = $('desk-radar-frame');
+  if (f.src) { f.src = 'about:blank'; f.removeAttribute('src'); }
+  img.hidden = false;
+  $('desk-radar-caption').hidden = false;
+  panel.classList.add('loaded');
+  const refresh = () => { img.src = stillUrl(); };
+  img.onerror = () => panel.classList.add('unreachable');
+  img.onload = () => panel.classList.remove('unreachable');
+  img.onclick = () => document.querySelector('.tab[data-section="lab"]')?.click();
+  refresh();
+  every('radar-still', 300, refresh);
+}
+
 function loadDeskRadar() {
   const panel = $('desk-radar'), f = $('desk-radar-frame');
   if (!panel) return;
@@ -1158,9 +1208,20 @@ function loadDeskRadar() {
   panel.hidden = !(settings().deskRadar || (stormOverride && settings().stormAuto));
   if (panel.hidden) {
     if (f.src) { f.src = 'about:blank'; f.removeAttribute('src'); }
+    $('desk-radar-still').hidden = true;
+    $('desk-radar-caption').hidden = true;
+    clearJob('radar-still');
     loadDeskRadar.armed = false;
     return;
   }
+  // Motion changed while the panel was up: swap whichever one is showing for the other.
+  if (stillRadar()) {
+    if (!$('desk-radar-still').hidden) return;
+    return showStill(panel);
+  }
+  $('desk-radar-still').hidden = true;
+  $('desk-radar-caption').hidden = true;
+  clearJob('radar-still');
   if (f.src || loadDeskRadar.armed) return;
   // First run: the drawer is open and typing the token matters more than the map. Closing the
   // drawer (by saving, or by hand — a hub-only install has no token to type) calls back here.
@@ -1327,6 +1388,11 @@ if (location.search.includes('selftest')) {
   console.assert(sig.aborted === false, 'expires: not aborted yet');
   console.assert(typeof sig.addEventListener === 'function', 'expires: returns a real signal');
 
+  // The radar still: which boxes get it, and a URL that actually changes.
+  console.assert(stillRadar() === (motionLevel() !== 'full' || ecoOn()), 'radar: still follows motion and eco');
+  console.assert(/[?&]site=/.test(stillUrl()) && /[?&]t=\d/.test(stillUrl()),
+    'radar: the still URL carries a site and a cache-buster');
+
   // The config echo, the one bug here that costs a whole CPU core rather than a wrong number.
   const held = rev;
   rev = 7;
@@ -1335,3 +1401,7 @@ if (location.search.includes('selftest')) {
   console.assert(shouldPull(undefined), 'config: a server that sends no revision still pulls');
   rev = held;
 }
+
+// Reached only if every module parsed and boot ran to the end — CI greps for it, which is the
+// closest thing a bundler-free site has to a compile check.
+if (location.search.includes('selftest')) document.documentElement.dataset.selftest = 'ok';
