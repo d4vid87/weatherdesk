@@ -6,7 +6,7 @@ const CACHE = `wd-shell-${VER}`;
 
 // The API surface. None of it is ever cached or intercepted: /events is an open SSE stream,
 // /history streams CSV, /config carries the token, and a stale copy of any of them is a bug.
-const API = /^\/(api|events|config|config-public|udp|history|history\.csv|diag|ingest|alerts|ha|discover|backup\.db|proxy)(\/|$|\?)/;
+const API = /^\/(api|events|config|config-public|udp|history|history\.csv|diag|health|ingest|alerts|ha|discover|backup(?:\.db|\.wdbak)|restore|proxy)(\/|$|\?)/;
 
 self.addEventListener('install', () => self.skipWaiting());
 

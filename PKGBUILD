@@ -1,6 +1,6 @@
 # Maintainer: David May <davidmay87@gmail.com>
 pkgname=weatherdesk
-pkgver=3.4.0
+pkgver=4.0.0
 pkgrel=1
 pkgdesc="Self-hosted dashboard for a WeatherFlow Tempest station"
 arch=('x86_64' 'aarch64')

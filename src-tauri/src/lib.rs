@@ -111,6 +111,27 @@ pub fn run_headless() {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn open_browser(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{port}");
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn();
+    result.is_ok()
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn run_browser() {
+    let data = default_data_dir();
+    let cfg = default_config_dir().join("config.json");
+    let (_state, port) = start_services(data, cfg);
+    if !open_browser(port) { eprintln!("weatherdesk: browser could not be opened; use http://127.0.0.1:{port}"); }
+    loop { std::thread::park(); }
+}
+
 #[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

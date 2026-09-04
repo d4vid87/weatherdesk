@@ -8,6 +8,36 @@ Raspberry Pi, an Android APK, and the `ghcr.io/d4vid87/weatherdesk` container im
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-04
+
+### Added
+- **Weather Timeline.** A compact Desk strip and a full Timeline tab combine the past 24 hours
+  with the next 48: rain windows and the 15-minute nowcast, thunder, snow and ice, freezes,
+  heat index, strong wind, unhealthy air, rapid station changes, official alerts and sun times.
+  Adjacent hours become one event, quiet one-hour forecast noise is suppressed, and a click opens
+  the underlying observation detail. Thresholds and categories are configurable in Settings.
+- **Plain-language confidence.** Forecast events say High, Medium, Low or Unavailable and why,
+  using the existing GFS, ECMWF, ICON, GEM and HRRR guidance. Exact contributing values and data
+  age stay behind an expander.
+- **Health Center.** Browser, server, ingest, forecast, alert, radar and archive checks are shown
+  together with safe actions: retry, clear stale caches, use still radar, checkpoint SQLite,
+  save the Safe renderer or open the LAN dashboard. A copyable support report excludes secrets
+  and location.
+- **Complete `.wdbak` backup and restore.** One portable SQLite file carries history, settings,
+  layouts, rules and metadata. Restore is staged, inspected and confirmed; corrupt, incomplete or
+  newer formats are rejected before live data changes. Applying it keeps a pre-restore recovery
+  bundle and rolls back failures.
+- **Browser fallback.** `--browser` runs the server and opens the dashboard without a webview.
+  On Linux, a native window that never becomes ready automatically opens that same dashboard in
+  the system browser after 20 seconds, so the Chromebook EGL failure no longer strands the app.
+- First-run setup now shows explicit station, first-reading and forecast verification progress.
+
+### Changed
+- `/health` exposes redacted server and archive status; `/health/action` accepts only fixed safe
+  actions. `/backup.wdbak`, `/restore/inspect` and `/restore/apply` form the recovery interface.
+- Open-Meteo forecast hours now retain relative humidity so heat events use heat index rather
+  than air temperature alone.
+
 ## [3.4.0] - 2026-09-03
 
 ### Fixed

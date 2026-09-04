@@ -14,6 +14,8 @@ let models = null;
 export async function refreshModels() {
   if (settings().lat == null) return;
   models = await api.multiModel();
+  models._fetchedAt = Date.now() / 1000;
+  window.dispatchEvent(new CustomEvent('wd:models', { detail: models }));
   renderAgreement();
   renderTiming();
   renderEdge();

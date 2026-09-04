@@ -2,6 +2,14 @@
 // it gets through `start_services`, so the headless build never compiles any of it.
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static FRONTEND_READY: AtomicBool = AtomicBool::new(false);
+
+fn should_open_fallback(ready: &AtomicBool) -> bool { !ready.swap(true, Ordering::Relaxed) }
+
+#[tauri::command]
+fn frontend_ready() { FRONTEND_READY.store(true, Ordering::Relaxed); }
 
 // The tray, the server and the paths behind them are desktop-only, and so is everything imported
 // for them — Android builds warn about each one otherwise.
@@ -11,6 +19,8 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager,
 };
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri_plugin_notification::NotificationExt;
 
 /// The current temperature, next to the clock, without a window in the way. Linux app
 /// indicators quietly drop tooltips, so the same string goes in the title too — on ayatana that
@@ -85,7 +95,7 @@ pub fn run() {
                 }
             }))
             .plugin(tauri_plugin_updater::Builder::new().build())
-            .invoke_handler(tauri::generate_handler![updater_check, updater_install]);
+            .invoke_handler(tauri::generate_handler![updater_check, updater_install, frontend_ready]);
     }
 
     builder = builder.plugin(tauri_plugin_notification::init());
@@ -94,6 +104,8 @@ pub fn run() {
         .setup(|app| {
             #[allow(unused_mut)]
             let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::default());
+            #[cfg(target_os = "linux")]
+            let fallback_port;
 
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
@@ -104,6 +116,8 @@ pub fn run() {
                     .map(|d| d.join("config.json"))
                     .unwrap_or_else(|_| crate::default_config_dir().join("config.json"));
                 let (state, port) = crate::start_services(data_dir, cfg_path.clone());
+                #[cfg(target_os = "linux")]
+                { fallback_port = port; }
 
                 let show = MenuItem::with_id(app, "show", "Show WeatherDesk", true, None::<&str>)?;
                 let refresh = MenuItem::with_id(app, "refresh", "Refresh", true, None::<&str>)?;
@@ -152,15 +166,44 @@ pub fn run() {
                     .maximized(cfg!(target_os = "linux"))
                     // the window isn't same-origin with the LAN server, so it needs the port told to it
                     .initialization_script(format!(
-                        "window.__WD_UDP='http://localhost:{port}/udp';window.__WD_SRV='http://localhost:{port}';{}",
+                        "window.__WD_UDP='http://localhost:{port}/udp';window.__WD_SRV='http://localhost:{port}';{};addEventListener('DOMContentLoaded',()=>window.__TAURI__?.core?.invoke('frontend_ready'));",
                         crate::server::ver_script()
                     ));
             }
 
             win.build()?;
 
+            #[cfg(target_os = "linux")]
+            {
+                let app = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    if !should_open_fallback(&FRONTEND_READY) { return; }
+                    eprintln!("weatherdesk: native window did not become ready; opening browser dashboard");
+                    let _ = crate::open_browser(fallback_port);
+                    let _ = app.notification().builder()
+                        .title("WeatherDesk opened in your browser")
+                        .body("The native window could not start on this graphics driver.")
+                        .show();
+                });
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error running WeatherDesk");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frontend_readiness_opens_the_fallback_once() {
+        let ready = AtomicBool::new(false);
+        assert!(should_open_fallback(&ready), "a timed-out frontend opens the browser");
+        assert!(!should_open_fallback(&ready), "the same launch cannot open a second tab");
+        let ready = AtomicBool::new(true);
+        assert!(!should_open_fallback(&ready), "a ready frontend keeps the native window");
+    }
 }
