@@ -1,9 +1,9 @@
 // Phase 2 — forecast intelligence: model agreement, timing anchor, live edge,
 // nowcast, weather story, forecast changes, verification.
 import * as api from './api.js';
-import { settings, U, num, timeStr, every, notify } from './app.js';
+import { settings, U, num, timeStr, every, notify, say } from './app.js';
 import { snapshot, changes, recordForecast, scoreForecast, accuracy } from './track.js';
-import { forecast as deskForecast } from './desk.js';
+import { forecast as deskForecast, severeAlerts } from './desk.js';
 
 const $ = (id) => document.getElementById(id);
 const MODEL_LIST = api.MODELS.split(',');
@@ -164,7 +164,60 @@ export function renderStory() {
     notify({ id: `winter-${wintry.time}`, category: 'winter', title: 'Snow / ice in forecast', body: `${wintry.conditions} around ${timeStr(wintry.time)}` });
   }
   if (maxGust >= settings().windGustAlert) out.push('Wind advisory-level gusts in the period.');
+  storyLines = out;
   $('story').innerHTML = out.map((s) => `<div>${s}</div>`).join('');
+}
+
+// --- spoken briefing ---
+
+// The sentences the story panel is showing, so the briefing says the same thing the screen does
+// rather than deriving a second opinion off the same forecast.
+let storyLines = [];
+
+// What a person across the room would want if they asked "what's it doing". Read off the hero
+// rather than the forecast: the hero is already the station overlaid on the model, which is the
+// number the dashboard is standing behind.
+export function briefing() {
+  const h = new Date().getHours();
+  const greet = h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.';
+  const t = (id) => ($(id)?.textContent || '').replace(/·/g, '.').trim();
+  const alerts = severeAlerts();
+  const parts = [
+    greet,
+    t('hero-temp') ? `It is ${t('hero-temp').replace('°', ' degrees')}.` : '',
+    t('hero-cond') ? `${t('hero-cond')}.` : '',
+    t('hero-feels'),
+    t('hero-hilo') ? `${t('hero-hilo')}.` : '',
+    ...storyLines,
+    alerts.length ? `${alerts.length} active alert${alerts.length > 1 ? 's' : ''}: ${alerts.map((a) => a.title).join(', ')}.` : 'No active alerts.',
+  ];
+  return parts.filter(Boolean).join(' ');
+}
+
+// Module level for the same reason as the listeners below: initIntel() re-runs on every save.
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#hero-icon')) say(briefing());
+});
+// It is a button, so it answers the keyboard like one.
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.closest?.('#hero-icon')) {
+    e.preventDefault();
+    say(briefing());
+  }
+});
+
+// One briefing per day at the time in settings. A wall tablet nobody has touched since boot has
+// no gesture yet, so the utterance lands in the replay hold and speaks on the first tap.
+let briefedDay = '';
+function briefTick() {
+  const want = settings().briefTime;
+  if (!want) return;
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const day = now.toDateString();
+  if (hhmm !== want || briefedDay === day) return;
+  briefedDay = day;
+  say(briefing());
 }
 
 // --- changes + verification panels ---
@@ -198,6 +251,10 @@ export function renderTrack() {
 }
 
 if (location.search.includes('selftest')) {
+  // The briefing has to say something even before a forecast has landed, and it must always end
+  // with the alert sentence — silence about alerts reads as "no alerts" to someone listening.
+  console.assert(/^Good (morning|afternoon|evening)\./.test(briefing()), 'intel: briefing opens with a greeting');
+  console.assert(/alert/.test(briefing()), 'intel: briefing ends on the alert state');
   console.assert(trustWord(2) === 'Good' && trustWord(4) === 'Fair' && trustWord(9) === 'Watch closely',
     'intel: trust badge thresholds');
 }
@@ -208,6 +265,7 @@ window.addEventListener('wd:forecast', () => { renderStory(); renderTrack(); ren
 window.addEventListener('wd:obs', (e) => scoreForecast(e.detail));
 
 export function initIntel() {
+  every('intel-brief', 60, briefTick);
   every('intel-models', 900, refreshModels);
   every('intel-nowcast', 600, refreshNowcast);
 }

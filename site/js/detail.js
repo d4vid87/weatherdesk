@@ -6,8 +6,8 @@
 // name, the same contract as the settings drawer: it takes focus when it opens, gives it back
 // when it closes, and Escape shuts it.
 //
-// ponytail: chart points are not clickable — the detail panel is itself a chart, so a click on
-// a chart would open a chart of the chart. Add if anyone asks.
+// A click on a point in any of the dashboard's own charts lands here too, with the time that was
+// clicked: same panel, windowed on that moment instead of on now.
 
 import { U, num, expires } from './app.js';
 import * as api from './api.js';
@@ -66,14 +66,16 @@ function close() {
 // metric's chart under the second one's title.
 let gen = 0;
 
-export async function openDetail(metric) {
+export async function openDetail(metric, at = null) {
   const m = METRICS[metric];
   if (!m) return;
   const mine = ++gen;
   build();
   const el = $('detail');
   returnTo = document.activeElement;
-  $('detail-title').textContent = m.label;
+  $('detail-title').textContent = at
+    ? `${m.label} · ${new Date(at).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric' })}`
+    : m.label;
   $('detail-blurb').textContent = m.blurb;
   $('detail-now').textContent = 'loading…';
   $('detail-stats').innerHTML = '';
@@ -81,16 +83,19 @@ export async function openDetail(metric) {
   el.setAttribute('aria-hidden', 'false');
   $('detail-close').focus();
   try {
-    const obs = (await api.localObs(48)).obs || [];
+    const obs = (await api.localObs(48, at)).obs || [];
     if (mine !== gen) return;
     const pts = obs.map((o) => ({ x: o[I.time] * 1000, y: o[m.idx] })).filter((p) => p.y != null);
-    if (!pts.length) { $('detail-now').textContent = 'nothing in the archive for the last 48 h'; return; }
+    if (!pts.length) {
+      $('detail-now').textContent = at ? 'nothing in the archive around that time' : 'nothing in the archive for the last 48 h';
+      return;
+    }
     const ys = pts.map((p) => p.y);
     const fmt = (v) => `${num(v, m.digits)}${m.unit()}`;
-    $('detail-now').textContent = `${fmt(ys[ys.length - 1])} now`;
+    $('detail-now').textContent = at ? `${fmt(pts[pts.length - 1].y)} at the end of the window` : `${fmt(ys[ys.length - 1])} now`;
     chart($('detail-chart'), [{ data: pts, color: '#4fb8ff', type: m.bar ? 'bar' : 'line' }],
-      { label: m.label, unit: m.unit().trim(), digits: m.digits,
-        xFormat: (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric' }) });
+      { label: m.label, unit: m.unit().trim(), digits: m.digits, markX: at,
+        xFormat: (x) => new Date(x).toLocaleTimeString([], at ? { weekday: 'short', hour: 'numeric' } : { hour: 'numeric' }) });
     const rows = m.sum
       ? [['Total · 48 h', fmt(ys.reduce((a, b) => a + b, 0))]]
       : [['High · 48 h', fmt(Math.max(...ys))], ['Low · 48 h', fmt(Math.min(...ys))],

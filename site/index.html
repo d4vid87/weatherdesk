@@ -83,8 +83,8 @@
   }
   #shortcuts[hidden] { display: none; }
   body.dimmed::after {
-    content: ''; position: fixed; inset: 0; background: #000; opacity: .45;
-    pointer-events: none; z-index: 999;
+    content: ''; position: fixed; inset: 0; background: #000; opacity: var(--dim, .45);
+    pointer-events: none; z-index: 999; transition: opacity 60s linear;
   }
   /* Keyboard focus has to be visible on every theme and palette — the default ring disappears
      entirely on the dark panels. :focus-visible, so a mouse click doesn't leave one behind. */
@@ -327,7 +327,10 @@
   #hero-sun { font-size: 17px; font-weight: 500; }
   /* Beside the temperature, not floating over the middle of the panel: with a live sky behind
      it, an absolutely positioned glyph sat wherever the sun happened to be. */
-  #hero-icon { position: relative; width: 96px; height: 96px; opacity: .95; pointer-events: none; flex: none; }
+  /* Tappable: it reads the day out loud (intel.js briefing). The children stay inert so a tap
+     always lands on the icon itself. */
+  #hero-icon { position: relative; width: 96px; height: 96px; opacity: .95; flex: none; cursor: pointer; }
+  #hero-icon > * { pointer-events: none; }
   #hero-icon svg, #hero-icon img { width: 96px; height: 96px; }
   /* A radial glow behind the glyph rather than a 26px drop-shadow filter on it: the filter
      re-rasterised the whole icon on every repaint. */
@@ -419,6 +422,11 @@
     position: relative; height: 100%; background: var(--panel); display: flex; align-items: center; justify-content: center; }
   #desk-radar-frame { width: 100%; height: 100%; border: 0; display: none; }
   #desk-radar.loaded > #desk-radar-frame { display: block; }
+  /* The still: a weak box cannot afford megabytes of wasm painting a loop, but it can afford one
+     PNG every five minutes. Same panel, same size, no iframe at all. */
+  #desk-radar-still { width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
+  #desk-radar-caption { position: absolute; inset: auto 0 0 0; padding: 6px 10px; font-size: 12px;
+    background: var(--panel2); pointer-events: none; }
   #desk-radar.unreachable::after { content: 'Radar unreachable'; position: absolute; inset: auto 0 0 0;
     padding: 6px 10px; font-size: 13px; color: var(--muted); background: var(--panel2); }
   /* Loaded in HookEcho's `?embed` mode: chromeless, and holding one frame a minute until it is
@@ -553,7 +561,12 @@
     .dc-head { gap: 6px; }
     .tab { padding: 8px 12px; white-space: nowrap; }
     /* thumbs, not mouse pointers */
-    .iconbtn, button { min-height: 40px; }
+    .iconbtn, button, .tab { min-height: 44px; }
+    /* 16px is the size below which mobile browsers zoom the page on focus, which then leaves the
+       drawer half off-screen. */
+    input, select, textarea { min-height: 44px; font-size: 16px; }
+    /* Save sits under a long scroll of settings; on a phone it has to stay reachable. */
+    #drawer-actions { position: sticky; bottom: 0; background: var(--panel); padding: 8px 0; }
     .phone-only { display: inline-flex; }
     #drawer { width: 100%; }
     /* A phone is where the dashboard is read, not where it is rearranged: left on, the grips and
@@ -595,6 +608,18 @@
     .sig-row { grid-template-columns: 1.5fr .8fr 1fr .9fr 20px; font-size: 12px; }
     .sig-row > span:nth-child(3), .sig-row > span:nth-child(5) { display: none; }
     .sig-row .fail { grid-column: 2 / -2 !important; }
+  }
+  /* One hand, one column: on a phone held upright the tabs and the gear belong under the thumb,
+     not at the top edge. `body` is already a flex column of header then main, so reversing it is
+     the whole move — no fixed positioning, and the drawer (absolute inside main) still opens over
+     the page with its gear visible. */
+  @media (max-width: 720px) and (orientation: portrait) {
+    body { flex-direction: column-reverse; }
+    header {
+      border-top: 1px solid var(--line);
+      border-bottom: 0;
+      padding-bottom: calc(6px + env(safe-area-inset-bottom));
+    }
   }
   /* A phone in landscape is compact by height, not by width: the hero's two columns fit side by
      side again, and stacking them there costs the rows below the fold. */
@@ -738,7 +763,7 @@
       </div>
       <div id="hero-feels" class="hero-dim"></div>
       <div class="hero-now">
-        <div id="hero-icon"></div>
+        <div id="hero-icon" role="button" tabindex="0" title="Tap to hear today"></div>
         <div id="hero-temp" data-metric="temp">--°</div>
         <div>
           <div id="hero-cond"></div>
@@ -758,6 +783,8 @@
 
     <div id="desk-radar" data-panel="radar">
       <iframe id="desk-radar-frame" title="Radar loop"></iframe>
+      <img id="desk-radar-still" alt="Radar" hidden>
+      <div id="desk-radar-caption" class="muted" hidden>Still image · 5 min · tap for the live map</div>
     </div>
 
         <div id="trends" data-panel="trends">
@@ -1035,6 +1062,7 @@
     <label>Cycle tabs every (seconds, 0 = off)</label><input id="set-kiosk" type="number" min="0" step="5">
     <label><input id="set-night-dim" type="checkbox"> Dim the screen overnight</label>
     <label><input id="set-speak" type="checkbox"> Read severe and emergency alerts aloud</label>
+    <label>Spoken briefing at (blank = off)</label><input id="set-brief-time" type="time">
     <label><input id="set-web-notif" type="checkbox"> Browser notifications (https only)</label>
 
     <label style="margin-top:14px">Eco mode (slower polling)</label>
@@ -1050,6 +1078,14 @@
       <option value="lite">Lite — movement only, no effects</option>
       <option value="off">Off — nothing moves</option>
     </select>
+    <label style="margin-top:14px">Window rendering (desktop app, next launch)</label>
+    <select id="set-render">
+      <option value="auto">Auto</option>
+      <option value="safe">Safe — software compositing</option>
+      <option value="gpu">GPU — no workarounds</option>
+    </select>
+    <p class="muted" style="font-size:12px">If the desktop window opens blank, set this to Safe
+      from any browser at http://&lt;this computer&gt;:8088 and restart the app.</p>
     <h2 style="font-size:13px;margin-top:18px">This computer</h2>
     <label>LAN dashboard port (blank = 8088; restart to apply)</label>
     <input id="set-http-port" type="number" min="1" max="65535" placeholder="8088">
@@ -1065,6 +1101,17 @@
       minute. Consoles hold one upload address, so pointing yours at WeatherDesk takes it off
       these networks — this puts it back.</p>
 
+    <label style="margin-top:14px">Keep history for</label>
+    <select id="set-retention">
+      <option value="0">Forever</option>
+      <option value="1">1 year</option>
+      <option value="2">2 years</option>
+      <option value="5">5 years</option>
+      <option value="10">10 years</option>
+    </select>
+    <p class="muted" style="font-size:12px">Older readings are deleted for good, an hour after
+      you save. Back the archive up first — most stations have no cloud to restore them from.</p>
+
     <div class="row">
       <button id="btn-export">Export settings</button>
       <button id="btn-import">Import settings</button>
@@ -1074,7 +1121,7 @@
       <span id="app-version" class="muted" style="font-size:12px;align-self:center"></span>
     </div>
     <input id="import-file" type="file" accept="application/json,.json" hidden>
-    <div class="row">
+    <div class="row" id="drawer-actions">
       <button class="primary" id="btn-save">Save</button>
       <button id="btn-diag">Diagnostics</button>
       <button id="btn-close">Close</button>

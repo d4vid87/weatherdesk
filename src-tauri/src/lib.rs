@@ -116,3 +116,67 @@ pub fn run_headless() {
 pub fn run() {
     gui::run();
 }
+
+/// Which WebKitGTK renderer knobs to set before the window is created.
+///
+/// The DMABUF renderer draws a blank window on some Wayland stacks; on the AppImage — which
+/// always runs under XWayland, because linuxdeploy's GTK hook exports `GDK_BACKEND=x11` — an
+/// Intel iGPU needs software compositing on top of that. Both flags cost the GPU path, so
+/// `auto` only reaches for the second one on the combination that is known to draw nothing.
+/// Pure so it can be tested; `main.rs` decides the mode and does the setting.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn render_env(mode: &str, appimage: bool, gpu_vendor: Option<&str>) -> Vec<(&'static str, &'static str)> {
+    match mode {
+        "gpu" => vec![],
+        "safe" => vec![
+            ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+            ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),
+        ],
+        _ => {
+            let mut v = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
+            // 0x8086 is Intel. The desktop's NVIDIA card draws fine with compositing on.
+            if appimage && gpu_vendor == Some("0x8086") {
+                v.push(("WEBKIT_DISABLE_COMPOSITING_MODE", "1"));
+            }
+            v
+        }
+    }
+}
+
+/// PCI vendor id of the first DRM card, e.g. `0x8086` (Intel), `0x10de` (NVIDIA).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn gpu_vendor() -> Option<String> {
+    let mut cards: Vec<_> = std::fs::read_dir("/sys/class/drm")
+        .ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("card") && !n.contains('-')).unwrap_or(false))
+        .collect();
+    cards.sort();
+    cards
+        .iter()
+        .find_map(|p| std::fs::read_to_string(p.join("device/vendor")).ok())
+        .map(|s| s.trim().to_string())
+}
+
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+mod render_tests {
+    use super::render_env;
+
+    #[test]
+    fn render_env_only_softens_the_combination_that_draws_nothing() {
+        fn names(v: Vec<(&'static str, &'static str)>) -> Vec<&'static str> {
+            v.iter().map(|(k, _)| *k).collect()
+        }
+        assert!(render_env("gpu", true, Some("0x8086")).is_empty());
+        assert_eq!(
+            names(render_env("safe", false, None)),
+            ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"]
+        );
+        assert_eq!(
+            names(render_env("auto", true, Some("0x8086"))),
+            ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"]
+        );
+        assert_eq!(names(render_env("auto", true, Some("0x10de"))), ["WEBKIT_DISABLE_DMABUF_RENDERER"]);
+        assert_eq!(names(render_env("auto", false, Some("0x8086"))), ["WEBKIT_DISABLE_DMABUF_RENDERER"]);
+    }
+}

@@ -56,6 +56,12 @@ const DEFAULTS = {
   // 'auto' | 'full' | 'lite' | 'off' — see motion.js. Auto means Full on a desktop and Lite on
   // the same hardware eco mode calls slow.
   motion: 'auto',
+  // 'HH:MM' local, blank = off. A spoken summary at a fixed time — see intel.js briefing().
+  briefTime: '',
+  // 'auto' | 'safe' | 'gpu' — WebKitGTK renderer workarounds, read by the Rust side at launch.
+  render: 'auto',
+  // Years of readings to keep, 0 = forever. Enforced by the Rust side, hourly.
+  retentionYears: 0,
   // Quiet hours, 'HH:MM' each, both empty = off. Suppresses the chime and every push channel;
   // a Severe or Extreme alert still comes through, because that is what the setting is for.
   quietStart: '', quietEnd: '',
@@ -305,16 +311,22 @@ const replay = () => {
 window.addEventListener('pointerdown', replay);
 window.addEventListener('keydown', replay);
 
-function speak(entry) {
-  if (!shouldSpeak(entry) || !('speechSynthesis' in window)) return;
-  const words = `${entry.severity === 'Extreme' ? 'Emergency. ' : ''}${entry.title}. ${entry.headline || entry.body || ''}`;
+// Say something out loud, with the hold-and-replay above. Also the tap-the-hero briefing and the
+// morning one, which is why the alert wrapper is a caller rather than the whole of it.
+export function say(words, delayMs = 0) {
+  if (!words || !('speechSynthesis' in window)) return;
   try {
     const utter = new SpeechSynthesisUtterance(words);
     utter.lang = navigator.language || 'en-US';
     utter.onerror = (e) => { if (e.error === 'not-allowed') held = { utter: new SpeechSynthesisUtterance(words), at: Date.now() }; };
-    // After the chime, not over it.
-    setTimeout(() => window.speechSynthesis.speak(utter), 300);
+    setTimeout(() => window.speechSynthesis.speak(utter), delayMs);
   } catch { /* no voices installed; the banner is still there */ }
+}
+
+function speak(entry) {
+  if (!shouldSpeak(entry)) return;
+  // After the chime, not over it.
+  say(`${entry.severity === 'Extreme' ? 'Emergency. ' : ''}${entry.title}. ${entry.headline || entry.body || ''}`, 300);
 }
 
 // An in-page banner is no use behind another window. Desktop only, and only when this window
@@ -445,6 +457,33 @@ export function isNight(now = new Date()) {
   return h >= 21 || h < 6;
 }
 
+// How dark the overlay should be right now, 0..1. A step at sunset is a light going off in the
+// room; over an hour nobody notices it happen, which is the point of a screen on a wall.
+export function dimLevel(now = new Date()) {
+  const t = now.getTime() / 1000;
+  if (sunTimes) {
+    const ramp = (from, to) => Math.min(1, Math.max(0, (t - from) / (to - from)));
+    // Sunset today ramps down; sunrise ramps back up. The sunrise pair is yesterday's day, so
+    // compare against the same day's numbers shifted by whichever side of them we are on.
+    if (t < sunTimes.sunrise + 3600) return 1 - ramp(sunTimes.sunrise, sunTimes.sunrise + 3600);
+    if (t >= sunTimes.sunset) return ramp(sunTimes.sunset, sunTimes.sunset + 3600);
+    return 0;
+  }
+  // No forecast yet: the clock, with 30-minute ramps around the old 21:00/06:00 window.
+  const mins = now.getHours() * 60 + now.getMinutes();
+  if (mins >= 21 * 60) return Math.min(1, (mins - 21 * 60) / 30);
+  if (mins < 6 * 60) return 1;
+  if (mins < 6 * 60 + 30) return 1 - (mins - 6 * 60) / 30;
+  return 0;
+}
+
+// The overlay itself: one custom property so the CSS owns how dark "full" is.
+export function applyDim() {
+  const level = _settings.nightDim ? dimLevel() : 0;
+  document.body.style.setProperty('--dim', (level * 0.45).toFixed(3));
+  document.body.classList.toggle('dimmed', level > 0);
+}
+
 // Seconds this job should actually run at.
 export function paceFor(name, base) {
   if (storm) return name === 'desk-obs' || name === 'desk-alerts' ? Math.max(30, base / 2) : base;
@@ -521,7 +560,7 @@ export function applyTheme() {
   document.body.classList.toggle('big-numbers', !!s.bigNumbers);
   if (s.accent) document.documentElement.style.setProperty('--accent', s.accent);
   else document.documentElement.style.removeProperty('--accent');
-  document.body.classList.toggle('dimmed', !!s.nightDim && isNight());
+  applyDim();
 }
 
 // --- kiosk ---
@@ -553,6 +592,8 @@ export function initKiosk() {
   clearJob('kiosk');
   if (secs) every('kiosk', secs, kioskStep);
   every('appearance', 900, () => { applyTheme(); burnInStep(); });
+  // Its own minute job: the appearance one runs quarter-hourly, which is a visible staircase.
+  every('dim', 60, applyDim);
 }
 
 // A job turned off in settings has to actually stop — every() only ever replaces.
@@ -665,6 +706,16 @@ if (location.search.includes('selftest')) {
   _settings.eco = 'off';
   console.assert(paceFor('desk-forecast', 300) === (night ? 900 : 300), 'pace: eco off');
   _settings = save;
+
+  // The dim ramp, on the clock fallback (no forecast has landed in a selftest run).
+  {
+    const at = (h, m = 0) => { const d = new Date(); d.setHours(h, m, 0, 0); return d; };
+    console.assert(dimLevel(at(14)) === 0, 'dim: nothing at midday');
+    console.assert(Math.abs(dimLevel(at(21, 15)) - 0.5) < 1e-9, 'dim: half way up the ramp');
+    console.assert(dimLevel(at(0)) === 1, 'dim: full at midnight');
+    console.assert(Math.abs(dimLevel(at(6, 15)) - 0.5) < 1e-9, 'dim: half way back down');
+    console.assert(dimLevel(at(7)) === 0, 'dim: clear by morning');
+  }
 
   // quiet hours: the window that wraps midnight is the one worth checking
   const q = { quietStart: '22:00', quietEnd: '07:00' };

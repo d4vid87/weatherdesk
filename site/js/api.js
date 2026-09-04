@@ -189,8 +189,11 @@ export function siToDisplay(obs) {
 // The same window of history for a station that has no cloud behind it: our own archive, which
 // is where every ingested report lands whatever brand sent it. Shaped like `deviceObs` so
 // `pro.js` reads one or the other without knowing which.
-export async function localObs(hours = 3) {
-  const j = await getJSON(`${window.__WD_SRV || ''}/history/tuples?${qs({ hours })}`);
+export async function localObs(hours = 3, at = null) {
+  // `at` is a moment someone clicked on a chart: a day either side of it, rather than the last
+  // `hours` up to now, which for a point three weeks back is the wrong archive entirely.
+  const params = at ? { from: Math.round(at / 1000) - 86400, to: Math.round(at / 1000) + 86400 } : { hours };
+  const j = await getJSON(`${window.__WD_SRV || ''}/history/tuples?${qs(params)}`);
   siToDisplay(j.obs || []);
   return j;
 }
@@ -534,6 +537,14 @@ export function tropical() {
   const srv = window.__WD_SRV ?? (window.location.protocol.startsWith('http') ? '' : null);
   if (srv == null) return Promise.reject(new Error('no server to proxy NHC'));
   return getJSON(`${srv}/proxy/nhc`);
+}
+
+// The US Drought Monitor, behind the same kind of proxy and for the same reason — neither it nor
+// the FCC county lookup it needs sends CORS headers. Nothing on a static host, as with NHC.
+export function droughtMonitor() {
+  const srv = window.__WD_SRV ?? (window.location.protocol.startsWith('http') ? '' : null);
+  if (srv == null) return Promise.reject(new Error('no server to proxy the Drought Monitor'));
+  return getJSON(`${srv}/proxy/drought`);
 }
 
 // --- Climate normals (ERA5 reanalysis via open-meteo, keyless) ---

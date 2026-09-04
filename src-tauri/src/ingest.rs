@@ -200,8 +200,6 @@ struct Mem {
 /// alternative, a negative rainfall, would corrupt every SUM downstream. The first report after a
 /// start scores zero: we have no idea how much of that total we already recorded.
 ///
-/// ponytail: the counters live in memory, so a restart forfeits one interval. Persist them in the
-/// `meta` table if that ever shows up in someone's rain total.
 fn delta(prev: &mut Option<f64>, cur: f64) -> f64 {
     let was = prev.replace(cur);
     match was {
@@ -209,6 +207,31 @@ fn delta(prev: &mut Option<f64>, cur: f64) -> f64 {
         Some(p) if cur < p => cur,
         Some(p) => cur - p,
     }
+}
+
+impl Mem {
+    /// Just the two running totals and when they were saved. `last_wall`/`last_raw` are throttle
+    /// state, not accounting: a restart should write the next report it hears, not skip it.
+    fn json(&self, at: u64) -> String {
+        serde_json::json!({ "rain": self.rain, "strikes": self.strikes, "at": at }).to_string()
+    }
+
+    /// A seed older than a day is thrown away. The console's own total has almost certainly
+    /// rolled over since, and scoring a whole day's rain against one interval is a worse lie than
+    /// forfeiting the outage.
+    fn from_json(s: &str, now: u64) -> Mem {
+        let v: serde_json::Value = serde_json::from_str(s).unwrap_or_default();
+        let stale = now.saturating_sub(v["at"].as_u64().unwrap_or(0)) > 86400;
+        Mem {
+            rain: if stale { None } else { v["rain"].as_f64() },
+            strikes: if stale { None } else { v["strikes"].as_f64() },
+            ..Default::default()
+        }
+    }
+}
+
+fn counter_key(origin: &str) -> String {
+    format!("counters:{origin}")
 }
 
 /// Counters and throttle state, per source. One shared set used to serve every brand at once,
@@ -318,7 +341,16 @@ fn take(state: &Arc<State>, f: &Fields, raw_ts: f64, src: i64, origin: &'static 
     }
 
     let mut all = mem().lock().unwrap();
-    let m = all.entry(origin).or_default();
+    // First report of this run: pick the counters back up off disk, so an app that was restarted
+    // (or updated) does not forfeit the rain that fell while it was down. A read connection —
+    // holding the writer's mutex across a query is what starves the UDP listener.
+    let m = all.entry(origin).or_insert_with(|| {
+        state
+            .db()
+            .and_then(|c| store::meta_get(&c, &counter_key(origin)))
+            .map(|s| Mem::from_json(&s, at))
+            .unwrap_or_default()
+    });
     if !keep(at, m, raw_ts) {
         drop(all);
         // Healthy: the poll is faster than the archive write gate. "throttled" read as a fault.
@@ -329,10 +361,16 @@ fn take(state: &Arc<State>, f: &Fields, raw_ts: f64, src: i64, origin: &'static 
     m.last_ts = Some(ts);
     m.last_wall = Some(at);
     m.last_raw = Some(raw_ts);
+    let saved = m.json(at);
     drop(all);
     note(origin, true, "stored", true);
 
-    state.with_db(|conn| store::insert(conn, &t, src));
+    // One lock, two writes: the row and the counters it was scored against move together, so a
+    // crash between them cannot double-count an interval of rain.
+    state.with_db(|conn| {
+        store::insert(conn, &t, src);
+        store::meta_set(conn, &counter_key(origin), &saved);
+    });
     if let (Some(d), Some(c)) = (t[14], t[15]) {
         if c > 0.0 {
             publish(
@@ -585,6 +623,19 @@ pub fn start_pollers(state: Arc<State>) {
                 poll_wll(&state, &wll);
             }
 
+            // Retention, hourly, from the one loop that already holds the state. Off by default:
+            // an archive is the reason most people run this, and a non-Tempest install has no
+            // cloud to backfill from once a year is gone.
+            if tick % 360 == 1 {
+                let years = s("retentionYears").trim_matches('"').parse::<i64>().unwrap_or(0);
+                if years > 0 {
+                    let cutoff = epoch() as i64 - years * 365 * 86400;
+                    // A week per lock: the UDP listener writes on its own connection and gives up
+                    // after ten seconds, so a long DELETE is a dropped reading.
+                    while state.with_db(|c| store::prune(c, cutoff)).unwrap_or(0) > 0 {}
+                }
+            }
+
             // A minute apart: the API allows one request a second, and the station behind it
             // uploads far more slowly than that.
             let (api, app) = (s("awnApiKey"), s("awnAppKey"));
@@ -614,6 +665,38 @@ pub fn start_pollers(state: Arc<State>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rain that fell while the app was down still gets scored once, and a console that rolled
+    /// its daily total over in the meantime never scores a negative interval.
+    #[test]
+    fn counters_survive_a_restart_and_a_rollover_while_down() {
+        let now = 1_700_000_000u64;
+        let mut m = Mem { rain: Some(0.4), ..Default::default() };
+        let saved = m.json(now);
+
+        // Restart: the seed is picked up and the next report scores only the difference.
+        let mut back = Mem::from_json(&saved, now + 600);
+        assert!((delta(&mut back.rain, 0.7) - 0.3).abs() < 1e-9);
+
+        // Rolled over while we were down — the new total is the accumulation since, never negative.
+        let mut rolled = Mem::from_json(&saved, now + 600);
+        assert_eq!(delta(&mut rolled.rain, 0.1), 0.1_f64);
+
+        // Three days later the console's total means nothing to us any more: start cold, which
+        // scores the first report as zero rather than inventing a day of rain.
+        let mut stale = Mem::from_json(&saved, now + 3 * 86400);
+        assert!(stale.rain.is_none());
+        assert_eq!(delta(&mut stale.rain, 5.0), 0.0_f64);
+
+        // A truncated or hand-edited meta row is a cold start, not a panic.
+        assert!(Mem::from_json("{oops", now).rain.is_none());
+        assert!(Mem::from_json("", now).strikes.is_none());
+
+        // Throttle state is deliberately not carried across: the first report after a restart is
+        // worth a row whatever the clock says.
+        m.last_wall = Some(now);
+        assert!(Mem::from_json(&m.json(now), now).last_wall.is_none());
+    }
 
     /// A real Ecowitt "customized upload" body, GW2000 firmware, Wittboy attached.
     const ECOWITT: &str = "PASSKEY=A1B2C3&stationtype=GW2000A_V3.1.5&dateutc=2026-08-19+14:30:00\
