@@ -327,6 +327,7 @@ fn n(v: Option<f64>) -> String {
 /// The counters are only advanced on a report we keep — a differenced total against a report we
 /// threw away would drop that interval's rain on the floor.
 fn take(state: &Arc<State>, f: &Fields, raw_ts: f64, src: i64, origin: &'static str) -> bool {
+    if state.maintenance.load(std::sync::atomic::Ordering::Relaxed) { return false; }
     let at = epoch();
     // A console clock that is out by a day would otherwise scatter rows across the archive and
     // defeat CWOP's staleness guard. Ten minutes of slack is more than any real drift.

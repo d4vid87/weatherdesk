@@ -62,6 +62,8 @@ const DEFAULTS = {
   render: 'auto',
   // Years of readings to keep, 0 = forever. Enforced by the Rust side, hourly.
   retentionYears: 0,
+  timeline: { precip: 30, freezeC: 0, heatC: 35, gustMs: 13.4112, aqi: 101,
+    categories: ['precip', 'storm', 'winter', 'freeze', 'heat', 'wind', 'aqi', 'change', 'sun', 'alert'] },
   // Quiet hours, 'HH:MM' each, both empty = off. Suppresses the chime and every push channel;
   // a Severe or Extreme alert still comes through, because that is what the setting is for.
   quietStart: '', quietEnd: '',

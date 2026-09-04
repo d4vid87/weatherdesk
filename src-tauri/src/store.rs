@@ -282,6 +282,21 @@ pub fn coverage_json(conn: &Connection, backfill: &str) -> String {
     )
 }
 
+/// Small, redacted facts for the Health Center. `quick_check` is intentionally used instead of
+/// `integrity_check`: it catches structural damage without turning a drawer click into a long scan.
+pub fn health(conn: &Connection, path: &Path) -> serde_json::Value {
+    let (first, last) = stamp(conn);
+    let rows: i64 = conn.query_row("SELECT COUNT(*) FROM obs", [], |r| r.get(0)).unwrap_or(0);
+    let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0)).unwrap_or_else(|_| "unavailable".into());
+    let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    serde_json::json!({ "ok": check == "ok", "check": check, "rows": rows,
+        "first": first, "last": last, "bytes": bytes })
+}
+
+pub fn checkpoint(conn: &Connection) -> bool {
+    conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)").is_ok()
+}
+
 pub const CSV_HEADER: &str =
     "time,wind_lull,wind_avg,wind_gust,wind_dir,wind_interval,pressure,temp,humidity,lux,uv,solar,rain,precip_type,strike_dist,strikes,battery,report_interval,day_rain\n";
 
@@ -365,6 +380,73 @@ pub fn backup_to(conn: &Connection, dest: &Path) -> rusqlite::Result<()> {
     Ok(())
 }
 
+pub const BACKUP_FORMAT: i64 = 1;
+
+/// A `.wdbak` is a normal SQLite snapshot with two reserved metadata rows. It can still be
+/// opened with sqlite3 when WeatherDesk is gone, which is a better recovery format than a custom
+/// archive nobody else understands.
+pub fn bundle_to(conn: &Connection, dest: &Path, config: &str) -> rusqlite::Result<()> {
+    backup_to(conn, dest)?;
+    let bundle = open(dest)?;
+    let manifest = serde_json::json!({
+        "format": BACKUP_FORMAT, "app": env!("CARGO_PKG_VERSION"),
+        "created": crate::server::epoch()
+    }).to_string();
+    bundle.execute("INSERT INTO meta (key,value) VALUES ('backup:manifest',?1)
+        ON CONFLICT(key) DO UPDATE SET value=?1", [&manifest])?;
+    bundle.execute("INSERT INTO meta (key,value) VALUES ('backup:config',?1)
+        ON CONFLICT(key) DO UPDATE SET value=?1", [config])?;
+    bundle.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+    Ok(())
+}
+
+pub fn inspect_bundle(path: &Path) -> Result<serde_json::Value, String> {
+    use rusqlite::OpenFlags;
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|_| "not a SQLite backup")?;
+    let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0)).map_err(|_| "integrity check failed")?;
+    if check != "ok" { return Err("integrity check failed".into()); }
+    let manifest: serde_json::Value = serde_json::from_str(&meta_get(&conn, "backup:manifest").ok_or("missing backup manifest")?)
+        .map_err(|_| "invalid backup manifest")?;
+    let format = manifest["format"].as_i64().ok_or("invalid backup format")?;
+    if format > BACKUP_FORMAT { return Err("backup was made by a newer WeatherDesk".into()); }
+    if format < 1 { return Err("unsupported backup format".into()); }
+    let config: serde_json::Value = serde_json::from_str(&meta_get(&conn, "backup:config").ok_or("missing backup settings")?)
+        .map_err(|_| "invalid backup settings")?;
+    if !config.is_object() { return Err("invalid backup settings".into()); }
+    let mut stmt = conn.prepare("PRAGMA table_info(obs)").map_err(|_| "missing observation archive")?;
+    let cols: Vec<String> = stmt.query_map([], |r| r.get(1)).map_err(|_| "missing observation archive")?
+        .flatten().collect();
+    let required = std::iter::once("ts").chain(FIELDS.iter().copied()).chain(std::iter::once("src"));
+    if required.clone().any(|c| !cols.iter().any(|x| x == c)) { return Err("backup archive schema is incomplete".into()); }
+    let (first, last) = stamp(&conn);
+    let rows: i64 = conn.query_row("SELECT COUNT(*) FROM obs", [], |r| r.get(0)).unwrap_or(0);
+    if first < 0 || last < first { return Err("backup contains invalid timestamps".into()); }
+    Ok(serde_json::json!({ "format": format, "app": manifest["app"], "created": manifest["created"],
+        "station": config.pointer("/settings/stationName").and_then(|v| v.as_str()).unwrap_or("WeatherDesk"),
+        "first": first, "last": last, "rows": rows }))
+}
+
+pub fn bundle_config(path: &Path) -> Result<String, String> {
+    use rusqlite::OpenFlags;
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|_| "cannot open backup")?;
+    meta_get(&conn, "backup:config").ok_or_else(|| "missing backup settings".into())
+}
+
+pub fn replace_from_bundle(conn: &Connection, path: &Path) -> rusqlite::Result<()> {
+    let cols = format!("ts, {}, src", FIELDS.join(", "));
+    conn.execute("ATTACH DATABASE ?1 AS restore", [path.to_string_lossy().to_string()])?;
+    let sql = format!("BEGIN IMMEDIATE;
+        DELETE FROM obs;
+        INSERT INTO obs ({cols}) SELECT {cols} FROM restore.obs;
+        DELETE FROM meta;
+        INSERT INTO meta SELECT key, value FROM restore.meta WHERE key NOT LIKE 'backup:%';
+        COMMIT;");
+    let result = conn.execute_batch(&sql);
+    if result.is_err() { let _ = conn.execute_batch("ROLLBACK;"); }
+    let _ = conn.execute_batch("DETACH DATABASE restore;");
+    result
+}
+
 // --- Backfill: WeatherFlow keeps the station's whole history; we only have what we heard ---
 
 /// Walk backwards from the oldest observation we hold, four days at a time, until the station's
@@ -444,6 +526,7 @@ pub fn backfill(conn: &Connection, token: &str, device_id: &str) {
 // silently drops a field, and a day boundary that puts yesterday's high on the wrong row.
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     /// The writer's insert has to keep working now that `src` is a bound parameter rather than
     /// a formatted-in literal, and stay idempotent on the timestamp key.
@@ -459,6 +542,60 @@ mod tests {
         assert_eq!(src, 3);
     }
 
+    #[test]
+    fn portable_backup_round_trips_archive_metadata_and_config() {
+        let dir = std::env::temp_dir().join(format!("wd-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = open(&dir.join("source.db")).unwrap();
+        let mut obs = vec![None; 19]; obs[0] = Some(1_700_000_000.0); obs[7] = Some(21.5);
+        assert!(insert(&source, &obs, 3));
+        meta_set(&source, "kept", "yes");
+        let bundle = dir.join("weatherdesk.wdbak");
+        let config = r#"{"settings":{"stationName":"Back yard","token":"secret"},"layout":{"hero":{}}}"#;
+        bundle_to(&source, &bundle, config).unwrap();
+        let summary = inspect_bundle(&bundle).unwrap();
+        assert_eq!(summary["rows"], 1);
+        assert_eq!(summary["station"], "Back yard");
+        assert_eq!(bundle_config(&bundle).unwrap(), config);
+
+        let target = open(&dir.join("target.db")).unwrap();
+        let mut other = vec![None; 19]; other[0] = Some(1_800_000_000.0);
+        insert(&target, &other, 0);
+        replace_from_bundle(&target, &bundle).unwrap();
+        assert_eq!(target.query_row("SELECT COUNT(*) FROM obs", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(meta_get(&target, "kept").as_deref(), Some("yes"));
+        assert!(meta_get(&target, "backup:config").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn portable_backup_rejects_corruption_and_newer_formats() {
+        let dir = std::env::temp_dir().join(format!("wd-bundle-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let corrupt = dir.join("bad.wdbak"); std::fs::write(&corrupt, b"not sqlite").unwrap();
+        assert!(inspect_bundle(&corrupt).is_err());
+        let source = open(&dir.join("source.db")).unwrap();
+        let newer = dir.join("newer.wdbak");
+        bundle_to(&source, &newer, "{}").unwrap();
+        let edit = open(&newer).unwrap();
+        meta_set(&edit, "backup:manifest", &serde_json::json!({"format": BACKUP_FORMAT + 1}).to_string());
+        edit.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap(); drop(edit);
+        assert!(inspect_bundle(&newer).unwrap_err().contains("newer"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn failed_restore_keeps_the_live_archive() {
+        let target = open(std::path::Path::new(":memory:")).unwrap();
+        let mut live = vec![None; 19]; live[0] = Some(1_700_000_000.0);
+        assert!(insert(&target, &live, 0));
+        let missing = std::env::temp_dir().join(format!("wd-missing-{}.wdbak", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        assert!(replace_from_bundle(&target, &missing).is_err());
+        assert_eq!(target.query_row("SELECT ts FROM obs", [], |r| r.get::<_, i64>(0)).unwrap(), 1_700_000_000);
+    }
+
     /// The cache key for /history/daily: no COUNT(*), and it still moves when the archive does.
     #[test]
     fn stamp_is_the_range_not_a_count() {
@@ -471,8 +608,6 @@ mod tests {
         insert(&conn, &obs, 0);
         assert_eq!(stamp(&conn), (100, 500));
     }
-    use super::*;
-
     fn mem() -> Connection {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(&format!(

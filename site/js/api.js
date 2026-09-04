@@ -297,6 +297,7 @@ export function shapeOm(j, ownTuple = null) {
   const hourly = times.map((t, i) => ({
     time: t,
     air_temperature: H.temperature_2m?.[i],
+    relative_humidity: H.relative_humidity_2m?.[i],
     precip_probability: H.precipitation_probability?.[i],
     wind_avg: H.wind_speed_10m?.[i],
     wind_gust: H.wind_gusts_10m?.[i],
@@ -367,7 +368,7 @@ export async function omForecast(lat = coords().lat, lon = coords().lon) {
     latitude: lat, longitude: lon,
     current: 'temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,is_day,'
       + 'weather_code,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
-    hourly: 'temperature_2m,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,'
+    hourly: 'temperature_2m,relative_humidity_2m,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,'
       + 'wind_direction_10m,uv_index,shortwave_radiation,wet_bulb_temperature_2m,visibility',
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,'
       + 'precipitation_probability_max,precipitation_sum',

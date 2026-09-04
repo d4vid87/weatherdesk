@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::UdpSocket;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -31,6 +31,7 @@ const HUB_PORT: u16 = 50222;
 /// Streams cost a thread each. Eight is more screens than any house has; the ninth is told so.
 const MAX_SSE: usize = 8;
 const WORKERS: usize = 4;
+static TEMP_N: AtomicUsize = AtomicUsize::new(0);
 
 pub struct State {
     /// Latest broadcast per packet type, as received. Raw JSON: the page already knows the
@@ -48,6 +49,8 @@ pub struct State {
     sse: Mutex<Vec<SyncSender<String>>>,
     sse_n: AtomicUsize,
     pub backfill: Mutex<&'static str>,
+    started: u64,
+    pub maintenance: AtomicBool,
 }
 
 impl State {
@@ -61,6 +64,8 @@ impl State {
             sse: Mutex::new(Vec::new()),
             sse_n: AtomicUsize::new(0),
             backfill: Mutex::new("off"),
+            started: now(),
+            maintenance: AtomicBool::new(false),
         })
     }
 
@@ -180,6 +185,27 @@ fn read_config(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|_| "{}".into())
 }
 
+fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(d) = path.parent() { std::fs::create_dir_all(d)?; }
+    let tmp = path.with_extension(format!("json.tmp.{}", TEMP_N.fetch_add(1, Ordering::Relaxed)));
+    std::fs::write(&tmp, text)?;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        // Windows does not replace an existing destination. Keep the old file until the new one
+        // is in place, and put it back if that second rename fails.
+        Err(_) if path.exists() => {
+            let old = path.with_extension("json.prev");
+            let _ = std::fs::remove_file(&old);
+            std::fs::rename(path, &old)?;
+            match std::fs::rename(&tmp, path) {
+                Ok(()) => { let _ = std::fs::remove_file(old); Ok(()) }
+                Err(next) => { let _ = std::fs::rename(old, path); Err(next) }
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Merge a settings write.
 ///
 /// A v3 client sends only what it changed, tagged with the `_rev` it last saw, and gets the
@@ -209,10 +235,7 @@ fn write_config(path: &Path, body: &str) -> Option<(u16, String, u64)> {
     let mut merged = merged;
     merged.as_object_mut()?.insert("_rev".into(), rev.into());
     let text = merged.to_string();
-    if let Some(d) = path.parent() {
-        std::fs::create_dir_all(d).ok()?;
-    }
-    std::fs::write(path, &text).ok()?;
+    write_atomic(path, &text).ok()?;
     Some(if delta { (200, text, rev) } else { (204, String::new(), rev) })
 }
 
@@ -407,6 +430,43 @@ fn is_ingest_path(path: &str) -> bool {
         || path == "/updateweatherstation.php"
 }
 
+fn staged_restore(state: &State, id: &str) -> Option<PathBuf> {
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit() || b == b'-') { return None; }
+    Some(state.data_dir.join(format!("restore-{id}.wdbak")))
+}
+
+fn cleanup_restores(state: &State) {
+    let Ok(files) = std::fs::read_dir(&state.data_dir) else { return };
+    for entry in files.flatten() {
+        let path = entry.path();
+        let old = entry.metadata().ok().and_then(|m| m.modified().ok())
+            .and_then(|t| SystemTime::now().duration_since(t).ok()).map(|d| d.as_secs() > 3600).unwrap_or(false);
+        if old && path.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("restore-") && n.ends_with(".wdbak")).unwrap_or(false) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn health_json(state: &State) -> String {
+    let db = state.db();
+    let archive = db.as_ref().map(|c| store::health(c, &store::db_path(&state.data_dir)))
+        .unwrap_or_else(|| serde_json::json!({ "ok": false, "check": "unavailable" }));
+    let diag = serde_json::from_str::<serde_json::Value>(&ingest::diag_json()).unwrap_or_default();
+    let cfg = serde_json::from_str::<serde_json::Value>(&read_config(&state.cfg_path)).unwrap_or_default();
+    let configured = |k: &str| cfg.pointer(&format!("/settings/{k}")).and_then(|v| v.as_str()).map(|v| !v.is_empty()).unwrap_or(false);
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"), "uptime": now().saturating_sub(state.started),
+        "archive": archive, "ingest": diag,
+        "integrations": {
+            "mqtt": { "configured": configured("mqttUrl"), "ok": diag.pointer("/mqtt/ok").and_then(|v| v.as_bool()) },
+            "homeAssistant": { "configured": configured("haUrl") && configured("haToken") },
+            "push": { "configured": configured("ntfyTopic") || configured("webhookUrl") || configured("mqttUrl"),
+                "ok": diag.pointer("/alerts/ok").and_then(|v| v.as_bool()) }
+        },
+        "backfill": *state.backfill.lock().unwrap_or_else(|e| e.into_inner())
+    }).to_string()
+}
+
 fn handle(state: &Arc<State>, mut req: Request) {
     let url = req.url().to_string();
     let path = url.split('?').next().unwrap_or("/").to_string();
@@ -455,6 +515,20 @@ fn handle(state: &Arc<State>, mut req: Request) {
         // What each station source last did, for the drawer and for a screenshot in a bug
         // report. Fixed phrases and status codes only, so there is nothing here to gate.
         "/diag" => json(ingest::diag_json()),
+        "/health" => json(health_json(state)),
+        "/health/action" => {
+            if *req.method() != tiny_http::Method::Post { Response::empty(405).boxed() } else {
+                let mut body = String::new();
+                let _ = req.as_reader().take(1024).read_to_string(&mut body);
+                let action = serde_json::from_str::<serde_json::Value>(&body).ok()
+                    .and_then(|v| v["action"].as_str().map(String::from));
+                let ok = match action.as_deref() {
+                    Some("checkpoint") => state.with_db(store::checkpoint).unwrap_or(false),
+                    _ => false,
+                };
+                if ok { json("{\"ok\":true}".into()) } else { Response::empty(400).boxed() }
+            }
+        }
         // The versioned contract: named fields, SI, no credentials. Everything else here is
         // shaped for the page and free to change with it — this one isn't. See `api.rs`.
         "/api/v1" => json(crate::api::snapshot(state)),
@@ -586,6 +660,74 @@ fn handle(state: &Arc<State>, mut req: Request) {
             });
             return;
         }
+        "/backup.wdbak" => {
+            let Some(conn) = state.db() else { return drop(req.respond(Response::empty(503))) };
+            let dest = state.data_dir.join(format!("backup-{}-{}.wdbak", now(), TEMP_N.fetch_add(1, Ordering::Relaxed)));
+            if store::bundle_to(&conn, &dest, &read_config(&state.cfg_path)).is_err() {
+                return drop(req.respond(Response::empty(500)));
+            }
+            let Ok(file) = std::fs::File::open(&dest) else { return drop(req.respond(Response::empty(500))) };
+            let len = file.metadata().map(|m| m.len() as usize).ok();
+            let res = Response::new(tiny_http::StatusCode(200), vec![
+                header("Content-Type", "application/octet-stream"),
+                header("Content-Disposition", "attachment; filename=weatherdesk.wdbak"),
+            ], file, len, None);
+            std::thread::spawn(move || { let _ = req.respond(res); let _ = std::fs::remove_file(dest); });
+            return;
+        }
+        "/restore/inspect" => {
+            if *req.method() != tiny_http::Method::Post { Response::empty(405).boxed() } else {
+                cleanup_restores(state);
+                let id = format!("{}-{}-{}", now(), std::process::id(), TEMP_N.fetch_add(1, Ordering::Relaxed));
+                let path = staged_restore(state, &id).unwrap();
+                let result = std::fs::File::create(&path).and_then(|mut f| {
+                    let n = std::io::copy(&mut req.as_reader().take(8 * 1024 * 1024 * 1024), &mut f)?;
+                    if n == 0 { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "empty")); }
+                    f.flush()
+                });
+                match result.ok().and_then(|_| store::inspect_bundle(&path).ok()) {
+                    Some(summary) => json(serde_json::json!({ "ok": true, "id": id, "summary": summary }).to_string()),
+                    None => { let _ = std::fs::remove_file(path); json("{\"ok\":false,\"error\":\"Backup is invalid or unsupported\"}".into()) }
+                }
+            }
+        }
+        "/restore/apply" => {
+            if *req.method() != tiny_http::Method::Post { Response::empty(405).boxed() } else {
+                let id = query(&url, "id").unwrap_or_default();
+                let Some(path) = staged_restore(state, &id).filter(|p| p.is_file()) else {
+                    return drop(req.respond(Response::empty(404)));
+                };
+                let valid = store::inspect_bundle(&path).is_ok();
+                let config = store::bundle_config(&path).ok();
+                let old_config = read_config(&state.cfg_path);
+                // VACUUM INTO refuses to overwrite. Use a private working name, then promote the
+                // successful snapshot to the stable recovery filename after the restore commits.
+                let recovery = state.data_dir.join(format!("pre-restore-{}.wdbak", TEMP_N.fetch_add(1, Ordering::Relaxed)));
+                let kept_recovery = state.data_dir.join("pre-restore.wdbak");
+                state.maintenance.store(true, Ordering::Relaxed);
+                let applied = valid && config.as_ref().map(|new_config| state.with_db(|conn| {
+                    if store::bundle_to(conn, &recovery, &old_config).is_err() { return false; }
+                    if store::replace_from_bundle(conn, &path).is_err() { return false; }
+                    if write_atomic(&state.cfg_path, new_config).is_err() {
+                        let _ = store::replace_from_bundle(conn, &recovery);
+                        return false;
+                    }
+                    true
+                }).unwrap_or(false)).unwrap_or(false);
+                state.maintenance.store(false, Ordering::Relaxed);
+                if applied {
+                    let _ = std::fs::remove_file(&kept_recovery);
+                    let _ = std::fs::rename(&recovery, &kept_recovery);
+                    *state.daily.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                    state.broadcast("config", "{\"restore\":true}");
+                    let _ = std::fs::remove_file(path);
+                    json("{\"ok\":true}".into())
+                } else {
+                    let _ = std::fs::remove_file(recovery);
+                    json("{\"ok\":false,\"error\":\"Restore failed; current data was kept\"}".into())
+                }
+            }
+        }
         "/config" => match *req.method() {
             tiny_http::Method::Get => json(read_config(&state.cfg_path)),
             tiny_http::Method::Put => {
@@ -709,9 +851,11 @@ pub fn listen_udp(state: Arc<State>) {
         let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&buf[..n]) else { continue };
         let Some(kind) = v.get("type").and_then(|t| t.as_str()).map(String::from) else { continue };
         if kind == "obs_st" {
-            if let (Some(c), Some(obs)) = (conn.as_ref(), v.get("obs").and_then(|o| o.get(0)).and_then(|o| o.as_array())) {
+            if !state.maintenance.load(Ordering::Relaxed) {
+              if let (Some(c), Some(obs)) = (conn.as_ref(), v.get("obs").and_then(|o| o.get(0)).and_then(|o| o.as_array())) {
                 let tuple: Vec<Option<f64>> = obs.iter().map(|x| x.as_f64()).collect();
                 store::insert(c, &tuple, store::SRC_UDP);
+              }
             }
         }
         // stamped on arrival so the page can tell a live packet from the last one before a
@@ -897,6 +1041,23 @@ mod tests {
     #[test]
     fn malformed_config_is_not_served_raw() {
         assert_eq!(redact("not json at all"), "{}");
+    }
+
+    #[test]
+    fn health_report_reveals_configuration_state_not_secrets() {
+        let dir = std::env::temp_dir().join(format!("wd-health-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("config.json");
+        std::fs::write(&cfg, r#"{"settings":{"token":"tempest-secret","mqttUrl":"mqtt://broker","mqttPass":"broker-secret","haUrl":"http://ha","haToken":"ha-secret","ntfyTopic":"push-secret"}}"#).unwrap();
+        let state = State::new(dir.clone(), cfg);
+        let out = health_json(&state);
+        for secret in ["tempest-secret", "broker-secret", "ha-secret", "push-secret", "mqtt://broker", "http://ha"] {
+            assert!(!out.contains(secret), "health leaked {secret}: {out}");
+        }
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v.pointer("/integrations/mqtt/configured").and_then(|x| x.as_bool()), Some(true));
+        assert_eq!(v.pointer("/integrations/homeAssistant/configured").and_then(|x| x.as_bool()), Some(true));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

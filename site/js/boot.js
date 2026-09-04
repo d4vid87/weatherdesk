@@ -16,6 +16,7 @@ import { initUdp } from './udp.js';
 import { initHome } from './home.js';
 import { initOutlook } from './outlook.js';
 import { initDetail } from './detail.js';
+import { initTimeline, timelineSettings } from './timeline.js';
 import { applyMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -151,6 +152,13 @@ function fillDrawer() {
   $('set-motion').value = s.motion || 'auto';
   $('set-render').value = s.render || 'auto';
   $('set-retention').value = String(s.retentionYears || 0);
+  const tl = timelineSettings(s);
+  $('set-tl-precip').value = tl.precip;
+  $('set-tl-freeze').value = s.units === 'metric' ? tl.freezeC : Math.round(tl.freezeC * 9 / 5 + 32);
+  $('set-tl-heat').value = s.units === 'metric' ? tl.heatC : Math.round(tl.heatC * 9 / 5 + 32);
+  $('set-tl-gust').value = Math.round(msToWind(tl.gustMs));
+  $('set-tl-aqi').value = tl.aqi;
+  document.querySelectorAll('[data-tl-cat]').forEach((c) => { c.checked = tl.categories.includes(c.dataset.tlCat); });
   $('set-storm-auto').checked = !!s.stormAuto;
   $('set-theme').value = s.theme || 'dark';
   $('set-accent').value = s.accent || '#4fb8ff';
@@ -440,6 +448,14 @@ $('btn-save').onclick = async () => {
     motion: $('set-motion').value,
     render: $('set-render').value,
     retentionYears: +$('set-retention').value || 0,
+    timeline: {
+      precip: Math.max(0, Math.min(100, +$('set-tl-precip').value || 30)),
+      freezeC: settings().units === 'metric' ? +$('set-tl-freeze').value : (+$('set-tl-freeze').value - 32) / 1.8,
+      heatC: settings().units === 'metric' ? +$('set-tl-heat').value : (+$('set-tl-heat').value - 32) / 1.8,
+      gustMs: windToMs(+$('set-tl-gust').value || 30),
+      aqi: Math.max(0, +$('set-tl-aqi').value || 101),
+      categories: [...document.querySelectorAll('[data-tl-cat]:checked')].map((c) => c.dataset.tlCat),
+    },
     stormAuto: $('set-storm-auto').checked,
     theme: $('set-theme').value,
     // The picker cannot express "no accent", so the default colour means the default.
@@ -507,7 +523,7 @@ $('btn-save').onclick = async () => {
   }
   loadDeskRadar();
   initDesk(); // idempotent: every() replaces existing jobs
-  initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initLayout(); initDetail(); initUdp(); initHome(); initOutlook();
+  initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initLayout(); initDetail(); initTimeline(); initUdp(); initHome(); initOutlook();
 };
 
 // station meta fills name/lat/lon and the Tempest device id when blank
@@ -557,19 +573,31 @@ async function firstReading(fetcher) {
   const out = $('wiz-first');
   out.className = 'muted';
   out.textContent = 'waiting for the first reading…';
+  $('wiz-step-source').textContent = 'done ✓'; $('wiz-step-source').className = 'ok';
+  $('wiz-step-reading').textContent = 'checking…';
   for (let i = 0; i < 15; i++) {
     try {
       const t = await fetcher();
       if (t != null) {
         out.className = 'ok';
         out.textContent = `${num(t, 1)}${U.temp()} received ✓`;
-        setTimeout(() => { $('wizard').hidden = true; }, 1500);
+        $('wiz-step-reading').textContent = 'done ✓'; $('wiz-step-reading').className = 'ok';
+        $('wiz-step-forecast').textContent = 'checking…';
+        try {
+          await api.betterForecast();
+          $('wiz-step-forecast').textContent = 'done ✓'; $('wiz-step-forecast').className = 'ok';
+          setTimeout(() => { $('wizard').hidden = true; }, 1500);
+        } catch {
+          $('wiz-step-forecast').textContent = 'needs attention'; $('wiz-step-forecast').className = 'fail';
+          out.textContent += ' · forecast/location could not be verified yet';
+        }
         return;
       }
     } catch { /* the console may still be mid-upload; the loop is the retry */ }
     await new Promise((r) => setTimeout(r, 2000));
   }
   out.className = 'fail';
+  $('wiz-step-reading').textContent = 'needs attention'; $('wiz-step-reading').className = 'fail';
   out.textContent = 'no reading yet — the dashboard is open behind this; check the console is uploading to the address above';
 }
 
@@ -758,8 +786,8 @@ function changelog() {
   if (!seen) return; // a fresh install has nothing to be new since
   notify({
     title: `WeatherDesk ${APP_VERSION}`,
-    body: 'New: tap the hero to hear the day, forecast and rate-of-change alert rules, clickable '
-      + 'charts, drought on the Fire card, archive retention — and a fix for the blank window on Linux.',
+    body: 'New: a past-and-future Weather Timeline with confidence, guided Health Center, complete '
+      + 'portable backup and restore, and an automatic browser fallback when Linux cannot draw the native window.',
   });
 }
 
@@ -976,14 +1004,37 @@ $('import-file').onchange = async (e) => {
 // button would be a second code path for something done once in a lifetime.
 $('btn-backup').onclick = async () => {
   try {
-    const r = await fetch(`${SRV}/backup.db`, { signal: expires(120000) });
+    const r = await fetch(`${SRV}/backup.wdbak`, { signal: expires(120000) });
     if (!r.ok) throw new Error(`${r.status}`);
-    download('weatherdesk.db', await r.blob());
+    download('weatherdesk.wdbak', await r.blob());
   } catch {
     notify({
       title: 'No archive to back up',
       body: 'The observation archive lives on the machine running the desktop app.',
     });
+  }
+};
+
+$('btn-restore').onclick = () => $('restore-file').click();
+$('restore-file').onchange = async (e) => {
+  const file = e.target.files?.[0]; e.target.value = '';
+  if (!file) return;
+  try {
+    const inspected = await (await fetch(`${SRV}/restore/inspect`, {
+      method: 'POST', body: file, signal: expires(120000),
+    })).json();
+    if (!inspected.ok) throw new Error(inspected.error || 'Backup rejected');
+    const s = inspected.summary;
+    const span = s.first ? `${new Date(s.first * 1000).toLocaleDateString()}–${new Date(s.last * 1000).toLocaleDateString()}` : 'empty archive';
+    if (!confirm(`Restore ${s.station} · ${s.rows} readings · ${span}? Current settings and history will be replaced. A recovery backup will be kept.`)) return;
+    const applied = await (await fetch(`${SRV}/restore/apply?id=${encodeURIComponent(inspected.id)}`, {
+      method: 'POST', signal: expires(120000),
+    })).json();
+    if (!applied.ok) throw new Error(applied.error || 'Restore failed');
+    notify({ title: 'Backup restored', body: 'Reloading settings and history.' });
+    setTimeout(() => location.reload(), 800);
+  } catch (err) {
+    notify({ title: 'Restore failed', body: err.message });
   }
 };
 
@@ -1021,6 +1072,7 @@ $('btn-csv').onclick = async () => {
 
 $('btn-diag').onclick = async () => {
   $('diag').innerHTML = '<div class="muted">running…</div>';
+  $('health-summary').innerHTML = '<div class="muted">running…</div>';
   // Viewport first, because it is the one number that explains a dashboard drawn at the wrong
   // size: WebKitGTK on Wayland sometimes hands the page a viewport that doesn't match the window
   // it lives in, and there is otherwise no way to tell that from the inside.
@@ -1030,6 +1082,60 @@ $('btn-diag').onclick = async () => {
     + rows.map((r) =>
     `<div><span>${r.name}</span><span class="${r.ok ? 'ok' : 'fail'}">${r.ok ? '✓ ' : '✗ '}${r.detail}</span></div>`
   ).join('');
+  let server = null;
+  try { server = await api.getJSON(`${SRV}/health`); } catch { /* browser-only build */ }
+  const archive = server?.archive;
+  const cards = [
+    ['Server', !!server, server ? `v${server.version} · up ${Math.floor(server.uptime / 60)} min` : 'not available in this build'],
+    ['Archive', !!archive?.ok, archive ? `${archive.rows || 0} rows · ${archive.check}` : 'not available'],
+    ['Forecast', rows.some((r) => r.ok && /forecast/i.test(r.name)), 'cloud forecast source'],
+    ['Alerts', rows.some((r) => r.ok && /alerts/i.test(r.name)), 'official warning feed'],
+    ['Radar', rows.some((r) => r.ok && /RainViewer/i.test(r.name)), 'map source'],
+    ['MQTT', !server?.integrations?.mqtt?.configured || server.integrations.mqtt.ok === true,
+      server?.integrations?.mqtt?.configured ? (server.integrations.mqtt.ok ? 'publishing' : 'needs attention') : 'not configured'],
+    ['Home Assistant', true,
+      server?.integrations?.homeAssistant?.configured ? 'configured · use Test both to verify credentials' : 'not configured'],
+    ['Push channels', !server?.integrations?.push?.configured || server.integrations.push.ok === true,
+      server?.integrations?.push?.configured ? (server.integrations.push.ok ? 'watching' : 'needs a test') : 'not configured'],
+    ['Browser', !!window.fetch && !!window.Promise, `${navigator.platform || 'unknown'} · ${view}`],
+  ];
+  const quota = await navigator.storage?.estimate?.().catch(() => null);
+  if (quota) cards.push(['Browser storage', true, `${Math.round((quota.usage || 0) / 1048576)} MB used of ${Math.round((quota.quota || 0) / 1048576)} MB`]);
+  $('health-summary').innerHTML = cards.map(([name, ok, detail]) =>
+    `<div><span>${name}</span><span class="${ok ? 'ok' : 'fail'}">${ok ? '✓' : '✗'} ${detail}</span></div>`).join('');
+  $('health-summary')._report = { version: APP_VERSION, viewport: view, platform: navigator.platform,
+    motion: document.documentElement.dataset.motion, render: settings().render, server,
+    sources: rows.map((r) => ({ name: r.name, ok: r.ok })) };
+};
+
+$('health-center').onclick = async (e) => {
+  const action = e.target.dataset.healthAction;
+  if (!action) return;
+  try {
+    if (action === 'retry') { refreshAll(); initSignals(); initUdp(); }
+    if (action === 'still') { saveSettings({ motion: 'lite' }); $('set-motion').value = 'lite'; loadDeskRadar(); }
+    if (action === 'clear') {
+      localStorage.removeItem('wd.cache.fc'); localStorage.removeItem('wd.cache.obs'); localStorage.removeItem('wd.normals');
+      refreshAll();
+    }
+    if (action === 'safe') { saveSettings({ render: 'safe' }); $('set-render').value = 'safe'; await pushConfig(); }
+    if (action === 'open') window.open(`${SRV || location.origin}/`, '_blank', 'noopener');
+    if (action === 'checkpoint') {
+      const r = await fetch(`${SRV}/health/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"action":"checkpoint"}' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    }
+    notify({ title: 'Health Center', body: action === 'safe' ? 'Safe renderer saved for the next launch.' : 'Action complete.' });
+    $('btn-diag').click();
+  } catch {
+    notify({ title: 'Health Center', body: 'That repair could not be completed.' });
+  }
+};
+
+$('btn-support').onclick = async () => {
+  if (!$('health-summary')._report) await $('btn-diag').onclick();
+  const text = JSON.stringify($('health-summary')._report || {}, null, 2);
+  await navigator.clipboard?.writeText(text);
+  notify({ title: 'Support report copied', body: 'Secrets and location are excluded.' });
 };
 
 window.addEventListener('wd:refresh', () => {
@@ -1315,7 +1421,7 @@ pulled.then(() => {
   showWizard();
   hydrateStation().then(() => {
     loadDeskRadar();
-    initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initDetail(); initUdp(); initHome();
+    initDesk(); initIntel(); initSignals(); initBoards(); initAlmanac(); initEnv(); initPro(); initDetail(); initTimeline(); initUdp(); initHome();
     every('server-alerts', 300, probeServerAlerts);
   });
 });

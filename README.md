@@ -35,6 +35,11 @@ bottom](docs/screenshot-national.png)
   change, moonrise/set), fire weather & dryness (including the county's US Drought Monitor class,
   on installs that run the app's own server), and station health (battery, signal, sensor
   faults, time since the last report).
+- **Timeline** — one continuous view from 24 hours ago through the next 48 hours. It merges rain,
+  storms, winter weather, freeze and heat-index crossings, wind, air quality, rapid station
+  changes, sun times and official alerts into readable windows. Forecast events carry a
+  plain-language confidence label; expand one for the contributing model values and source age.
+  The three nearest events also appear on the Desk. Timeline events do not notify by themselves.
 - **Forecast Lab** — radar, embedded from [HookEcho](https://hookecho.io/).
 
 The Desk radar loads itself, in HookEcho's embedded mode: no chrome, and one frame a minute until
@@ -451,10 +456,11 @@ incoming reading never has to wait for it. There is no undo and most stations ha
 restore from, so it asks once before shortening the window. The file itself does not shrink — the
 freed space is reused — and `sqlite3 weatherdesk.db VACUUM` with the app stopped will reclaim it.
 
-`Settings → History CSV` hands the whole archive over as a spreadsheet, and `Backup archive`
-downloads a consistent snapshot of the database itself. To restore one: quit the app, copy the file
-over `<app data>/weatherdesk.db` (delete the `-wal` and `-shm` files beside it if they exist), and
-start it again.
+`Settings → History CSV` hands the whole archive over as a spreadsheet. `Complete backup` downloads
+one `.wdbak` SQLite file containing the archive, settings, layouts, rules and metadata. `Restore
+backup` inspects it first, shows its station, row count and date range, then applies it only after
+confirmation. WeatherDesk keeps the previous state as `pre-restore.wdbak`; invalid or newer
+formats do not touch the running data.
 
 **CWOP.** Put a callsign in `Settings → CWOP station ID` and the app reports your readings to the
 Citizen Weather Observer Program every ten minutes, where NOAA's MADIS feeds them to the models
@@ -583,6 +589,10 @@ open — for a phone that is asleep, use the ntfy channel.
 Settings → **Diagnostics** pings every source and prints ✓/✗ plus latency for each, along with the
 viewport size. Start there — it separates "my token is wrong" from "NWS is down".
 
+The **Health Center** adds server uptime, archive integrity and safe repair buttons. **Copy support
+report** produces a redacted report with version, platform, viewport, renderer and source status;
+it never contains credentials, webhook addresses or station coordinates.
+
 | What you see | What it means |
 |---|---|
 | *token rejected: create or check a personal use token…* | The token is wrong, expired, or was never created. tempestwx.com → Settings → Data Authorizations. |
@@ -608,6 +618,9 @@ If that draws, make it permanent in `Settings → Window rendering → Safe`, wh
 any browser on the LAN (`http://<that machine>:8088`) — a blank window is still a working server.
 The app prints one line at startup saying which mode it picked and what it set. The AUR build,
 which links the system WebKitGTK, generally does not need any of this.
+
+If the webview never becomes ready, WeatherDesk 4 opens its still-running LAN dashboard in the
+default browser after 20 seconds. `weatherdesk --browser` chooses that reliable mode immediately.
 
 ## Security
 

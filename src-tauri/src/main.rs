@@ -16,6 +16,9 @@ fn main() {
     if std::env::args().any(|a| a == "--headless") {
         return weatherdesk_lib::run_headless();
     }
+    if std::env::args().any(|a| a == "--browser") {
+        return weatherdesk_lib::run_browser();
+    }
     // WebKitGTK renderer knobs. Which ones depend on the box: the AppImage runs under XWayland
     // and an Intel iGPU there draws a blank window unless compositing is software too. Mode comes
     // from `WD_RENDER`, `--render <mode>`, then the saved setting, so a blank window can be fixed

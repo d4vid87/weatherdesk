@@ -25,6 +25,7 @@
 <link rel="modulepreload" href="js/icons.js">
 <link rel="modulepreload" href="js/motion.js">
 <link rel="modulepreload" href="js/sky.js">
+<link rel="modulepreload" href="js/timeline.js">
 <style>
   @font-face { font-family: 'Barlow SC'; font-style: normal; font-weight: 500; font-display: swap;
     src: url(fonts/barlow-semi-condensed-500.woff2) format('woff2'); }
@@ -670,6 +671,29 @@
     border: 1px solid var(--line); border-radius: 8px; font: inherit; }
   .notif-x { position: absolute; top: 4px; right: 6px; background: none; border: 0; color: var(--muted);
     font-size: 16px; cursor: pointer; }
+  .timeline-strip { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  .tl-event { display:grid; gap:3px; padding:10px; border:1px solid var(--line); border-left:4px solid var(--accent);
+    border-radius:8px; background:var(--panel2); cursor:pointer; min-width:0; }
+  .tl-event.sev-watch { border-left-color:var(--warn); }
+  .tl-event.sev-warning { border-left-color:var(--bad); }
+  .tl-event > span { color:var(--muted); font-size:12px; }
+  .tl-when { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  #timeline-list { display:grid; gap:8px; max-width:900px; margin:0 auto; }
+  #timeline-range { position:sticky; top:0; z-index:2; background:var(--bg); padding:10px 0; text-align:center; }
+  #timeline-axis { display:grid; grid-template-columns:1fr 2fr; height:8px; max-width:900px; margin:0 auto 12px;
+    border-radius:8px; overflow:visible; position:relative; background:var(--line); }
+  #timeline-axis .observed { background:var(--muted); border-radius:8px 0 0 8px; }
+  #timeline-axis .forecast { background:var(--accent); border-radius:0 8px 8px 0; opacity:.7; }
+  #timeline-axis::after { content:'NOW'; position:absolute; left:33.333%; top:-7px; transform:translateX(-50%);
+    color:var(--text); background:var(--bg); padding:0 4px; font-size:10px; }
+  #timeline-filters { display:flex; flex-wrap:wrap; gap:5px; max-width:900px; margin:0 auto 12px; }
+  #timeline-filters button { color:var(--muted); background:var(--panel2); border:1px solid var(--line);
+    border-radius:7px; padding:6px 9px; cursor:pointer; }
+  #timeline-filters button.active { border-color:var(--accent); color:var(--text); }
+  #timeline-title { max-width:900px; margin:0 auto; }
+  html[data-motion="full"] .tl-event { transition:transform .18s ease,border-color .18s ease; }
+  html[data-motion="full"] .tl-event:hover, .tl-event:focus-visible { transform:translateY(-2px); border-color:var(--accent); }
+  @media(max-width:720px) { .timeline-strip { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -678,6 +702,7 @@
   <h1>WEATHERDESK</h1>
   <nav>
     <button class="tab" data-section="desk">Desk</button>
+    <button class="tab" data-section="timeline">Timeline</button>
     <button class="tab" data-section="lab">Forecast Lab</button>
     <button class="tab" data-section="signals">Local Signals</button>
     <button class="tab" data-section="data">Data</button>
@@ -697,6 +722,11 @@
   <div class="wizard-box">
     <img src="icon-512.png" alt="" loading="lazy" style="display:block;width:180px;max-width:60%;margin:0 auto 10px">
     <h2 style="margin-top:0;text-align:center">Welcome to WeatherDesk</h2>
+    <div id="wizard-progress" class="kv-rows" aria-label="Setup progress">
+      <div><span>1 · Choose a station</span><span id="wiz-step-source">current</span></div>
+      <div><span>2 · Receive a reading</span><span id="wiz-step-reading">waiting</span></div>
+      <div><span>3 · Verify forecast</span><span id="wiz-step-forecast">waiting</span></div>
+    </div>
     <p class="muted" style="font-size:13px">Pick the brand of station in the garden. Every brand
       except Tempest needs no token and no account — the readings come from your own sensors, the
       forecast from open-meteo.</p>
@@ -774,6 +804,10 @@
     </div>
 
     <div id="ticker" data-panel="ticker"><div id="ticker-track"></div><span id="src-health"></span><button id="ticker-pause">❚❚</button></div>
+
+    <div class="card" id="timeline-peek" data-panel="timeline-peek">
+      <h2>What happens next</h2><div id="timeline-strip" class="timeline-strip"></div>
+    </div>
 
     <div id="ha-panel" data-panel="ha" style="display:none">
       <h2 id="ha-stamp">Home Assistant<span id="mqtt-state" class="muted" style="float:right;font-size:12px"></span></h2>
@@ -879,6 +913,19 @@
 
   <!-- ponytail: Forecast Lab is the existing weathermap app in an iframe (radar loop, satellite,
        lightning, SPC, alerts already work there). Inline it into map.js only if the two need shared state. -->
+  <section class="page" id="timeline" aria-labelledby="timeline-title">
+    <h2 id="timeline-title">Weather timeline</h2>
+    <div id="timeline-range" class="muted"></div>
+    <div id="timeline-axis" aria-hidden="true"><span class="observed"></span><span class="forecast"></span></div>
+    <div id="timeline-filters" aria-label="Filter timeline">
+      <button data-tl-filter="all" class="active">All</button><button data-tl-filter="precip">Rain</button>
+      <button data-tl-filter="storm">Storm</button><button data-tl-filter="winter">Snow / ice</button>
+      <button data-tl-filter="freeze">Freeze</button><button data-tl-filter="heat">Heat</button>
+      <button data-tl-filter="wind">Wind</button><button data-tl-filter="aqi">Air</button>
+      <button data-tl-filter="change">Changes</button><button data-tl-filter="sun">Sun</button><button data-tl-filter="alert">Alerts</button>
+    </div>
+    <div id="timeline-list" aria-live="polite"></div>
+  </section>
   <section class="page" id="lab" style="padding:0"><iframe id="lab-frame" title="Forecast Lab"></iframe></section>
   <section class="page" id="signals">
     <div class="grid" id="signals-grid">
@@ -1116,11 +1163,26 @@
       <button id="btn-export">Export settings</button>
       <button id="btn-import">Import settings</button>
       <button id="btn-csv">History CSV</button>
-      <button id="btn-backup">Backup archive</button>
+      <button id="btn-backup">Complete backup</button>
+      <button id="btn-restore">Restore backup</button>
       <button id="btn-update">Check for updates</button>
       <span id="app-version" class="muted" style="font-size:12px;align-self:center"></span>
     </div>
     <input id="import-file" type="file" accept="application/json,.json" hidden>
+    <input id="restore-file" type="file" accept=".wdbak,application/octet-stream" hidden>
+    <section id="health-center">
+      <h2 style="font-size:13px;margin-top:18px">Health Center</h2>
+      <div id="health-summary" class="kv-rows"></div>
+      <div class="row">
+        <button data-health-action="retry">Retry now</button>
+        <button data-health-action="still">Use still radar</button>
+        <button data-health-action="clear">Clear stale cache</button>
+        <button data-health-action="checkpoint">Checkpoint archive</button>
+        <button data-health-action="safe">Use Safe renderer</button>
+        <button data-health-action="open">Open LAN dashboard</button>
+        <button id="btn-support">Copy support report</button>
+      </div>
+    </section>
     <div class="row" id="drawer-actions">
       <button class="primary" id="btn-save">Save</button>
       <button id="btn-diag">Diagnostics</button>
@@ -1158,9 +1220,24 @@
 
     <h2 style="font-size:13px;margin-top:18px">Tabs</h2>
     <div id="tab-toggles">
+      <label><input type="checkbox" data-tab="timeline"> Timeline</label>
       <label><input type="checkbox" data-tab="lab"> Forecast Lab</label>
       <label><input type="checkbox" data-tab="signals"> Local Signals</label>
       <label><input type="checkbox" data-tab="data"> Data</label>
+    </div>
+    <h2 style="font-size:13px;margin-top:18px">Timeline</h2>
+    <p class="muted" style="font-size:12px">Events stay here. Official warnings and explicit alert rules are the only things that notify.</p>
+    <label>Precipitation chance (%)</label><input id="set-tl-precip" type="number" min="0" max="100">
+    <label>Freeze threshold</label><input id="set-tl-freeze" type="number">
+    <label>Heat threshold</label><input id="set-tl-heat" type="number">
+    <label>Wind gust threshold</label><input id="set-tl-gust" type="number" min="0">
+    <label>Air quality threshold (AQI)</label><input id="set-tl-aqi" type="number" min="0">
+    <div class="checkgrid">
+      <label><input type="checkbox" data-tl-cat="precip"> Rain</label><label><input type="checkbox" data-tl-cat="storm"> Thunder</label>
+      <label><input type="checkbox" data-tl-cat="winter"> Snow / ice</label><label><input type="checkbox" data-tl-cat="freeze"> Freeze</label>
+      <label><input type="checkbox" data-tl-cat="heat"> Heat</label><label><input type="checkbox" data-tl-cat="wind"> Wind</label>
+      <label><input type="checkbox" data-tl-cat="aqi"> Air quality</label><label><input type="checkbox" data-tl-cat="sun"> Sun</label>
+      <label><input type="checkbox" data-tl-cat="change"> Rapid changes</label><label><input type="checkbox" data-tl-cat="alert"> Official alerts</label>
     </div>
     <h2 style="font-size:13px;margin-top:18px">Places</h2>
     <div class="row" style="margin-top:6px">
