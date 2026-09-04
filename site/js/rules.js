@@ -72,7 +72,11 @@ function fromTuple(t) {
 // here and neither should be able to grow it without limit.
 const ring = [];
 function derive(m) {
-  ring.push({ t: m._t, press: m._press, strikes: m._strikes, temp: m.temp, rh: m.rh });
+  const sample = { t: m._t, press: m._press, strikes: m._strikes, temp: m.temp, rh: m.rh };
+  // REST and websocket can deliver the same Tempest observation. Keep one sample or strike
+  // counts and rate history are doubled merely because two transports were healthy.
+  if (ring[ring.length - 1]?.t === m._t) ring[ring.length - 1] = sample;
+  else ring.push(sample);
   const cutoff = m._t - 3 * 3600;
   while (ring.length && ring[0].t < cutoff) ring.shift();
   const first = ring.find((r) => r.press != null);
@@ -334,5 +338,15 @@ if (location.search.includes('selftest')) {
     console.assert(evaluate(m, [{ metric: 'low18h', op: '<', value: 34 }], 0).length === 1,
       'rules: a forecast rule fires on the forecast alone');
     state.clear();
+  }
+
+  // The same observation arriving over REST and websocket is one sample, not two strikes.
+  {
+    ring.length = 0;
+    const now = Math.floor(Date.now() / 1000);
+    derive({ temp: 70, rh: 50, _press: 1010, _strikes: 2, _t: now });
+    const m = derive({ temp: 70, rh: 50, _press: 1010, _strikes: 2, _t: now });
+    console.assert(ring.length === 1 && m.strikes3h === 2, 'rules: duplicate transports do not duplicate a sample');
+    ring.length = 0;
   }
 }
