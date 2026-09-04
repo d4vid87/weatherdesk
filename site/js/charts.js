@@ -151,6 +151,10 @@ export function chart(canvas, series, opts = {}) {
 // mouse events so a tablet gets the same readout from a fingertip.
 function bindHover(canvas, series, opts) {
   canvas._wdDraw = () => chart(canvas, series, opts);
+  // The listeners below are bound once, but the explorer redraws the same canvas with a different
+  // `onPick` per metric — so the click reads the latest opts, not the ones it was bound with.
+  canvas._wdOpts = opts;
+  canvas.style.cursor = opts.onPick ? 'pointer' : '';
   if (canvas._wdBound || opts.hover === false) return;
   canvas._wdBound = true;
   // One redraw per frame however fast the pointer reports.
@@ -168,12 +172,12 @@ function bindHover(canvas, series, opts) {
   // A click is a hover that stopped: `move` has already run, so the pick is whatever the readout
   // is showing. Nothing to do on a chart nobody wired an `onPick` to.
   canvas.addEventListener('click', (e) => {
-    if (!opts.onPick) return;
+    const onPick = canvas._wdOpts?.onPick;
+    if (!onPick) return;
     const hx = e.clientX - canvas.getBoundingClientRect().left;
     const m = canvas._wdNearest?.(hx)?.[0];
-    if (m) opts.onPick(m.p, m.name);
+    if (m) onPick(m.p, m.name);
   });
-  canvas.style.cursor = opts.onPick ? 'pointer' : '';
   canvas.addEventListener('pointermove', move);
   canvas.addEventListener('pointerdown', move);
   canvas.addEventListener('pointerleave', clear);
@@ -214,6 +218,11 @@ if (typeof window !== 'undefined' && location.search.includes('selftest')) {
     picked = null;
     cv2.dispatchEvent(new MouseEvent('click', { clientX: 400 }));
     console.assert(picked === null, 'chart: a click nowhere near a sample picks nothing');
+    // Redrawn without a pick: the old handler must not keep firing the old callback.
+    chart(cv2, [{ data: [{ x: 0, y: 1 }], color: '#f00', name: 'a' }], {});
+    cv2._wdNearest = () => [{ p: { x: 0, y: 1 }, name: 'a' }];
+    cv2.dispatchEvent(new MouseEvent('click', { clientX: 4 }));
+    console.assert(picked === null && cv2.style.cursor === '', 'chart: a redraw replaces the pick handler');
   }
   cv._wdHover = null;
   chart(cv, [{ type: 'band', data: [{ x: 0, lo: 1, hi: 9 }, { x: 1, lo: 2, hi: 8 }], color: '#0f0' }]);

@@ -213,9 +213,12 @@ function briefTick() {
   const want = settings().briefTime;
   if (!want) return;
   const now = new Date();
-  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const [h, m] = want.split(':').map(Number);
+  // A window, not an exact minute: the job is a setInterval, and a tab that was hidden or throttled
+  // can skip the one tick that matched. Five minutes late is still the morning briefing.
+  const late = now.getHours() * 60 + now.getMinutes() - (h * 60 + m);
   const day = now.toDateString();
-  if (hhmm !== want || briefedDay === day) return;
+  if (late < 0 || late >= 5 || briefedDay === day) return;
   briefedDay = day;
   say(briefing());
 }

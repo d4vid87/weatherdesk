@@ -418,7 +418,8 @@ const jobs = new Map();
 // a battery percent.
 // 'pace' itself is exempt for an obvious reason: stretched to 45 minutes it would be the thing
 // that never notices the night window closing.
-const PACE_EXEMPT = ['clock', 'udp', 'desk-alerts', 'pace', 'stale-sweep', 'kiosk', 'appearance'];
+// `dim` and `intel-brief` are clocks: tripled at night they would miss their minute.
+const PACE_EXEMPT = ['clock', 'udp', 'desk-alerts', 'pace', 'stale-sweep', 'kiosk', 'appearance', 'dim', 'intel-brief'];
 
 // Set by desk.js when NWS has a Severe/Extreme alert out. Beats eco and night both.
 let storm = false;
