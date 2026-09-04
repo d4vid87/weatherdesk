@@ -107,7 +107,8 @@ export function forecastMetrics(fc) {
   const daily = fc?.forecast?.daily || [];
   const now = Date.now() / 1000;
   const within = (h) => hourly.filter((x) => x.time >= now && x.time <= now + h * 3600);
-  const max = (arr, key) => (arr.length ? Math.max(...arr.map((x) => x[key] || 0)) : null);
+  // Missing values are missing, not zero: a forecast with no gust field must not read as calm.
+  const max = (arr, key) => { const v = arr.map((x) => x[key]).filter((x) => x != null); return v.length ? Math.max(...v) : null; };
   const next18 = within(18).map((x) => x.air_temperature).filter((v) => v != null);
   return {
     low18h: next18.length ? Math.min(...next18) : null,

@@ -504,10 +504,13 @@ fn handle(state: &Arc<State>, mut req: Request) {
             let ds = store::day_start(now() as i64, tz);
             // The lock is not held across the query: a slow aggregate would otherwise block
             // every other screen asking the same question.
+            // Backfill writes past days while it runs, which nothing in the key can see: no cache
+            // until it is done.
+            let filling = *state.backfill.lock().unwrap() == "running";
             let hit = {
                 let cache = state.daily.lock().unwrap();
                 match cache.as_ref() {
-                    Some((t, c, d, head)) if (*t, *c, *d) == (tz, min, ds) => Some(head.clone()),
+                    Some((t, c, d, head)) if !filling && (*t, *c, *d) == (tz, min, ds) => Some(head.clone()),
                     _ => None,
                 }
             };
@@ -516,7 +519,9 @@ fn handle(state: &Arc<State>, mut req: Request) {
             // redo per request — which is what keeps the archive's growth off this endpoint.
             let head = hit.unwrap_or_else(|| {
                 let fresh = store::daily_head_json(&conn, tz, ds);
-                *state.daily.lock().unwrap() = Some((tz, min, ds, fresh.clone()));
+                if !filling {
+                    *state.daily.lock().unwrap() = Some((tz, min, ds, fresh.clone()));
+                }
                 fresh
             });
             let body = store::daily_join(&head, store::daily_today_row(&conn, tz, ds).as_deref());
@@ -741,6 +746,8 @@ pub fn start_backfill(state: Arc<State>) {
         *state.backfill.lock().unwrap() = "running";
         store::backfill(&conn, &token, &device);
         *state.backfill.lock().unwrap() = "done";
+        // The cloud just wrote days that are all before today: the cached head is wrong now.
+        *state.daily.lock().unwrap() = None;
     });
 }
 
